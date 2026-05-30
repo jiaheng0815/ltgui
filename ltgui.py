@@ -50,6 +50,21 @@ def detect_platform():
     else:
         raise RuntimeError(f"Unsupported platform: {sys.platform}")
 
+def check_platform_clean():
+    """Auto-clean if platform changed since last build"""
+    fingerprint = os.path.join(BUILD_DIR, ".platform")
+    current = detect_platform()
+    if os.path.exists(fingerprint):
+        with open(fingerprint, "r") as f:
+            previous = f.read().strip()
+        if previous != current:
+            cprint(f"Platform changed ({previous} -> {current}), cleaning...", Color.YELLOW)
+            if os.path.exists(BUILD_DIR):
+                shutil.rmtree(BUILD_DIR)
+    os.makedirs(BUILD_DIR, exist_ok=True)
+    with open(fingerprint, "w") as f:
+        f.write(current)
+
 def get_platform_libs(platform):
     if platform == "windows":
         return ["-lgdi32", "-lgdiplus", "-luser32", "-lcomctl32", "-lole32", "-limm32"]
@@ -275,6 +290,7 @@ def run_program(name, platform, is_release):
 # --- Commands ---
 def cmd_build(args):
     is_release = len(args) >= 2 and args[1] == "release"
+    check_platform_clean()
     platform = detect_platform()
     lib_path = build_lib(platform, is_release)
     if lib_path:

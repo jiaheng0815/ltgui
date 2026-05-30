@@ -41,8 +41,6 @@ private:
     static void registerWindow(X11Window* w);
     static void unregisterWindow(X11Window* w);
     static X11Window* findWindow(::Window xid);
-    void handleEvent(XEvent& xev);
-    Key mapKeySym(KeySym ks) const;
 
     static Display* s_display_;
     static int s_displayRefCount_;
