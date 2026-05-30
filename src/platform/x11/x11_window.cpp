@@ -6,6 +6,15 @@
 #include <X11/keysym.h>
 #include <cstring>
 
+// X11 headers define macros that conflict with ltgui enums
+#undef None
+#undef FocusIn
+#undef FocusOut
+#undef ButtonPress
+#undef ButtonRelease
+#undef Button4
+#undef Button5
+
 namespace ltgui {
 
 #include <unordered_map>
@@ -210,44 +219,39 @@ void X11Window::handleEvent(XEvent& xev) {
         }
         break;
 
-    case ButtonPress: {
-        ev.type = EventType::MouseDown;
+    case 4: { // X11 ButtonPress
+        int btn = xev.xbutton.button;
         ev.pos = {xev.xbutton.x, xev.xbutton.y};
-        switch (xev.xbutton.button) {
-        case Button1: ev.button = MouseButton::Left; break;
-        case Button2: ev.button = MouseButton::Middle; break;
-        case Button3: ev.button = MouseButton::Right; break;
-        default: ev.button = MouseButton::None; break;
+
+        if (btn >= 4) {  // Scroll wheel (buttons 4/5)
+            ev.type = EventType::MouseWheel;
+            ev.wheelDelta = (btn == 4) ? 1 : -1;
+        } else {
+            ev.type = EventType::MouseDown;
+            if (btn == 1) ev.button = MouseButton::Left;
+            else if (btn == 2) ev.button = MouseButton::Middle;
+            else if (btn == 3) ev.button = MouseButton::Right;
         }
         eventCallback_(ev);
         break;
     }
 
-    case ButtonRelease: {
-        ev.type = EventType::MouseUp;
-        ev.pos = {xev.xbutton.x, xev.xbutton.y};
-        switch (xev.xbutton.button) {
-        case Button1: ev.button = MouseButton::Left; break;
-        case Button2: ev.button = MouseButton::Middle; break;
-        case Button3: ev.button = MouseButton::Right; break;
-        default: ev.button = MouseButton::None; break;
+    case 5: { // X11 ButtonRelease
+        int btn = xev.xbutton.button;
+        if (btn < 4) {
+            ev.type = EventType::MouseUp;
+            ev.pos = {xev.xbutton.x, xev.xbutton.y};
+            if (btn == 1) ev.button = MouseButton::Left;
+            else if (btn == 2) ev.button = MouseButton::Middle;
+            else if (btn == 3) ev.button = MouseButton::Right;
+            eventCallback_(ev);
         }
-        eventCallback_(ev);
         break;
     }
 
     case MotionNotify: {
         ev.type = EventType::MouseMove;
         ev.pos = {xev.xmotion.x, xev.xmotion.y};
-        eventCallback_(ev);
-        break;
-    }
-
-    case Button4:  // Scroll up
-    case Button5: { // Scroll down
-        ev.type = EventType::MouseWheel;
-        ev.wheelDelta = (xev.type == Button4) ? 1 : -1;
-        ev.pos = {xev.xbutton.x, xev.xbutton.y};
         eventCallback_(ev);
         break;
     }
