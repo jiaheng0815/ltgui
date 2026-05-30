@@ -1,5 +1,7 @@
 #include "platform/win32/win32_canvas.h"
 
+#ifdef LTGUI_PLATFORM_WINDOWS
+
 namespace ltgui {
 
 namespace {
@@ -226,3 +228,5 @@ Size Win32Canvas::measureText(const std::string& text) {
 }
 
 } // namespace ltgui
+
+#endif // LTGUI_PLATFORM_WINDOWS

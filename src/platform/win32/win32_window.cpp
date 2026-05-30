@@ -1,4 +1,7 @@
 #include "platform/win32/win32_window.h"
+
+#ifdef LTGUI_PLATFORM_WINDOWS
+
 #include "platform/win32/win32_canvas.h"
 #include <windowsx.h>
 #include <imm.h>
@@ -398,3 +401,5 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 } // namespace ltgui
+
+#endif // LTGUI_PLATFORM_WINDOWS
