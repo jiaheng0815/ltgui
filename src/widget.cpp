@@ -172,7 +172,8 @@ bool Widget::handleEvent(Event& event) {
     switch (event.type) {
     case EventType::MouseDown:
     case EventType::MouseUp:
-    case EventType::MouseMove: {
+    case EventType::MouseMove:
+    case EventType::MouseWheel: {
         // Translate event position to local coordinates
         Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
 

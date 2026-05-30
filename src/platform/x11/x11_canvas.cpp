@@ -96,7 +96,7 @@ void X11Canvas::setFont(const Font& font) {
     }
 
     // Build font name pattern: "family:size=12:weight=bold"
-    std::string pattern = font.family + ":size=" + std::to_string(font.size);
+    std::string pattern = font.family + ":pixelsize=" + std::to_string(font.size);
     if (static_cast<int>(font.weight) >= static_cast<int>(FontWeight::Bold)) {
         pattern += ":weight=bold";
     }
@@ -156,8 +156,8 @@ void X11Canvas::drawText(const std::string& text, const Rect& rect, int flags) {
         tx += rect.width - extents.width;
     }
 
-    // Vertical alignment (baseline)
-    ty += (rect.height - (extents.height)) / 2 + extents.height - extents.y;
+    // Vertical alignment — use font ascent/descent for accurate baseline
+    ty = rect.y + (rect.height + xftFont_->ascent - xftFont_->descent) / 2;
 
     XftDrawStringUtf8(xftDraw_, &xftColor_, xftFont_,
                        tx, ty,
@@ -189,7 +189,7 @@ void X11Canvas::strokeEllipse(const Rect& rect, int lineWidth) {
 Size X11Canvas::measureText(const std::string& text) {
     if (!display_ || !xftFont_) {
         // Use a default font for measurement
-        XftFont* f = XftFontOpenName(display_, screen_, "sans:size=12");
+        XftFont* f = XftFontOpenName(display_, screen_, "sans:pixelsize=12");
         if (!f) return {0, 0};
 
         XGlyphInfo extents;
