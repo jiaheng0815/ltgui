@@ -6,6 +6,16 @@
 #include "platform/native_canvas.h"
 #include <X11/Xlib.h>
 #include <X11/Xft/Xft.h>
+
+// Clean up X11 macro pollution
+#undef None
+#undef FocusIn
+#undef FocusOut
+#undef ButtonPress
+#undef ButtonRelease
+#undef Button4
+#undef Button5
+
 #include <string>
 
 namespace ltgui {
