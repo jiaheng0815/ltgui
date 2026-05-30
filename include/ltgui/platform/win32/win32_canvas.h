@@ -1,5 +1,8 @@
 #pragma once
 #include "platform/platform.h"
+
+#ifdef LTGUI_PLATFORM_WINDOWS
+
 #include <windows.h>
 #include <gdiplus.h>
 #include "platform/native_canvas.h"
@@ -47,3 +50,5 @@ private:
 };
 
 } // namespace ltgui
+
+#endif // LTGUI_PLATFORM_WINDOWS

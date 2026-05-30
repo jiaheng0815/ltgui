@@ -1,7 +1,11 @@
 #pragma once
 #include "platform/platform.h"
+
+#ifdef LTGUI_PLATFORM_WINDOWS
+
 #include <windows.h>
 #include "platform/native_window.h"
+
 namespace ltgui {
 
 class Win32Window : public NativeWindow {
@@ -36,3 +40,5 @@ private:
 };
 
 } // namespace ltgui
+
+#endif // LTGUI_PLATFORM_WINDOWS
