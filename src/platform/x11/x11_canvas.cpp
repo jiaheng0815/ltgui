@@ -15,7 +15,8 @@ X11Canvas::X11Canvas(Display* display, ::Window window, int screen)
     gc_ = XCreateGC(display_, window_, 0, nullptr);
 
     // Default color
-    currentPixel_ = BlackPixel(display_, screen_);
+    // Initialize with black
+    currentPixel_ = allocColor(Color::Black);
     XSetForeground(display_, gc_, currentPixel_);
 }
 
@@ -59,7 +60,8 @@ void X11Canvas::resize(int width, int height) {
 
 void X11Canvas::beginPaint() {
     if (backbuffer_) {
-        XSetForeground(display_, gc_, WhitePixel(display_, screen_));
+        unsigned long white = allocColor(Color::White);
+        XSetForeground(display_, gc_, white);
         XFillRectangle(display_, backbuffer_, gc_, 0, 0, canvasWidth_, canvasHeight_);
         XSetForeground(display_, gc_, currentPixel_);
     }
@@ -115,13 +117,26 @@ void X11Canvas::setFont(const Font& font) {
 }
 
 unsigned long X11Canvas::allocColor(const Color& c) {
+    Visual* visual = DefaultVisual(display_, screen_);
+
+    // TrueColor: compute pixel directly from RGB masks
+    if (visual->c_class == TrueColor) {
+        unsigned long r = (static_cast<unsigned long>(c.r) * visual->red_mask   / 255) & visual->red_mask;
+        unsigned long g = (static_cast<unsigned long>(c.g) * visual->green_mask / 255) & visual->green_mask;
+        unsigned long b = (static_cast<unsigned long>(c.b) * visual->blue_mask  / 255) & visual->blue_mask;
+        return r | g | b;
+    }
+
+    // Fallback: allocate from colormap
     XColor xc;
     xc.red   = c.r * 0x101;
     xc.green = c.g * 0x101;
     xc.blue  = c.b * 0x101;
     xc.flags = DoRed | DoGreen | DoBlue;
-    XAllocColor(display_, colormap_, &xc);
-    return xc.pixel;
+    if (XAllocColor(display_, colormap_, &xc)) {
+        return xc.pixel;
+    }
+    return BlackPixel(display_, screen_);
 }
 
 void X11Canvas::fillRect(const Rect& rect) {
