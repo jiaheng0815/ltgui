@@ -77,6 +77,8 @@ def get_platform_libs(platform):
 def get_platform_flags(platform):
     if platform == "windows":
         return ["-D_UNICODE", "-DUNICODE"]
+    elif platform == "linux":
+        return ["-I/usr/include/freetype2"]
     return []
 
 def get_source_files():
