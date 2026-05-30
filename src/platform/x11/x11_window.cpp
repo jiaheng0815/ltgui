@@ -1,5 +1,348 @@
-#include "platform/platform.h"
+#include "platform/x11/x11_window.h"
 
 #ifdef LTGUI_PLATFORM_LINUX
-#  error "X11 backend not yet implemented"
-#endif
+
+#include "platform/x11/x11_canvas.h"
+#include <X11/keysym.h>
+#include <cstring>
+
+namespace ltgui {
+
+#include <unordered_map>
+
+Display* X11Window::s_display_ = nullptr;
+int X11Window::s_displayRefCount_ = 0;
+
+namespace {
+    std::unordered_map< ::Window, X11Window*> g_windowMap;
+}
+
+void X11Window::registerWindow(X11Window* w) {
+    if (w && w->window_) {
+        g_windowMap[w->window_] = w;
+    }
+}
+
+void X11Window::unregisterWindow(X11Window* w) {
+    if (w && w->window_) {
+        g_windowMap.erase(w->window_);
+    }
+}
+
+X11Window* X11Window::findWindow(::Window xid) {
+    auto it = g_windowMap.find(xid);
+    return (it != g_windowMap.end()) ? it->second : nullptr;
+}
+
+X11Window::X11Window() {
+    if (!s_display_) {
+        s_display_ = XOpenDisplay(nullptr);
+    }
+    if (s_display_) {
+        s_displayRefCount_++;
+    }
+}
+
+X11Window::~X11Window() {
+    destroy();
+    delete canvas_;
+    canvas_ = nullptr;
+
+    s_displayRefCount_--;
+    if (s_displayRefCount_ <= 0 && s_display_) {
+        XCloseDisplay(s_display_);
+        s_display_ = nullptr;
+        s_displayRefCount_ = 0;
+    }
+}
+
+bool X11Window::create(int width, int height, const std::string& title) {
+    if (!s_display_) return false;
+    if (window_) return true;
+
+    int screen = DefaultScreen(s_display_);
+    ::Window root = RootWindow(s_display_, screen);
+
+    window_ = XCreateSimpleWindow(s_display_, root,
+                                   0, 0, width, height, 1,
+                                   BlackPixel(s_display_, screen),
+                                   WhitePixel(s_display_, screen));
+
+    // Set window title
+    setTitle(title);
+
+    // Register WM_DELETE_WINDOW protocol
+    wmDeleteMessage_ = XInternAtom(s_display_, "WM_DELETE_WINDOW", False);
+    wmProtocols_     = XInternAtom(s_display_, "WM_PROTOCOLS", False);
+    XSetWMProtocols(s_display_, window_, &wmDeleteMessage_, 1);
+
+    // Select events we want to receive
+    XSelectInput(s_display_, window_,
+                 ExposureMask | StructureNotifyMask |
+                 ButtonPressMask | ButtonReleaseMask |
+                 PointerMotionMask | ButtonMotionMask |
+                 KeyPressMask | KeyReleaseMask |
+                 EnterWindowMask | LeaveWindowMask |
+                 FocusChangeMask);
+
+    size_.width = width;
+    size_.height = height;
+
+    canvas_ = new X11Canvas(s_display_, window_, screen);
+    canvas_->resize(width, height);
+
+    registerWindow(this);
+    return true;
+}
+
+void X11Window::destroy() {
+    if (window_ && s_display_) {
+        unregisterWindow(this);
+        XDestroyWindow(s_display_, window_);
+        window_ = 0;
+    }
+}
+
+void X11Window::show() {
+    if (window_ && s_display_) {
+        XMapWindow(s_display_, window_);
+        mapped_ = true;
+    }
+}
+
+void X11Window::hide() {
+    if (window_ && s_display_) {
+        XUnmapWindow(s_display_, window_);
+        mapped_ = false;
+    }
+}
+
+void X11Window::close() {
+    if (window_ && s_display_ && eventCallback_) {
+        Event ev;
+        ev.type = EventType::Close;
+        eventCallback_(ev);
+    }
+}
+
+void X11Window::setTitle(const std::string& title) {
+    if (window_ && s_display_) {
+        XStoreName(s_display_, window_, title.c_str());
+    }
+}
+
+void X11Window::setSize(int width, int height) {
+    if (window_ && s_display_) {
+        XResizeWindow(s_display_, window_, width, height);
+        size_.width = width;
+        size_.height = height;
+        if (canvas_) canvas_->resize(width, height);
+    }
+}
+
+Size X11Window::getSize() const {
+    return size_;
+}
+
+void X11Window::invalidate(const Rect& /*rect*/) {
+    if (window_ && s_display_) {
+        XEvent ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = Expose;
+        ev.xexpose.window = window_;
+        XSendEvent(s_display_, window_, False, ExposureMask, &ev);
+        XFlush(s_display_);
+    }
+}
+
+void* X11Window::nativeHandle() const {
+    return reinterpret_cast<void*>(window_);
+}
+
+NativeCanvas* X11Window::getCanvas() {
+    return canvas_;
+}
+
+void X11Window::processEvents() {
+    if (!s_display_ || !window_) return;
+
+    while (XPending(s_display_)) {
+        XEvent xev;
+        XNextEvent(s_display_, &xev);
+        handleEvent(xev);
+    }
+}
+
+void X11Window::handleEvent(XEvent& xev) {
+    if (!eventCallback_) return;
+
+    Event ev;
+
+    switch (xev.type) {
+    case Expose: {
+        ev.type = EventType::Paint;
+        ev.width = size_.width;
+        ev.height = size_.height;
+        eventCallback_(ev);
+        break;
+    }
+
+    case ConfigureNotify: {
+        int w = xev.xconfigure.width;
+        int h = xev.xconfigure.height;
+        if (w != size_.width || h != size_.height) {
+            size_.width = w;
+            size_.height = h;
+            if (canvas_) canvas_->resize(w, h);
+
+            ev.type = EventType::Resize;
+            ev.width = w;
+            ev.height = h;
+            eventCallback_(ev);
+        }
+        break;
+    }
+
+    case ClientMessage:
+        if (static_cast<Atom>(xev.xclient.data.l[0]) == wmDeleteMessage_) {
+            ev.type = EventType::Close;
+            eventCallback_(ev);
+        }
+        break;
+
+    case ButtonPress: {
+        ev.type = EventType::MouseDown;
+        ev.pos = {xev.xbutton.x, xev.xbutton.y};
+        switch (xev.xbutton.button) {
+        case Button1: ev.button = MouseButton::Left; break;
+        case Button2: ev.button = MouseButton::Middle; break;
+        case Button3: ev.button = MouseButton::Right; break;
+        default: ev.button = MouseButton::None; break;
+        }
+        eventCallback_(ev);
+        break;
+    }
+
+    case ButtonRelease: {
+        ev.type = EventType::MouseUp;
+        ev.pos = {xev.xbutton.x, xev.xbutton.y};
+        switch (xev.xbutton.button) {
+        case Button1: ev.button = MouseButton::Left; break;
+        case Button2: ev.button = MouseButton::Middle; break;
+        case Button3: ev.button = MouseButton::Right; break;
+        default: ev.button = MouseButton::None; break;
+        }
+        eventCallback_(ev);
+        break;
+    }
+
+    case MotionNotify: {
+        ev.type = EventType::MouseMove;
+        ev.pos = {xev.xmotion.x, xev.xmotion.y};
+        eventCallback_(ev);
+        break;
+    }
+
+    case Button4:  // Scroll up
+    case Button5: { // Scroll down
+        ev.type = EventType::MouseWheel;
+        ev.wheelDelta = (xev.type == Button4) ? 1 : -1;
+        ev.pos = {xev.xbutton.x, xev.xbutton.y};
+        eventCallback_(ev);
+        break;
+    }
+
+    case KeyPress: {
+        ev.type = EventType::KeyDown;
+        KeySym ks = XLookupKeysym(&xev.xkey, 0);
+        ev.key = mapKeySym(ks);
+        // Also get the character if possible
+        char buf[8] = {};
+        KeySym ks2;
+        int len = XLookupString(&xev.xkey, buf, sizeof(buf), &ks2, nullptr);
+        if (len == 1 && static_cast<unsigned char>(buf[0]) >= 32) {
+            ev.charCode = static_cast<unsigned char>(buf[0]);
+        }
+        eventCallback_(ev);
+        break;
+    }
+
+    case KeyRelease: {
+        ev.type = EventType::KeyUp;
+        KeySym ks = XLookupKeysym(&xev.xkey, 0);
+        ev.key = mapKeySym(ks);
+        eventCallback_(ev);
+        break;
+    }
+
+    case EnterNotify:
+        ev.type = EventType::FocusIn;
+        eventCallback_(ev);
+        break;
+
+    case LeaveNotify:
+        ev.type = EventType::FocusOut;
+        eventCallback_(ev);
+        break;
+    }
+}
+
+Key X11Window::mapKeySym(KeySym ks) const {
+    // Letters
+    if (ks >= XK_a && ks <= XK_z)
+        return static_cast<Key>(static_cast<int>(Key::A) + (ks - XK_a));
+    if (ks >= XK_A && ks <= XK_Z)
+        return static_cast<Key>(static_cast<int>(Key::A) + (ks - XK_A));
+
+    // Digits
+    if (ks >= XK_0 && ks <= XK_9)
+        return static_cast<Key>(static_cast<int>(Key::Num0) + (ks - XK_0));
+
+    // Function keys
+    if (ks >= XK_F1 && ks <= XK_F12)
+        return static_cast<Key>(static_cast<int>(Key::F1) + (ks - XK_F1));
+
+    // Special keys
+    switch (ks) {
+    case XK_Escape:    return Key::Escape;
+    case XK_Return:    return Key::Enter;
+    case XK_space:     return Key::Space;
+    case XK_BackSpace: return Key::Backspace;
+    case XK_Tab:       return Key::Tab;
+    case XK_Shift_L:   case XK_Shift_R:   return Key::Shift;
+    case XK_Control_L: case XK_Control_R: return Key::Control;
+    case XK_Alt_L:     case XK_Alt_R:     return Key::Alt;
+    case XK_Left:      return Key::Left;
+    case XK_Right:     return Key::Right;
+    case XK_Up:        return Key::Up;
+    case XK_Down:      return Key::Down;
+    case XK_Home:      return Key::Home;
+    case XK_End:       return Key::End;
+    case XK_Page_Up:   return Key::PageUp;
+    case XK_Page_Down: return Key::PageDown;
+    case XK_Insert:    return Key::Insert;
+    case XK_Delete:    return Key::Delete;
+    default:           return Key::Unknown;
+    }
+}
+
+bool X11Window::processAllPending() {
+    if (!s_display_) return false;
+
+    bool processed = false;
+    while (XPending(s_display_)) {
+        XEvent xev;
+        XNextEvent(s_display_, &xev);
+
+        X11Window* w = findWindow(xev.xany.window);
+        if (w) {
+            w->handleEvent(xev);
+        }
+        processed = true;
+    }
+    return processed;
+}
+
+} // namespace ltgui
+
+#endif // LTGUI_PLATFORM_LINUX

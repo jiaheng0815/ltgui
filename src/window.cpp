@@ -4,6 +4,10 @@
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 #include "platform/win32/win32_window.h"
+#elif defined(LTGUI_PLATFORM_LINUX)
+#include "platform/x11/x11_window.h"
+#elif defined(LTGUI_PLATFORM_MACOS)
+#include "platform/cocoa/cocoa_window.h"
 #endif
 
 namespace ltgui {
@@ -12,9 +16,9 @@ Window::Window() {
 #ifdef LTGUI_PLATFORM_WINDOWS
     nativeWindow_ = std::make_unique<Win32Window>();
 #elif defined(LTGUI_PLATFORM_LINUX)
-    // TODO
+    nativeWindow_ = std::make_unique<X11Window>();
 #elif defined(LTGUI_PLATFORM_MACOS)
-    // TODO
+    nativeWindow_ = std::make_unique<CocoaWindow>();
 #endif
     Application::instance().registerWindow(this);
 }

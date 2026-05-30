@@ -3,6 +3,12 @@
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 #include <windows.h>
+#elif defined(LTGUI_PLATFORM_LINUX)
+#include "platform/x11/x11_window.h"
+#include <X11/Xlib.h>
+#include <unistd.h>
+#elif defined(LTGUI_PLATFORM_MACOS)
+#import <Cocoa/Cocoa.h>
 #endif
 
 namespace ltgui {
@@ -28,14 +34,18 @@ int Application::run() {
         }
         processEvents();
     }
-#endif
-
-#ifdef LTGUI_PLATFORM_LINUX
-    // TODO: X11 event loop
-#endif
-
-#ifdef LTGUI_PLATFORM_MACOS
-    // TODO: Cocoa event loop
+#elif defined(LTGUI_PLATFORM_LINUX)
+    while (running_) {
+        if (!X11Window::processAllPending()) {
+            usleep(5000);
+        }
+        processEvents();
+    }
+#elif defined(LTGUI_PLATFORM_MACOS)
+    [NSApplication sharedApplication];
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    [NSApp activateIgnoringOtherApps:YES];
+    [NSApp run];
 #endif
 
     return 0;
@@ -45,11 +55,12 @@ void Application::quit() {
     running_ = false;
 #ifdef LTGUI_PLATFORM_WINDOWS
     PostQuitMessage(0);
+#elif defined(LTGUI_PLATFORM_MACOS)
+    [NSApp terminate:nil];
 #endif
 }
 
 void Application::processEvents() {
-    // Process any pending tasks (timers, idle callbacks, etc.)
 }
 
 void Application::registerWindow(Window* window) {
