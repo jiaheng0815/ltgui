@@ -6,6 +6,8 @@
 
 namespace ltgui {
 
+ComboBox* ComboBox::s_openCombo_ = nullptr;
+
 ComboBox::ComboBox(Widget* parent) : Widget(parent) {
     style().bgColor = currentTheme().bgSecondary;
     style().fgColor = currentTheme().textPrimary;
@@ -65,8 +67,18 @@ Size ComboBox::sizeHint() const {
 Rect ComboBox::effectiveGeometry() const {
     Rect r = absoluteRect();
     if (dropped_ && !items_.empty()) {
-        int dropH = std::min(static_cast<int>(items_.size()) * 26, 200);
-        r.height += dropH;
+        int dropH = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
+        bool dropDown = true;
+        if (auto* win = window()) {
+            int winH = win->getSize().height;
+            if (r.bottom() + dropH > winH - 4) dropDown = false;
+        }
+        if (dropDown) {
+            r.height += dropH;
+        } else {
+            r.y -= dropH;
+            r.height += dropH;
+        }
     }
     return r;
 }
@@ -100,26 +112,15 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
     canvas->drawLine({cx - 4, cy - 2}, {cx, cy + 2}, 2);
     canvas->drawLine({cx, cy + 2}, {cx + 4, cy - 2}, 2);
 
-    // Dropdown list — clamped to window bounds
+    // Dropdown list — uses cached direction and height from handleEvent
     if (dropped_ && !items_.empty()) {
-        int dropH = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
-        bool dropDown = true; // true = below, false = above (flip if near bottom)
-
-        // Get window height for clamping
-        if (auto* win = window()) {
-            int winH = win->getSize().height;
-            if (r.bottom() + dropH > winH - 4) {
-                dropDown = false;
-            }
-        }
-
         Rect dropRect;
-        if (dropDown) {
-            dropRect = Rect(r.x, r.bottom() + 1, r.width, dropH);
+        if (dropDown_) {
+            dropRect = Rect(r.x, r.bottom() + 1, r.width, dropHeight_);
         } else {
-            int dropY = r.y - dropH - 1;
+            int dropY = r.y - dropHeight_ - 1;
             if (dropY < 0) dropY = 0;
-            dropRect = Rect(r.x, dropY, r.width, dropH);
+            dropRect = Rect(r.x, dropY, r.width, dropHeight_);
         }
 
         canvas->setColor(t.bgSecondary);
@@ -145,28 +146,66 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
     }
 }
 
+void ComboBox::openDropdown() {
+    dropped_ = true;
+    dropHeight_ = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
+    dropDown_ = true;
+    if (auto* win = window()) {
+        if (absoluteRect().bottom() + dropHeight_ > win->getSize().height - 4) {
+            dropDown_ = false;
+        }
+    }
+    // Track as the active open combo box
+    if (s_openCombo_ && s_openCombo_ != this) {
+        s_openCombo_->closeDropdown();
+    }
+    s_openCombo_ = this;
+    update();
+}
+
+void ComboBox::closeDropdown() {
+    if (!dropped_) return;
+    dropped_ = false;
+    if (s_openCombo_ == this) s_openCombo_ = nullptr;
+    update();
+}
+
+bool ComboBox::closeIfClickOutside(const Point& absPos) {
+    if (!s_openCombo_) return false;
+    Rect eff = s_openCombo_->effectiveGeometry();
+    if (!eff.contains(absPos)) {
+        s_openCombo_->closeDropdown();
+        return true;
+    }
+    return false;
+}
+
 bool ComboBox::handleEvent(Event& event) {
     if (!isEnabled()) return false;
 
     if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
         if (!dropped_) {
-            dropped_ = true;
-            update();
+            openDropdown();
+            event.accepted = true;
+            return true;
         } else {
             int localY = event.pos.y - y();
-            int dropH = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
-            int relY = localY - height() - 1;
-            if (relY >= 0 && relY < dropH) {
+            int relY;
+            if (dropDown_) {
+                relY = localY - height() - 1;
+            } else {
+                relY = localY + dropHeight_;
+            }
+            if (relY >= 0 && relY < dropHeight_) {
                 int index = relY / 26;
                 if (index >= 0 && index < static_cast<int>(items_.size())) {
                     setCurrentIndex(index);
                 }
             }
-            dropped_ = false;
-            update();
+            closeDropdown();
+            event.accepted = true;
+            return true;
         }
-        event.accepted = true;
-        return true;
     }
 
     return false;

@@ -25,15 +25,26 @@ public:
     Size sizeHint() const override;
     Rect effectiveGeometry() const override;
 
+    // Called by Window before hit-testing; returns true if a click-away closed this
+    static bool closeIfClickOutside(const Point& absPos);
+
 protected:
     void paintSelf(NativeCanvas* canvas) override;
     bool handleEvent(Event& event) override;
 
 private:
+    void openDropdown();
+    void closeDropdown();
+
     std::vector<std::string> items_;
     int selected_ = -1;
     bool dropped_ = false;
+    bool dropDown_ = true;
+    int dropHeight_ = 0;
     SelectionChangedCallback selectionCallback_;
+
+    static ComboBox* s_openCombo_;
+    friend class Window;
 };
 
 } // namespace ltgui

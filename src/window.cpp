@@ -1,6 +1,7 @@
 #include "window.h"
 #include "app.h"
 #include "widget.h"
+#include "widgets/combobox.h"
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 #include "platform/win32/win32_window.h"
@@ -169,6 +170,8 @@ void Window::handleEvent(Event& event) {
         }
         break;
     case EventType::MouseDown: {
+        // Close any open ComboBox dropdown if click is outside it
+        ComboBox::closeIfClickOutside(event.pos);
         if (centralWidget_) {
             Widget* prevFocus = focusWidget_;
             centralWidget_->handleEvent(event);
