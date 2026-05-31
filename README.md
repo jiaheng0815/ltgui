@@ -10,7 +10,7 @@ A from-scratch, cross-platform retained-mode GUI framework written in C++17. Zer
 
 ## Features
 
-- **Cross-platform** — Windows (GDI+), Linux/X11, macOS/Cocoa (stub)
+- **Cross-platform** — Windows (GDI+), Linux/X11, macOS/Cocoa (in development)
 - **17 built-in widgets** — Button, Label, TextBox, CheckBox, RadioButton, Slider, ListBox, ScrollArea, ComboBox, Image, ProgressBar, TabWidget, Tooltip, TreeView
 - **Retained widget tree** — classical OOP widget hierarchy with parent-child relationships
 - **Layout system** — `BoxLayout` (horizontal/vertical) and `GridLayout` with stretch factors
@@ -102,7 +102,7 @@ int main() {
 |          Platform Abstraction Layer             |
 |  +----------+----------+-------------------+    |
 |  |  Win32   |   X11    |      Cocoa        |    |
-|  |  (GDI+)  |  (Xft)   |     (stub)        |    |
+|  |  (GDI+)  |  (Xft)   |  (in development) |    |
 |  +----------+----------+-------------------+    |
 +-------------------------------------------------+
 ```
@@ -266,7 +266,7 @@ ltgui/
 │   │   ├── native_canvas.h
 │   │   ├── win32/              #   Windows (GDI+) backend
 │   │   ├── x11/                #   Linux (X11+Xft) backend
-│   │   └── cocoa/              #   macOS (Cocoa) stub
+│   │   └── cocoa/              #   macOS (Cocoa) in development
 │   └── widgets/                #   Built-in widgets (17)
 │       ├── button.h            ├── checkbox.h
 │       ├── combobox.h          ├── image.h
@@ -303,7 +303,7 @@ MIT
 
 ## 特性
 
-- **跨平台** — Windows (GDI+)，Linux/X11，macOS/Cocoa（桩）
+- **跨平台** — Windows (GDI+)，Linux/X11，macOS/Cocoa（开发中）
 - **17 个内置控件** — Button、Label、TextBox、CheckBox、RadioButton、Slider、ListBox、ScrollArea、ComboBox、Image、ProgressBar、TabWidget、Tooltip、TreeView
 - **保留模式控件树** — 经典面向对象控件层级，父子关系
 - **布局系统** — `BoxLayout`（水平/垂直）和 `GridLayout`，支持拉伸因子
@@ -395,7 +395,7 @@ int main() {
 |          Platform Abstraction Layer             |
 |  +----------+----------+-------------------+    |
 |  |  Win32   |   X11    |      Cocoa        |    |
-|  |  (GDI+)  |  (Xft)   |     (stub)        |    |
+|  |  (GDI+)  |  (Xft)   |  (in development) |    |
 |  +----------+----------+-------------------+    |
 +-------------------------------------------------+
 ```
@@ -552,7 +552,7 @@ ltgui/
 │   │   ├── native_canvas.h
 │   │   ├── win32/              #   Windows (GDI+) 后端
 │   │   ├── x11/                #   Linux (X11+Xft) 后端
-│   │   └── cocoa/              #   macOS (Cocoa) 桩
+│   │   └── cocoa/              #   macOS (Cocoa) 开发中
 │   └── widgets/                #   内置控件 (17 个)
 │       ├── button.h            ├── checkbox.h
 │       ├── combobox.h          ├── image.h
