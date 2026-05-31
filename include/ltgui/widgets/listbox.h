@@ -1,5 +1,6 @@
 #pragma once
 #include "widget.h"
+#include "animation.h"
 #include <string>
 #include <vector>
 #include <functional>
@@ -31,10 +32,12 @@ protected:
 private:
     std::vector<std::string> items_;
     int selected_ = -1;
-    int scrollOffset_ = 0;
-    int itemHeight_ = 24;
+    AnimatedFloat scrollAnim_{0.0f};
+    int scrollTarget_ = 0;
+    int itemHeight_ = 26;
     SelectionChangedCallback selectionCallback_;
 
+    int currentScrollOffset();
     int visibleItems() const;
 };
 

@@ -39,14 +39,17 @@ Size Image::sizeHint() const {
 
 void Image::paintSelf(NativeCanvas* canvas) {
     if (!loaded_ || path_.empty()) return;
+    if (imageSize_.width <= 0 || imageSize_.height <= 0) return;
 
     Rect r = absoluteRect();
+    if (r.width <= 0 || r.height <= 0) return;
+
     Rect drawRect = r;
 
     if (fitMode_ == 'c') {
         // Contain: fit within bounds, maintaining aspect ratio
-        float imgRatio = static_cast<float>(imageSize_.width) / imageSize_.height;
-        float rectRatio = static_cast<float>(r.width) / r.height;
+        float imgRatio = static_cast<float>(imageSize_.width) / static_cast<float>(imageSize_.height);
+        float rectRatio = static_cast<float>(r.width) / static_cast<float>(r.height);
         if (imgRatio > rectRatio) {
             int newH = static_cast<int>(r.width / imgRatio);
             drawRect.y += (r.height - newH) / 2;
@@ -61,8 +64,8 @@ void Image::paintSelf(NativeCanvas* canvas) {
         drawRect = r;
     } else {
         // Fill: cover (crop)
-        float imgRatio = static_cast<float>(imageSize_.width) / imageSize_.height;
-        float rectRatio = static_cast<float>(r.width) / r.height;
+        float imgRatio = static_cast<float>(imageSize_.width) / static_cast<float>(imageSize_.height);
+        float rectRatio = static_cast<float>(r.width) / static_cast<float>(r.height);
         if (imgRatio > rectRatio) {
             int newW = static_cast<int>(r.height * imgRatio);
             drawRect.x -= (newW - r.width) / 2;

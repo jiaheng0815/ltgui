@@ -216,6 +216,40 @@ void CocoaCanvas::strokeEllipse(const Rect& rect, int lineWidth) {
     CGContextStrokeEllipseInRect(ctx, CGRectMake(rect.x, rect.y, rect.width, rect.height));
 }
 
+static void addRoundedRectPath(CGContextRef ctx, const CGRect& rect, CGFloat radius) {
+    CGFloat r = std::min(radius, std::min(rect.size.width, rect.size.height) / 2.0f);
+    CGFloat x = rect.origin.x, y = rect.origin.y;
+    CGFloat w = rect.size.width, h = rect.size.height;
+    CGFloat d = r * 2.0f;
+    CGContextBeginPath(ctx);
+    CGContextAddArc(ctx, x + w - r, y + r, r, -M_PI_2, 0, 0);
+    CGContextAddArc(ctx, x + w - r, y + h - r, r, 0, M_PI_2, 0);
+    CGContextAddArc(ctx, x + r, y + h - r, r, M_PI_2, M_PI, 0);
+    CGContextAddArc(ctx, x + r, y + r, r, M_PI, 3.0f * M_PI_2, 0);
+    CGContextClosePath(ctx);
+}
+
+void CocoaCanvas::fillRoundedRect(const Rect& rect, int radius) {
+    CGContextRef ctx = static_cast<CGContextRef>(backbuffer_);
+    if (!ctx) return;
+    CGContextSetRGBFillColor(ctx,
+                              currentR_ / 255.0f, currentG_ / 255.0f,
+                              currentB_ / 255.0f, currentA_ / 255.0f);
+    addRoundedRectPath(ctx, CGRectMake(rect.x, rect.y, rect.width, rect.height), radius);
+    CGContextFillPath(ctx);
+}
+
+void CocoaCanvas::strokeRoundedRect(const Rect& rect, int radius, int lineWidth) {
+    CGContextRef ctx = static_cast<CGContextRef>(backbuffer_);
+    if (!ctx) return;
+    CGContextSetRGBStrokeColor(ctx,
+                                currentR_ / 255.0f, currentG_ / 255.0f,
+                                currentB_ / 255.0f, currentA_ / 255.0f);
+    CGContextSetLineWidth(ctx, lineWidth);
+    addRoundedRectPath(ctx, CGRectMake(rect.x, rect.y, rect.width, rect.height), radius);
+    CGContextStrokePath(ctx);
+}
+
 Size CocoaCanvas::measureText(const std::string& text) {
     NSFont* font = (__bridge NSFont*)currentFont_;
     if (!font) {

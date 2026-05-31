@@ -35,6 +35,11 @@ private:
     int hovered_ = -1;
     int tabBarHeight_ = 32;
 
+    mutable std::vector<int> cachedTabWidths_;
+    mutable bool tabWidthsDirty_ = true;
+
+    void invalidateTabWidths() const { tabWidthsDirty_ = true; }
+    void ensureTabWidths() const;
     Rect tabRect(int index) const;
     int totalTabWidth() const;
 };

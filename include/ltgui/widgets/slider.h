@@ -28,6 +28,7 @@ private:
     int max_ = 100;
     int value_ = 0;
     bool dragging_ = false;
+    bool hovered_ = false;
     ValueChangedCallback valueChangedCallback_;
 
     int thumbPos() const;

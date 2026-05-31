@@ -15,7 +15,7 @@ void ProgressBar::setValue(int value) {
     value = std::max(min_, std::min(max_, value));
     if (value_ != value) {
         value_ = value;
-        float pct = static_cast<float>(value_ - min_) / static_cast<float>(max_ - min_);
+        float pct = (max_ > min_) ? static_cast<float>(value_ - min_) / static_cast<float>(max_ - min_) : 1.0f;
         displayValue_.setTarget(pct, 300, Easing::EaseOut);
         update();
     }

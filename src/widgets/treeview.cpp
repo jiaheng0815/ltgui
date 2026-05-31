@@ -19,12 +19,17 @@ TreeViewItem* TreeViewItem::addChild(const std::string& text) {
     auto* child = new TreeViewItem(text);
     child->parent_ = this;
     child->depth_ = depth_ + 1;
+    child->treeView_ = treeView_;
     children_.push_back(child);
     return child;
 }
 
 void TreeViewItem::removeChild(int index) {
     if (index >= 0 && index < static_cast<int>(children_.size())) {
+        // Notify owning TreeView to clear dangling selection
+        if (treeView_ && treeView_->selectedItem() == children_[index]) {
+            treeView_->setSelectedItem(nullptr);
+        }
         delete children_[index];
         children_.erase(children_.begin() + index);
     }
@@ -40,6 +45,7 @@ TreeView::TreeView(Widget* parent) : Widget(parent) {
     style().borderRadius = 4;
     root_ = new TreeViewItem("");
     root_->expanded_ = true;
+    root_->treeView_ = this;
 }
 
 TreeView::~TreeView() { delete root_; }

@@ -1,5 +1,6 @@
 #include "app.h"
 #include "window.h"
+#include "animation.h"
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 #include <windows.h>
@@ -24,22 +25,31 @@ int Application::run() {
 #ifdef LTGUI_PLATFORM_WINDOWS
     MSG msg;
     while (running_) {
-        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) {
-                running_ = false;
-                break;
+        auto& anim = AnimationManager::instance();
+        DWORD timeout = anim.hasActive() ? 1 : INFINITE;
+
+        DWORD result = MsgWaitForMultipleObjects(0, nullptr, FALSE, timeout, QS_ALLINPUT);
+        if (result == WAIT_OBJECT_0) {
+            while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                if (msg.message == WM_QUIT) {
+                    running_ = false;
+                    break;
+                }
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
             }
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
         }
         processEvents();
     }
 #elif defined(LTGUI_PLATFORM_LINUX)
     while (running_) {
-        if (!X11Window::processAllPending()) {
-            usleep(5000);
-        }
+        X11Window::processAllPending();
         processEvents();
+        if (!AnimationManager::instance().hasActive()) {
+            usleep(16000);
+        } else {
+            usleep(1000);
+        }
     }
 #elif defined(LTGUI_PLATFORM_MACOS)
     [NSApplication sharedApplication];
@@ -61,6 +71,13 @@ void Application::quit() {
 }
 
 void Application::processEvents() {
+    auto& anim = AnimationManager::instance();
+    anim.tick();
+    if (anim.hasActive()) {
+        for (auto* w : windows_) {
+            w->update();
+        }
+    }
 }
 
 void Application::registerWindow(Window* window) {

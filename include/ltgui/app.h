@@ -19,6 +19,8 @@ public:
     void registerWindow(Window* window);
     void unregisterWindow(Window* window);
 
+    const std::vector<Window*>& windows() const { return windows_; }
+
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "widget.h"
+#include "animation.h"
 
 namespace ltgui {
 
@@ -18,6 +19,7 @@ protected:
 
 private:
     Widget* contentWidget_ = nullptr;
+    AnimatedFloat scrollYAnim_{0.0f};
     int scrollX_ = 0;
     int scrollY_ = 0;
     int contentWidth_ = 0;
@@ -25,6 +27,7 @@ private:
 
     void updateScrollBars();
     void scrollTo(int x, int y);
+    int currentScrollY();
 };
 
 } // namespace ltgui

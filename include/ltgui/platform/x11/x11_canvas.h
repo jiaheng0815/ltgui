@@ -34,6 +34,8 @@ public:
 
     void fillRect(const Rect& rect) override;
     void strokeRect(const Rect& rect, int lineWidth = 1) override;
+    void fillRoundedRect(const Rect& rect, int radius) override;
+    void strokeRoundedRect(const Rect& rect, int radius, int lineWidth = 1) override;
     void drawText(const std::string& text, const Rect& rect, int flags = 0) override;
     void drawLine(const Point& p1, const Point& p2, int lineWidth = 1) override;
     void fillEllipse(const Rect& rect) override;
@@ -61,7 +63,9 @@ private:
     bool xftColorSet_ = false;
 
     unsigned long currentPixel_ = 0;
+    uint8_t currentAlpha_ = 255;
     Font currentFontDesc_;
+    float dpiScale_ = 1.0f;
     int canvasWidth_ = 0;
     int canvasHeight_ = 0;
 };

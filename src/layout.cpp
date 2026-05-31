@@ -104,7 +104,7 @@ void BoxLayout::layout(Widget* container) {
     }
 }
 
-Size BoxLayout::preferredSize(Widget* container) const {
+Size BoxLayout::preferredSize(const Widget* container) const {
     if (!container) return {0, 0};
 
     const auto& children = container->children();
@@ -197,7 +197,7 @@ void GridLayout::layout(Widget* container) {
     }
 }
 
-Size GridLayout::preferredSize(Widget* container) const {
+Size GridLayout::preferredSize(const Widget* container) const {
     if (!container) return {0, 0};
 
     const auto& children = container->children();

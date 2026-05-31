@@ -1,4 +1,5 @@
 #include "widgets/combobox.h"
+#include "window.h"
 #include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
@@ -99,10 +100,27 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
     canvas->drawLine({cx - 4, cy - 2}, {cx, cy + 2}, 2);
     canvas->drawLine({cx, cy + 2}, {cx + 4, cy - 2}, 2);
 
-    // Dropdown list
+    // Dropdown list — clamped to window bounds
     if (dropped_ && !items_.empty()) {
         int dropH = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
-        Rect dropRect(r.x, r.bottom() + 1, r.width, dropH);
+        bool dropDown = true; // true = below, false = above (flip if near bottom)
+
+        // Get window height for clamping
+        if (auto* win = window()) {
+            int winH = win->getSize().height;
+            if (r.bottom() + dropH > winH - 4) {
+                dropDown = false;
+            }
+        }
+
+        Rect dropRect;
+        if (dropDown) {
+            dropRect = Rect(r.x, r.bottom() + 1, r.width, dropH);
+        } else {
+            int dropY = r.y - dropH - 1;
+            if (dropY < 0) dropY = 0;
+            dropRect = Rect(r.x, dropY, r.width, dropH);
+        }
 
         canvas->setColor(t.bgSecondary);
         canvas->fillRoundedRect(dropRect, 4);

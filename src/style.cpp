@@ -1,16 +1,18 @@
 #include "style.h"
+#include "theme.h"
 
 namespace ltgui {
 
 Style Style::defaultStyle() {
+    Theme t = currentTheme();
     Style s;
-    s.bgColor = Color::ButtonFace;
-    s.fgColor = Color::TextColor;
-    s.borderColor = Color::ButtonShadow;
+    s.bgColor = t.bgSecondary;
+    s.fgColor = t.textPrimary;
+    s.borderColor = t.border;
     s.borderWidth = 1;
-    s.borderRadius = 0;
+    s.borderRadius = 4;
     s.font = Font("Segoe UI", 12);
-    s.setPadding(6, 4);
+    s.setPadding(8, 4);
     s.setMargin(2);
     return s;
 }

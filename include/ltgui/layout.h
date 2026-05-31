@@ -11,7 +11,7 @@ class Layout {
 public:
     virtual ~Layout() = default;
     virtual void layout(Widget* container) = 0;
-    virtual Size preferredSize(Widget* container) const = 0;
+    virtual Size preferredSize(const Widget* container) const = 0;
 };
 
 class BoxLayout : public Layout {
@@ -29,7 +29,7 @@ public:
     void setDirection(Direction dir);
 
     void layout(Widget* container) override;
-    Size preferredSize(Widget* container) const override;
+    Size preferredSize(const Widget* container) const override;
 
 private:
     Direction direction_;
@@ -46,7 +46,7 @@ public:
     void setRowStretch(int row, int factor);
 
     void layout(Widget* container) override;
-    Size preferredSize(Widget* container) const override;
+    Size preferredSize(const Widget* container) const override;
 
 private:
     int cols_;

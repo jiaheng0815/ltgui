@@ -85,6 +85,9 @@ Size Window::getSize() const {
 }
 
 void Window::setCentralWidget(Widget* widget) {
+    if (centralWidget_) {
+        delete centralWidget_;
+    }
     centralWidget_ = widget;
     if (widget) {
         widget->setWindow(this);

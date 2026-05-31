@@ -23,6 +23,7 @@ int TabWidget::addTab(const std::string& label) {
         setCurrentIndex(0);
     }
     invalidateSizeHint();
+    invalidateTabWidths();
     update();
     return static_cast<int>(tabs_.size()) - 1;
 }
@@ -43,6 +44,7 @@ void TabWidget::removeTab(int index) {
         tabs_[current_].content->setVisible(true);
     }
     invalidateSizeHint();
+    invalidateTabWidths();
     update();
 }
 
@@ -93,31 +95,33 @@ void TabWidget::setGeometry(const Rect& rect) {
     }
 }
 
-int TabWidget::totalTabWidth() const {
-    int w = 0;
+void TabWidget::ensureTabWidths() const {
+    if (!tabWidthsDirty_) return;
+    cachedTabWidths_.clear();
+    cachedTabWidths_.reserve(tabs_.size());
     auto* win = window();
     auto* c = win ? win->canvas() : nullptr;
     for (auto& tab : tabs_) {
-        if (c) {
-            w += c->measureText(tab.label).width + 24 + 2;
-        } else {
-            w += 60;
-        }
+        cachedTabWidths_.push_back(c ? c->measureText(tab.label).width + 24 + 2 : 62);
     }
+    tabWidthsDirty_ = false;
+}
+
+int TabWidget::totalTabWidth() const {
+    ensureTabWidths();
+    int w = 0;
+    for (int v : cachedTabWidths_) w += v;
     return w;
 }
 
 Rect TabWidget::tabRect(int index) const {
+    ensureTabWidths();
     Rect r = absoluteRect();
-    auto* win = window();
-    auto* c = win ? win->canvas() : nullptr;
     int startX = r.x + 2;
     for (int i = 0; i < index; i++) {
-        Size ts = c ? c->measureText(tabs_[i].label) : Size{50, 0};
-        startX += ts.width + 24 + 2;
+        startX += cachedTabWidths_[i];
     }
-    Size ts = c ? c->measureText(tabs_[index].label) : Size{50, 0};
-    return {startX, r.y + 2, ts.width + 24, tabBarHeight_ - 2};
+    return {startX, r.y + 2, cachedTabWidths_[index] - 2, tabBarHeight_ - 2};
 }
 
 void TabWidget::paintSelf(NativeCanvas* canvas) {
@@ -132,10 +136,10 @@ void TabWidget::paintSelf(NativeCanvas* canvas) {
     canvas->fillRoundedRect(Rect(r.x, r.y, r.width, tabBarHeight_), 6);
 
     // Tabs
+    ensureTabWidths();
     int x = r.x + 2;
     for (int i = 0; i < static_cast<int>(tabs_.size()); i++) {
-        Size textSize = canvas->measureText(tabs_[i].label);
-        int tw = textSize.width + 24;
+        int tw = cachedTabWidths_[i] - 2;
         Rect tr(x, r.y + 2, tw, tabBarHeight_ - 2);
 
         if (i == current_) {
@@ -153,7 +157,7 @@ void TabWidget::paintSelf(NativeCanvas* canvas) {
         canvas->drawText(tabs_[i].label, tr,
                          NativeCanvas::AlignCenter | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);
 
-        x += tw + 2;
+        x += cachedTabWidths_[i];
     }
 
     // Content area border
@@ -171,12 +175,10 @@ bool TabWidget::handleEvent(Event& event) {
     int localY = event.pos.y - y();
 
     if (localY >= 0 && localY <= tabBarHeight_) {
+        ensureTabWidths();
         int xcursor = 2;
         for (int i = 0; i < static_cast<int>(tabs_.size()); i++) {
-            auto* win = window();
-            auto* c = win ? win->canvas() : nullptr;
-            Size textSize = c ? c->measureText(tabs_[i].label) : Size{50, 0};
-            int tw = textSize.width + 24;
+            int tw = cachedTabWidths_[i] - 2;
             if (localX >= xcursor && localX < xcursor + tw) {
                 if (event.type == EventType::MouseMove) {
                     hovered_ = i;
@@ -190,7 +192,7 @@ bool TabWidget::handleEvent(Event& event) {
                     return true;
                 }
             }
-            xcursor += tw + 2;
+            xcursor += cachedTabWidths_[i];
         }
         if (event.type == EventType::MouseMove && hovered_ >= 0) {
             hovered_ = -1;

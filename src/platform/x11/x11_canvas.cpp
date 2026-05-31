@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 
 namespace ltgui {
 
@@ -13,6 +14,28 @@ X11Canvas::X11Canvas(Display* display, ::Window window, int screen)
     colormap_ = DefaultColormap(display_, screen_);
 
     gc_ = XCreateGC(display_, window_, 0, nullptr);
+
+    // Compute DPI scale to match Windows rendering size.
+    // Xft pixelsize and GDI+ lfHeight interpret the same number differently:
+    //   - GDI+: lfHeight=-12 means cell height = 12px (EM ≈ 10px)
+    //   - Xft:  pixelsize=12   means EM size   = 12px (cell ≈ 14.4px)
+    // Xft actually renders bigger, but Windows often has DPI scaling (125%+)
+    // while X11 runs at 96 DPI. Detect actual DPI and scale accordingly.
+    float xdpi = 96.0f;
+    int wmm = DisplayWidthMM(display_, screen_);
+    if (wmm > 0) {
+        xdpi = DisplayWidth(display_, screen_) * 25.4f / wmm;
+    }
+    float ydpi = 96.0f;
+    int hmm = DisplayHeightMM(display_, screen_);
+    if (hmm > 0) {
+        ydpi = DisplayHeight(display_, screen_) * 25.4f / hmm;
+    }
+    dpiScale_ = (xdpi + ydpi) / (2.0f * 96.0f);
+    // Clamp to reasonable range: 1.0x–2.0x to guard against
+    // X servers that report bogus physical dimensions (e.g. WSL)
+    if (dpiScale_ < 1.0f) dpiScale_ = 1.0f;
+    if (dpiScale_ > 2.0f) dpiScale_ = 2.0f;
 
     // Default color
     // Initialize with black
@@ -60,6 +83,7 @@ void X11Canvas::resize(int width, int height) {
 
 void X11Canvas::beginPaint() {
     if (backbuffer_) {
+        XSetFillStyle(display_, gc_, FillSolid);
         unsigned long white = allocColor(Color::White);
         XSetForeground(display_, gc_, white);
         XFillRectangle(display_, backbuffer_, gc_, 0, 0, canvasWidth_, canvasHeight_);
@@ -78,6 +102,7 @@ void X11Canvas::endPaint() {
 
 void X11Canvas::setColor(const Color& color) {
     currentPixel_ = allocColor(color);
+    currentAlpha_ = color.a;
     XSetForeground(display_, gc_, currentPixel_);
 
     // Xft color
@@ -91,14 +116,15 @@ void X11Canvas::setColor(const Color& color) {
 
 void X11Canvas::setFont(const Font& font) {
     currentFontDesc_ = font;
+    // Apply DPI scale so rendered size matches GDI+ at equivalent scaling
+    currentFontDesc_.size = static_cast<int>(font.size * dpiScale_);
 
     if (xftFont_) {
         XftFontClose(display_, xftFont_);
         xftFont_ = nullptr;
     }
 
-    // Build font name pattern: "family:size=12:weight=bold"
-    std::string pattern = font.family + ":pixelsize=" + std::to_string(font.size);
+    std::string pattern = font.family + ":pixelsize=" + std::to_string(currentFontDesc_.size);
     if (static_cast<int>(font.weight) >= static_cast<int>(FontWeight::Bold)) {
         pattern += ":weight=bold";
     }
@@ -110,20 +136,32 @@ void X11Canvas::setFont(const Font& font) {
     if (f) {
         xftFont_ = f;
     } else {
-        // Fallback to default font
-        xftFont_ = XftFontOpenName(display_, screen_,
-                                    "sans:size=12");
+        // Fallback: use pixelsize (not size) for consistency with measureText
+        std::string fb = "sans:pixelsize=" + std::to_string(currentFontDesc_.size);
+        xftFont_ = XftFontOpenName(display_, screen_, fb.c_str());
     }
 }
 
 unsigned long X11Canvas::allocColor(const Color& c) {
     Visual* visual = DefaultVisual(display_, screen_);
 
-    // TrueColor: compute pixel directly from RGB masks
-    if (visual->c_class == TrueColor) {
-        unsigned long r = (static_cast<unsigned long>(c.r) * visual->red_mask   / 255) & visual->red_mask;
-        unsigned long g = (static_cast<unsigned long>(c.g) * visual->green_mask / 255) & visual->green_mask;
-        unsigned long b = (static_cast<unsigned long>(c.b) * visual->blue_mask  / 255) & visual->blue_mask;
+    // DirectColor / TrueColor: compute pixel directly from RGB masks
+    if (visual->c_class == TrueColor || visual->c_class == DirectColor) {
+        // Extract contiguous mask bits (e.g. 0xFF0000 → value=0xFF, shift=16)
+        auto decompose = [](unsigned long mask) -> std::pair<unsigned long, int> {
+            if (mask == 0) return {0, 0};
+            int shift = 0;
+            while ((mask & 1) == 0) { mask >>= 1; shift++; }
+            return {mask, shift};
+        };
+
+        auto [rBits, rShift] = decompose(visual->red_mask);
+        auto [gBits, gShift] = decompose(visual->green_mask);
+        auto [bBits, bShift] = decompose(visual->blue_mask);
+
+        unsigned long r = (static_cast<unsigned long>(c.r) * rBits / 255) << rShift;
+        unsigned long g = (static_cast<unsigned long>(c.g) * gBits / 255) << gShift;
+        unsigned long b = (static_cast<unsigned long>(c.b) * bBits / 255) << bShift;
         return r | g | b;
     }
 
@@ -140,19 +178,19 @@ unsigned long X11Canvas::allocColor(const Color& c) {
 }
 
 void X11Canvas::fillRect(const Rect& rect) {
-    if (!display_ || !backbuffer_) return;
+    if (!display_ || !backbuffer_ || currentAlpha_ == 0) return;
     XFillRectangle(display_, backbuffer_, gc_, rect.x, rect.y, rect.width, rect.height);
 }
 
 void X11Canvas::strokeRect(const Rect& rect, int lineWidth) {
-    if (!display_ || !backbuffer_) return;
+    if (!display_ || !backbuffer_ || currentAlpha_ == 0) return;
     XSetLineAttributes(display_, gc_, lineWidth, LineSolid, CapButt, JoinMiter);
     XDrawRectangle(display_, backbuffer_, gc_, rect.x, rect.y, rect.width, rect.height);
     XSetLineAttributes(display_, gc_, 1, LineSolid, CapButt, JoinMiter);
 }
 
 void X11Canvas::drawText(const std::string& text, const Rect& rect, int flags) {
-    if (!display_ || !backbuffer_ || !xftDraw_ || !xftFont_ || !xftColorSet_)
+    if (!display_ || !backbuffer_ || !xftDraw_ || !xftFont_ || !xftColorSet_ || currentAlpha_ == 0)
         return;
 
     // Measure text for alignment
@@ -181,30 +219,70 @@ void X11Canvas::drawText(const std::string& text, const Rect& rect, int flags) {
 }
 
 void X11Canvas::drawLine(const Point& p1, const Point& p2, int lineWidth) {
-    if (!display_ || !backbuffer_) return;
+    if (!display_ || !backbuffer_ || currentAlpha_ == 0) return;
     XSetLineAttributes(display_, gc_, lineWidth, LineSolid, CapButt, JoinMiter);
     XDrawLine(display_, backbuffer_, gc_, p1.x, p1.y, p2.x, p2.y);
     XSetLineAttributes(display_, gc_, 1, LineSolid, CapButt, JoinMiter);
 }
 
 void X11Canvas::fillEllipse(const Rect& rect) {
-    if (!display_ || !backbuffer_) return;
+    if (!display_ || !backbuffer_ || currentAlpha_ == 0) return;
     XFillArc(display_, backbuffer_, gc_,
               rect.x, rect.y, rect.width, rect.height, 0, 360 * 64);
 }
 
 void X11Canvas::strokeEllipse(const Rect& rect, int lineWidth) {
-    if (!display_ || !backbuffer_) return;
+    if (!display_ || !backbuffer_ || currentAlpha_ == 0) return;
     XSetLineAttributes(display_, gc_, lineWidth, LineSolid, CapButt, JoinMiter);
     XDrawArc(display_, backbuffer_, gc_,
               rect.x, rect.y, rect.width, rect.height, 0, 360 * 64);
     XSetLineAttributes(display_, gc_, 1, LineSolid, CapButt, JoinMiter);
 }
 
+void X11Canvas::fillRoundedRect(const Rect& rect, int radius) {
+    if (!display_ || !backbuffer_ || currentAlpha_ == 0) return;
+    int r = std::min(radius, std::min(rect.width, rect.height) / 2);
+    if (r <= 0) { fillRect(rect); return; }
+    int x = rect.x, y = rect.y, w = rect.width, h = rect.height;
+    int d = r * 2;
+    // Fill center rect
+    XFillRectangle(display_, backbuffer_, gc_, x + r, y, w - d, h);
+    XFillRectangle(display_, backbuffer_, gc_, x, y + r, w, h - d);
+    // Fill corner arcs
+    XFillArc(display_, backbuffer_, gc_, x, y, d, d, 90 * 64, 90 * 64);
+    XFillArc(display_, backbuffer_, gc_, x + w - d, y, d, d, 0 * 64, 90 * 64);
+    XFillArc(display_, backbuffer_, gc_, x + w - d, y + h - d, d, d, 270 * 64, 90 * 64);
+    XFillArc(display_, backbuffer_, gc_, x, y + h - d, d, d, 180 * 64, 90 * 64);
+}
+
+void X11Canvas::strokeRoundedRect(const Rect& rect, int radius, int lineWidth) {
+    if (!display_ || !backbuffer_ || currentAlpha_ == 0) return;
+    int r = std::min(radius, std::min(rect.width, rect.height) / 2);
+    if (r <= 0) { strokeRect(rect, lineWidth); return; }
+    int x = rect.x, y = rect.y, w = rect.width, h = rect.height;
+    int d = r * 2;
+    XSetLineAttributes(display_, gc_, lineWidth, LineSolid, CapButt, JoinMiter);
+    // Top edge
+    XDrawLine(display_, backbuffer_, gc_, x + r, y, x + w - r, y);
+    // Right edge
+    XDrawLine(display_, backbuffer_, gc_, x + w, y + r, x + w, y + h - r);
+    // Bottom edge
+    XDrawLine(display_, backbuffer_, gc_, x + w - r, y + h, x + r, y + h);
+    // Left edge
+    XDrawLine(display_, backbuffer_, gc_, x, y + h - r, x, y + r);
+    // Corner arcs
+    XDrawArc(display_, backbuffer_, gc_, x, y, d, d, 90 * 64, 90 * 64);
+    XDrawArc(display_, backbuffer_, gc_, x + w - d, y, d, d, 0 * 64, 90 * 64);
+    XDrawArc(display_, backbuffer_, gc_, x + w - d, y + h - d, d, d, 270 * 64, 90 * 64);
+    XDrawArc(display_, backbuffer_, gc_, x, y + h - d, d, d, 180 * 64, 90 * 64);
+    XSetLineAttributes(display_, gc_, 1, LineSolid, CapButt, JoinMiter);
+}
+
 Size X11Canvas::measureText(const std::string& text) {
     if (!display_ || !xftFont_) {
-        // Use a default font for measurement
-        XftFont* f = XftFontOpenName(display_, screen_, "sans:pixelsize=12");
+        int fs = static_cast<int>(12 * dpiScale_);
+        std::string fb = "sans:pixelsize=" + std::to_string(fs);
+        XftFont* f = XftFontOpenName(display_, screen_, fb.c_str());
         if (!f) return {0, 0};
 
         XGlyphInfo extents;
@@ -212,7 +290,7 @@ Size X11Canvas::measureText(const std::string& text) {
                             reinterpret_cast<const XftChar8*>(text.c_str()),
                             text.size(), &extents);
         int w = extents.width;
-        int h = extents.height;
+        int h = f->ascent + f->descent;  // cell height, matches GDI+ MeasureString
         XftFontClose(display_, f);
         return {w, h};
     }
@@ -221,7 +299,7 @@ Size X11Canvas::measureText(const std::string& text) {
     XftTextExtentsUtf8(display_, xftFont_,
                         reinterpret_cast<const XftChar8*>(text.c_str()),
                         text.size(), &extents);
-    return {extents.width, extents.height};
+    return {extents.width, xftFont_->ascent + xftFont_->descent};
 }
 
 } // namespace ltgui

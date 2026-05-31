@@ -79,7 +79,7 @@ void Widget::setGeometry(const Rect& rect) {
 Size Widget::sizeHint() const {
     if (!sizeHintDirty_) return cachedSizeHint_;
     if (layout_) {
-        cachedSizeHint_ = layout_->preferredSize(const_cast<Widget*>(this));
+        cachedSizeHint_ = layout_->preferredSize(this);
     } else {
         cachedSizeHint_ = {100, 24};
     }

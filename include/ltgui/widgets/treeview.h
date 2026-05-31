@@ -7,6 +7,8 @@
 
 namespace ltgui {
 
+class TreeView;
+
 class TreeViewItem {
 public:
     TreeViewItem(const std::string& text);
@@ -30,6 +32,7 @@ private:
     std::string text_;
     std::vector<TreeViewItem*> children_;
     TreeViewItem* parent_ = nullptr;
+    TreeView* treeView_ = nullptr;
     bool expanded_ = false;
     int depth_ = 0;
 };

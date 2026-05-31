@@ -98,15 +98,19 @@ bool ScrollArea::handleEvent(Event& event) {
         return true;
     }
 
-    if (contentWidget_ && event.type == EventType::MouseMove) {
+    if (contentWidget_) {
         int localX = event.pos.x - x();
         int localY = event.pos.y - y();
-        if (contentWidget_->geometry().contains({localX + scrollX_, localY + currentScrollY()})) {
+        bool inContent = contentWidget_->geometry().contains(
+            {localX + scrollX_, localY + currentScrollY()});
+        if (inContent && (event.type == EventType::MouseMove ||
+                          event.type == EventType::MouseDown ||
+                          event.type == EventType::MouseUp)) {
             Point savedPos = event.pos;
             event.pos = {localX + scrollX_, localY + currentScrollY()};
             bool handled = contentWidget_->handleEvent(event);
             event.pos = savedPos;
-            return handled;
+            if (handled) return true;
         }
     }
 
