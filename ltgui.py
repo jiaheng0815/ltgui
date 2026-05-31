@@ -33,6 +33,7 @@ def cprint(msg, color=Color.WHITE, bold=False):
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(SCRIPT_DIR, "src")
 INCLUDE_DIR = os.path.join(SCRIPT_DIR, "include", "ltgui")
+VENDOR_DIR = os.path.join(SCRIPT_DIR, "vendor")
 EXAMPLES_DIR = os.path.join(SCRIPT_DIR, "examples")
 APP_DIR      = os.path.join(SCRIPT_DIR, "app")
 BUILD_DIR = os.path.join(SCRIPT_DIR, "build")
@@ -67,7 +68,8 @@ def check_platform_clean():
 
 def get_platform_libs(platform):
     if platform == "windows":
-        return ["-lgdi32", "-lgdiplus", "-luser32", "-lcomctl32", "-lole32", "-limm32"]
+        return ["-lgdi32", "-lgdiplus", "-luser32", "-lcomctl32", "-lole32", "-limm32",
+                "-ld3d11", "-ldxgi", "-ld3dcompiler"]
     elif platform == "linux":
         return ["-lX11", "-lXft", "-lXrender", "-lfontconfig"]
     elif platform == "macos":
@@ -106,7 +108,7 @@ def compile_source(src_path, platform, is_release):
     else:
         flags += ["-g", "-O0"]
 
-    flags += ["-I", INCLUDE_DIR]
+    flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
     flags += get_platform_flags(platform)
     flags += [src_path, "-o", obj_path]
 
@@ -180,7 +182,7 @@ def build_example(name, platform, is_release, lib_path):
     else:
         flags += ["-g", "-O0"]
 
-    flags += ["-I", INCLUDE_DIR]
+    flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
     flags += get_platform_flags(platform)
     flags += [src, lib_path]
     flags += get_platform_libs(platform)
@@ -226,7 +228,7 @@ def build_app(name, platform, is_release, lib_path):
     else:
         flags += ["-g", "-O0"]
 
-    flags += ["-I", INCLUDE_DIR]
+    flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
     flags += get_platform_flags(platform)
     flags += [src, lib_path]
     flags += get_platform_libs(platform)
