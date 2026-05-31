@@ -1,13 +1,15 @@
 #include "widgets/scrollarea.h"
+#include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
 
 namespace ltgui {
 
 ScrollArea::ScrollArea(Widget* parent) : Widget(parent) {
-    style().bgColor = Color::White;
+    style().bgColor = currentTheme().bgSecondary;
     style().borderWidth = 1;
-    style().borderColor = Color::Gray;
+    style().borderColor = currentTheme().border;
+    style().borderRadius = 4;
 }
 
 void ScrollArea::setWidget(Widget* widget) {
@@ -27,7 +29,6 @@ void ScrollArea::setWidget(Widget* widget) {
 }
 
 void ScrollArea::updateScrollBars() {
-    // Simple: content size is the widget's size hint
     if (contentWidget_) {
         Size hint = contentWidget_->sizeHint();
         contentWidth_ = hint.width;
@@ -36,70 +37,80 @@ void ScrollArea::updateScrollBars() {
 }
 
 Size ScrollArea::sizeHint() const {
-    return {200, 200};
+    if (!sizeHintDirty()) return cachedSizeHint();
+    setCachedSizeHint({200, 200});
+    return cachedSizeHint();
+}
+
+int ScrollArea::currentScrollY() {
+    return static_cast<int>(scrollYAnim_.value());
 }
 
 void ScrollArea::scrollTo(int x, int y) {
-    scrollX_ = std::max(0, std::min(x, contentWidth_ - width()));
-    scrollY_ = std::max(0, std::min(y, contentHeight_ - height()));
+    scrollX_ = std::max(0, std::min(x, std::max(0, contentWidth_ - width())));
+    scrollY_ = std::max(0, std::min(y, std::max(0, contentHeight_ - height())));
+    scrollYAnim_.setTarget(static_cast<float>(scrollY_), 200, Easing::EaseOut);
     if (contentWidget_) {
-        contentWidget_->setGeometry(Rect(-scrollX_, -scrollY_, contentWidth_, contentHeight_));
+        contentWidget_->setGeometry(Rect(-scrollX_, -currentScrollY(), contentWidth_, contentHeight_));
     }
     update();
 }
 
 void ScrollArea::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    Theme t = currentTheme();
 
-    // Background
     canvas->setColor(style().bgColor);
-    canvas->fillRect(r);
+    canvas->fillRoundedRect(r, style().borderRadius);
 
-    // Border
-    if (style().borderWidth > 0) {
-        canvas->setColor(style().borderColor);
-        canvas->strokeRect(r, style().borderWidth);
-    }
-
-    // Scrollbar (if needed)
+    // Scrollbar track
     if (contentHeight_ > height()) {
         int sbWidth = 12;
-        int thumbH = std::max(20, height() * height() / contentHeight_);
-        int thumbY = r.y + (scrollY_ * (height() - thumbH)) / (contentHeight_ - height());
+        int scrollY = currentScrollY();
+        int thumbH = std::max(24, height() * height() / contentHeight_);
+        int maxScroll = contentHeight_ - height();
+        int thumbY = r.y;
+        if (maxScroll > 0) {
+            thumbY += (scrollY * (height() - thumbH)) / maxScroll;
+        }
 
-        // Track
-        canvas->setColor(Color::LightGray);
-        canvas->fillRect(Rect(r.right() - sbWidth, r.y, sbWidth, r.height));
+        canvas->setColor(t.scrollbarTrack);
+        canvas->fillRoundedRect(Rect(r.right() - sbWidth, r.y, sbWidth, r.height), 4);
 
-        // Thumb
-        canvas->setColor(Color::Gray);
-        canvas->fillRect(Rect(r.right() - sbWidth, thumbY, sbWidth, thumbH));
+        canvas->setColor(t.scrollbarThumb);
+        canvas->fillRoundedRect(Rect(r.right() - sbWidth + 2, thumbY + 1, sbWidth - 4, thumbH - 2), 3);
+    }
+
+    // Content clipping — border stroke on top
+    if (style().borderWidth > 0) {
+        canvas->setColor(style().borderColor);
+        canvas->strokeRoundedRect(r, style().borderRadius, style().borderWidth);
     }
 }
 
 bool ScrollArea::handleEvent(Event& event) {
     if (!isEnabled()) return false;
 
-    int localX = event.pos.x - x();
-    int localY = event.pos.y - y();
-
     if (event.type == EventType::MouseWheel) {
-        scrollTo(scrollX_, scrollY_ - event.wheelDelta * 30);
+        int newY = scrollY_ - event.wheelDelta * 30;
+        scrollTo(scrollX_, newY);
         event.accepted = true;
         return true;
     }
 
-    // Forward to content widget
     if (contentWidget_ && event.type == EventType::MouseMove) {
-        Point localPos = {localX + scrollX_, localY + scrollY_};
-        if (contentWidget_->geometry().contains(localPos)) {
-            Event childEvent = event;
-            childEvent.pos = localPos;
-            return contentWidget_->handleEvent(childEvent);
+        int localX = event.pos.x - x();
+        int localY = event.pos.y - y();
+        if (contentWidget_->geometry().contains({localX + scrollX_, localY + currentScrollY()})) {
+            Point savedPos = event.pos;
+            event.pos = {localX + scrollX_, localY + currentScrollY()};
+            bool handled = contentWidget_->handleEvent(event);
+            event.pos = savedPos;
+            return handled;
         }
     }
 
-    return Widget::handleEvent(event);
+    return false;
 }
 
 } // namespace ltgui

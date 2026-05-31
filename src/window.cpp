@@ -97,8 +97,18 @@ void Window::setCentralWidget(Widget* widget) {
 }
 
 void Window::update() {
+    invalidate(Rect(0, 0, getSize().width, getSize().height));
+}
+
+void Window::invalidate(const Rect& rect) {
+    if (dirtyValid_) {
+        accumulatedDirty_ = accumulatedDirty_.united(rect);
+    } else {
+        accumulatedDirty_ = rect;
+        dirtyValid_ = true;
+    }
     if (nativeWindow_) {
-        nativeWindow_->invalidate(Rect(0, 0, getSize().width, getSize().height));
+        nativeWindow_->invalidate(rect);
     }
 }
 
@@ -114,8 +124,13 @@ void Window::handleEvent(Event& event) {
     case EventType::Paint:
         if (canvas_) {
             canvas_->beginPaint();
-            onPaint(canvas_);
+            if (!dirtyValid_) {
+                Size sz = getSize();
+                accumulatedDirty_ = Rect(0, 0, sz.width, sz.height);
+            }
+            onPaint(canvas_, accumulatedDirty_);
             canvas_->endPaint();
+            dirtyValid_ = false;
             event.accepted = true;
         }
         break;
@@ -177,9 +192,9 @@ void Window::setFocusWidget(Widget* w) {
     }
 }
 
-void Window::onPaint(NativeCanvas* canvas) {
+void Window::onPaint(NativeCanvas* canvas, const Rect& dirtyRect) {
     if (centralWidget_ && canvas) {
-        centralWidget_->paint(canvas);
+        centralWidget_->paint(canvas, dirtyRect);
     }
 }
 

@@ -5,6 +5,7 @@
 
 #include <windows.h>
 #include <gdiplus.h>
+#include <unordered_map>
 #include "platform/native_canvas.h"
 
 namespace ltgui {
@@ -23,10 +24,15 @@ public:
 
     void fillRect(const Rect& rect) override;
     void strokeRect(const Rect& rect, int lineWidth = 1) override;
+    void fillRoundedRect(const Rect& rect, int radius) override;
+    void strokeRoundedRect(const Rect& rect, int radius, int lineWidth = 1) override;
     void drawText(const std::string& text, const Rect& rect, int flags = 0) override;
     void drawLine(const Point& p1, const Point& p2, int lineWidth = 1) override;
     void fillEllipse(const Rect& rect) override;
     void strokeEllipse(const Rect& rect, int lineWidth = 1) override;
+    void drawImage(const std::string& path, const Rect& rect) override;
+    Size imageSize(const std::string& path) override;
+    void drawPixelBuffer(const uint8_t* rgba, int w, int h, const Rect& rect) override;
 
     Size measureText(const std::string& text) override;
 
@@ -34,6 +40,7 @@ private:
     Gdiplus::Color toGdiColor(const Color& c);
     Gdiplus::Font* getOrCreateFont(const Font& f);
     int toGdiFontStyle(FontWeight w, FontStyle s);
+    void flushFontCache();
 
     HWND hwnd_ = nullptr;
     Gdiplus::Bitmap* backbuffer_ = nullptr;
@@ -47,6 +54,12 @@ private:
 
     int canvasWidth_ = 0;
     int canvasHeight_ = 0;
+
+    // Caches
+    std::unordered_map<Font, Gdiplus::Font*> fontCache_;
+    std::unordered_map<std::string, Gdiplus::Image*> imageCache_;
+    Gdiplus::Bitmap* measureBitmap_ = nullptr;
+    Gdiplus::Graphics* measureGraphics_ = nullptr;
 };
 
 } // namespace ltgui

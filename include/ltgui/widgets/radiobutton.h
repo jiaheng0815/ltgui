@@ -18,6 +18,7 @@ public:
     using ToggleCallback = std::function<void(bool)>;
     void onToggled(ToggleCallback cb) { toggleCallback_ = std::move(cb); }
 
+    bool isRadioButton() const override { return true; }
     Size sizeHint() const override;
 
 protected:

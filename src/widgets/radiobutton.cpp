@@ -1,5 +1,6 @@
 #include "widgets/radiobutton.h"
 #include "window.h"
+#include "theme.h"
 #include "platform/native_canvas.h"
 
 namespace ltgui {
@@ -8,21 +9,22 @@ RadioButton::RadioButton(const std::string& text, Widget* parent)
     : Widget(parent), text_(text) {
     style().bgColor = Color::Transparent;
     style().borderWidth = 0;
+    style().fgColor = currentTheme().textPrimary;
 }
 
 void RadioButton::setText(const std::string& text) {
     text_ = text;
+    invalidateSizeHint();
     update();
 }
 
 void RadioButton::setChecked(bool checked) {
     if (checked_ != checked) {
-        // Uncheck siblings in the same parent
         if (checked && parent()) {
             for (auto* child : parent()->children()) {
-                if (child != this) {
-                    auto* rb = dynamic_cast<RadioButton*>(child);
-                    if (rb && rb->isChecked()) {
+                if (child != this && child->isRadioButton()) {
+                    auto* rb = static_cast<RadioButton*>(child);
+                    if (rb->isChecked()) {
                         rb->checked_ = false;
                         rb->update();
                     }
@@ -36,39 +38,39 @@ void RadioButton::setChecked(bool checked) {
 }
 
 Size RadioButton::sizeHint() const {
-    Widget* w = const_cast<RadioButton*>(this);
-    auto* win = w->window();
-    if (win && win->canvas()) {
-        Size textSize = win->canvas()->measureText(text_);
-        return {textSize.width + 24 + style().paddingHorz(),
-                std::max(textSize.height, 16) + style().paddingVert()};
+    if (!sizeHintDirty()) return cachedSizeHint();
+    if (auto* win = window()) {
+        if (auto* c = win->canvas()) {
+            Size textSize = c->measureText(text_);
+            setCachedSizeHint({textSize.width + 24 + style().paddingHorz(),
+                               std::max(textSize.height, 16) + style().paddingVert()});
+            return cachedSizeHint();
+        }
     }
-    return {100, 22};
+    setCachedSizeHint({100, 22});
+    return cachedSizeHint();
 }
 
 void RadioButton::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    Theme t = currentTheme();
 
-    // Radio circle
     int circleSize = 14;
     int circleY = r.y + (r.height - circleSize) / 2;
     Rect circleRect(r.x + 2, circleY, circleSize, circleSize);
 
-    canvas->setColor(Color::White);
+    canvas->setColor(t.bgSecondary);
     canvas->fillEllipse(circleRect);
-
-    canvas->setColor(Color::Gray);
-    canvas->strokeEllipse(circleRect);
+    canvas->setColor(checked_ ? t.accent : t.border);
+    canvas->strokeEllipse(circleRect, checked_ ? 2 : 1);
 
     if (checked_) {
-        // Draw filled dot inside
         Rect dotRect(r.x + 5, circleY + 3, circleSize - 6, circleSize - 6);
-        canvas->setColor(Color::DarkBlue);
+        canvas->setColor(t.accent);
         canvas->fillEllipse(dotRect);
     }
 
-    // Text label
-    canvas->setColor(style().fgColor);
+    canvas->setColor(isEnabled() ? style().fgColor : t.textDisabled);
     canvas->setFont(style().font);
     Rect textRect(r.x + circleSize + 6, r.y, r.width - circleSize - 6, r.height);
     canvas->drawText(text_, textRect,
@@ -80,9 +82,10 @@ bool RadioButton::handleEvent(Event& event) {
 
     if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
         setChecked(true);
+        event.accepted = true;
         return true;
     }
-    return Widget::handleEvent(event);
+    return false;
 }
 
 } // namespace ltgui

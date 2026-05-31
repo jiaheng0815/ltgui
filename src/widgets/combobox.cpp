@@ -1,15 +1,17 @@
 #include "widgets/combobox.h"
+#include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
 
 namespace ltgui {
 
 ComboBox::ComboBox(Widget* parent) : Widget(parent) {
-    style().bgColor = Color::White;
+    style().bgColor = currentTheme().bgSecondary;
+    style().fgColor = currentTheme().textPrimary;
     style().borderWidth = 1;
-    style().borderColor = Color::Gray;
-    style().borderRadius = 2;
-    style().setPadding(6, 4);
+    style().borderColor = currentTheme().border;
+    style().borderRadius = 4;
+    style().setPadding(8, 4);
 }
 
 void ComboBox::addItem(const std::string& item) {
@@ -54,13 +56,15 @@ void ComboBox::setCurrentIndex(int index) {
 }
 
 Size ComboBox::sizeHint() const {
-    return {140, 28};
+    if (!sizeHintDirty()) return cachedSizeHint();
+    setCachedSizeHint({150, 30});
+    return cachedSizeHint();
 }
 
 Rect ComboBox::effectiveGeometry() const {
     Rect r = absoluteRect();
     if (dropped_ && !items_.empty()) {
-        int dropH = std::min(static_cast<int>(items_.size()) * 24, 200);
+        int dropH = std::min(static_cast<int>(items_.size()) * 26, 200);
         r.height += dropH;
     }
     return r;
@@ -68,15 +72,14 @@ Rect ComboBox::effectiveGeometry() const {
 
 void ComboBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    Theme t = currentTheme();
 
-    // Background
     canvas->setColor(style().bgColor);
-    canvas->fillRect(r);
+    canvas->fillRoundedRect(r, style().borderRadius);
 
-    // Border
     if (style().borderWidth > 0) {
-        canvas->setColor(style().borderColor);
-        canvas->strokeRect(r, style().borderWidth);
+        canvas->setColor(dropped_ ? t.accent : style().borderColor);
+        canvas->strokeRoundedRect(r, style().borderRadius, dropped_ ? 2 : style().borderWidth);
     }
 
     // Selected text
@@ -89,36 +92,36 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
     canvas->drawText(displayText, textRect,
                      NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);
 
-    // Dropdown arrow
-    int arrowX = r.right() - 16;
-    int arrowY = r.y + r.height / 2;
-    canvas->setColor(Color::Gray);
-    canvas->drawLine({arrowX, arrowY - 3}, {arrowX + 6, arrowY - 3});
-    canvas->drawLine({arrowX + 3, arrowY - 3}, {arrowX + 3, arrowY + 3});
+    // Dropdown arrow (v-shape)
+    int cx = r.right() - 13;
+    int cy = r.y + r.height / 2;
+    canvas->setColor(t.textSecondary);
+    canvas->drawLine({cx - 4, cy - 2}, {cx, cy + 2}, 2);
+    canvas->drawLine({cx, cy + 2}, {cx + 4, cy - 2}, 2);
 
     // Dropdown list
     if (dropped_ && !items_.empty()) {
-        int dropH = std::min(static_cast<int>(items_.size()) * 24, 200);
-        Rect dropRect(r.x, r.bottom(), r.width, dropH);
+        int dropH = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
+        Rect dropRect(r.x, r.bottom() + 1, r.width, dropH);
 
-        canvas->setColor(Color::White);
-        canvas->fillRect(dropRect);
-        canvas->setColor(Color::Gray);
-        canvas->strokeRect(dropRect);
+        canvas->setColor(t.bgSecondary);
+        canvas->fillRoundedRect(dropRect, 4);
+        canvas->setColor(t.border);
+        canvas->strokeRoundedRect(dropRect, 4);
 
         for (size_t i = 0; i < items_.size(); i++) {
-            int itemY = dropRect.y + static_cast<int>(i) * 24;
-            Rect itemRect(dropRect.x + 2, itemY, dropRect.width - 4, 24);
+            int itemY = dropRect.y + 1 + static_cast<int>(i) * 26;
+            Rect itemRect(dropRect.x + 2, itemY, dropRect.width - 4, 26);
 
             if (static_cast<int>(i) == selected_) {
-                canvas->setColor(Color(0, 120, 215));
-                canvas->fillRect(itemRect);
+                canvas->setColor(t.accent);
+                canvas->fillRoundedRect(itemRect.adjusted(2, 1, -2, -1), 3);
                 canvas->setColor(Color::White);
             } else {
                 canvas->setColor(style().fgColor);
             }
 
-            canvas->drawText(items_[i], itemRect,
+            canvas->drawText(items_[i], itemRect.adjusted(6, 0, -4, 0),
                              NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);
         }
     }
@@ -127,18 +130,16 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
 bool ComboBox::handleEvent(Event& event) {
     if (!isEnabled()) return false;
 
-    int localY = event.pos.y - y();
-
     if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
         if (!dropped_) {
             dropped_ = true;
             update();
         } else {
-            // Check if clicking on a dropdown item
-            int dropH = std::min(static_cast<int>(items_.size()) * 24, 200);
-            int relY = localY - height();
+            int localY = event.pos.y - y();
+            int dropH = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
+            int relY = localY - height() - 1;
             if (relY >= 0 && relY < dropH) {
-                int index = relY / 24;
+                int index = relY / 26;
                 if (index >= 0 && index < static_cast<int>(items_.size())) {
                     setCurrentIndex(index);
                 }
@@ -150,7 +151,7 @@ bool ComboBox::handleEvent(Event& event) {
         return true;
     }
 
-    return Widget::handleEvent(event);
+    return false;
 }
 
 } // namespace ltgui

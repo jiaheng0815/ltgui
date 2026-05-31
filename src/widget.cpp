@@ -77,10 +77,14 @@ void Widget::setGeometry(const Rect& rect) {
 }
 
 Size Widget::sizeHint() const {
+    if (!sizeHintDirty_) return cachedSizeHint_;
     if (layout_) {
-        return layout_->preferredSize(const_cast<Widget*>(this));
+        cachedSizeHint_ = layout_->preferredSize(const_cast<Widget*>(this));
+    } else {
+        cachedSizeHint_ = {100, 24};
     }
-    return {100, 24}; // Default widget size
+    sizeHintDirty_ = false;
+    return cachedSizeHint_;
 }
 
 Size Widget::minimumSize() const {
@@ -124,26 +128,28 @@ void Widget::propagateWindow(Window* window) {
     }
 }
 
-void Widget::paint(NativeCanvas* canvas) {
+void Widget::paint(NativeCanvas* canvas, const Rect& dirtyRect) {
     if (!visible_) return;
 
     Rect abs = absoluteRect();
+    if (!abs.intersects(dirtyRect)) return;
+
     canvas->setColor(style_.bgColor);
     canvas->fillRect(abs);
 
     paintSelf(canvas);
     paintBorder(canvas);
-    paintChildren(canvas);
+    paintChildren(canvas, dirtyRect);
 }
 
 void Widget::paintSelf(NativeCanvas* /*canvas*/) {
     // Override in subclasses
 }
 
-void Widget::paintChildren(NativeCanvas* canvas) {
+void Widget::paintChildren(NativeCanvas* canvas, const Rect& dirtyRect) {
     for (auto* child : children_) {
         if (child->visible_) {
-            child->paint(canvas);
+            child->paint(canvas, dirtyRect);
         }
     }
 }
@@ -165,6 +171,17 @@ void Widget::update() {
     }
 }
 
+void Widget::update(const Rect& dirtyLocalRect) {
+    if (window_) {
+        Rect absDirty = absoluteRect();
+        absDirty.x += dirtyLocalRect.x;
+        absDirty.y += dirtyLocalRect.y;
+        absDirty.width = dirtyLocalRect.width;
+        absDirty.height = dirtyLocalRect.height;
+        window_->invalidate(absDirty);
+    }
+}
+
 bool Widget::handleEvent(Event& event) {
     if (!enabled_ || !visible_) return false;
 
@@ -182,9 +199,11 @@ bool Widget::handleEvent(Event& event) {
             Widget* child = *it;
             if (child->visible_ && child->enabled_ &&
                 child->effectiveGeometry().contains(localPos)) {
-                Event childEvent = event;
-                childEvent.pos = localPos;
-                if (child->handleEvent(childEvent)) {
+                Point savedPos = event.pos;
+                event.pos = localPos;
+                bool handled = child->handleEvent(event);
+                event.pos = savedPos;
+                if (handled) {
                     event.accepted = true;
                     return true;
                 }

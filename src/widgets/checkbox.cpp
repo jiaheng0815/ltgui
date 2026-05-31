@@ -1,5 +1,6 @@
 #include "widgets/checkbox.h"
 #include "window.h"
+#include "theme.h"
 #include "platform/native_canvas.h"
 
 namespace ltgui {
@@ -8,10 +9,12 @@ CheckBox::CheckBox(const std::string& text, Widget* parent)
     : Widget(parent), text_(text) {
     style().bgColor = Color::Transparent;
     style().borderWidth = 0;
+    style().fgColor = currentTheme().textPrimary;
 }
 
 void CheckBox::setText(const std::string& text) {
     text_ = text;
+    invalidateSizeHint();
     update();
 }
 
@@ -24,41 +27,45 @@ void CheckBox::setChecked(bool checked) {
 }
 
 Size CheckBox::sizeHint() const {
-    Widget* w = const_cast<CheckBox*>(this);
-    auto* win = w->window();
-    if (win && win->canvas()) {
-        Size textSize = win->canvas()->measureText(text_);
-        return {textSize.width + 24 + style().paddingHorz(),
-                std::max(textSize.height, 16) + style().paddingVert()};
+    if (!sizeHintDirty()) return cachedSizeHint();
+    if (auto* win = window()) {
+        if (auto* c = win->canvas()) {
+            Size textSize = c->measureText(text_);
+            setCachedSizeHint({textSize.width + 24 + style().paddingHorz(),
+                               std::max(textSize.height, 16) + style().paddingVert()});
+            return cachedSizeHint();
+        }
     }
-    return {100, 22};
+    setCachedSizeHint({100, 22});
+    return cachedSizeHint();
 }
 
 void CheckBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    Theme t = currentTheme();
 
-    // Check box
     int boxSize = 14;
     int boxY = r.y + (r.height - boxSize) / 2;
     Rect boxRect(r.x + 2, boxY, boxSize, boxSize);
 
-    canvas->setColor(Color::White);
-    canvas->fillRect(boxRect);
+    canvas->setColor(t.bgSecondary);
+    canvas->fillRoundedRect(boxRect, 3);
 
-    canvas->setColor(Color::Gray);
-    canvas->strokeRect(boxRect);
+    canvas->setColor(checked_ ? t.accent : t.border);
+    canvas->strokeRoundedRect(boxRect, 3);
 
     if (checked_) {
-        // Draw check mark
-        canvas->setColor(Color::DarkBlue);
-        canvas->drawLine({boxRect.x + 2, boxRect.y + boxSize / 2},
-                         {boxRect.x + boxSize / 2, boxRect.y + boxSize - 2});
-        canvas->drawLine({boxRect.x + boxSize / 2, boxRect.y + boxSize - 2},
-                         {boxRect.x + boxSize - 2, boxRect.y + 2});
+        canvas->setColor(t.accent);
+        canvas->fillRoundedRect(boxRect.adjusted(2, 2, -2, -2), 2);
+        // Checkmark
+        canvas->setColor(Color::White);
+        canvas->drawLine({boxRect.x + 3, boxRect.y + boxSize / 2},
+                         {boxRect.x + boxSize / 2, boxRect.y + boxSize - 3}, 2);
+        canvas->drawLine({boxRect.x + boxSize / 2, boxRect.y + boxSize - 3},
+                         {boxRect.x + boxSize - 3, boxRect.y + 3}, 2);
     }
 
-    // Text label
-    canvas->setColor(style().fgColor);
+    canvas->setColor(isEnabled() ? style().fgColor : t.textDisabled);
     canvas->setFont(style().font);
     Rect textRect(r.x + boxSize + 6, r.y, r.width - boxSize - 6, r.height);
     canvas->drawText(text_, textRect,
@@ -70,9 +77,10 @@ bool CheckBox::handleEvent(Event& event) {
 
     if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
         setChecked(!checked_);
+        event.accepted = true;
         return true;
     }
-    return Widget::handleEvent(event);
+    return false;
 }
 
 } // namespace ltgui

@@ -28,12 +28,13 @@ public:
     Widget* centralWidget() const { return centralWidget_; }
 
     void update();
+    void invalidate(const Rect& rect);
     void* nativeHandle() const;
 
     NativeCanvas* canvas() { return canvas_; }
 
 protected:
-    virtual void onPaint(NativeCanvas* canvas);
+    virtual void onPaint(NativeCanvas* canvas, const Rect& dirtyRect);
 
 private:
     friend class Application;
@@ -46,6 +47,8 @@ private:
     NativeCanvas* canvas_ = nullptr;
     Widget* centralWidget_ = nullptr;
     Widget* focusWidget_ = nullptr;
+    Rect accumulatedDirty_;
+    bool dirtyValid_ = false;
 };
 
 } // namespace ltgui

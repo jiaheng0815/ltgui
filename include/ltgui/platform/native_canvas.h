@@ -19,14 +19,18 @@ public:
 
     virtual void fillRect(const Rect& rect) = 0;
     virtual void strokeRect(const Rect& rect, int lineWidth = 1) = 0;
+    virtual void fillRoundedRect(const Rect& rect, int radius);
+    virtual void strokeRoundedRect(const Rect& rect, int radius, int lineWidth = 1);
     virtual void drawText(const std::string& text, const Rect& rect, int flags = 0) = 0;
     virtual void drawLine(const Point& p1, const Point& p2, int lineWidth = 1) = 0;
     virtual void fillEllipse(const Rect& rect) = 0;
     virtual void strokeEllipse(const Rect& rect, int lineWidth = 1) = 0;
+    virtual void drawImage(const std::string& path, const Rect& rect);
+    virtual Size imageSize(const std::string& path);
+    virtual void drawPixelBuffer(const uint8_t* rgba, int w, int h, const Rect& rect);
 
     virtual Size measureText(const std::string& text) = 0;
 
-    // Text alignment flags
     enum TextFlag {
         AlignLeft    = 0,
         AlignCenter  = 1,
@@ -38,5 +42,22 @@ public:
         WordWrap     = 32
     };
 };
+
+// Default implementations — fall back to basic shapes
+inline void NativeCanvas::fillRoundedRect(const Rect& rect, int /*radius*/) {
+    fillRect(rect);
+}
+inline void NativeCanvas::strokeRoundedRect(const Rect& rect, int /*radius*/, int lineWidth) {
+    strokeRect(rect, lineWidth);
+}
+inline void NativeCanvas::drawImage(const std::string& /*path*/, const Rect& /*rect*/) {
+    // No-op default: platforms override when image support is available
+}
+inline void NativeCanvas::drawPixelBuffer(const uint8_t* /*rgba*/, int /*w*/, int /*h*/, const Rect& /*rect*/) {
+    // No-op default: platforms override when pixel-buffer support is available
+}
+inline Size NativeCanvas::imageSize(const std::string& /*path*/) {
+    return {};
+}
 
 } // namespace ltgui

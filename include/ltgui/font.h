@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <functional>
 
 namespace ltgui {
 
@@ -39,3 +40,16 @@ struct Font {
 };
 
 } // namespace ltgui
+
+namespace std {
+template <>
+struct hash<ltgui::Font> {
+    size_t operator()(const ltgui::Font& f) const noexcept {
+        size_t h = hash<string>{}(f.family);
+        h ^= hash<int>{}(f.size) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= hash<int>{}(static_cast<int>(f.weight)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= hash<int>{}(static_cast<int>(f.style)) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        return h;
+    }
+};
+} // namespace std

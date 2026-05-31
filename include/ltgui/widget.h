@@ -54,14 +54,15 @@ public:
     void setVisible(bool visible);
     bool hasFocus() const { return focused_; }
 
-    // Window access
+    void invalidateSizeHint() { sizeHintDirty_ = true; if (parent_) parent_->invalidateSizeHint(); }
     Window* window() const { return window_; }
     void setWindow(Window* window);
     void claimFocus();
 
     // Painting
-    virtual void paint(NativeCanvas* canvas);
+    virtual void paint(NativeCanvas* canvas, const Rect& dirtyRect);
     void update();
+    void update(const Rect& dirtyLocalRect);
 
     // Events
     virtual bool handleEvent(Event& event);
@@ -69,12 +70,20 @@ public:
     // Hit testing — returns the deepest child at pos (or this)
     virtual Widget* hitTest(const Point& pos);
 
+    // Fast type check — avoids dynamic_cast for sibling iteration (e.g. radio groups)
+    virtual bool isRadioButton() const { return false; }
+
 protected:
     virtual void paintSelf(NativeCanvas* canvas);
-    virtual void paintChildren(NativeCanvas* canvas);
+    virtual void paintChildren(NativeCanvas* canvas, const Rect& dirtyRect);
     virtual void paintBorder(NativeCanvas* canvas);
 
     void propagateWindow(Window* window);
+
+    // sizeHint cache support for subclasses
+    bool sizeHintDirty() const { return sizeHintDirty_; }
+    Size cachedSizeHint() const { return cachedSizeHint_; }
+    void setCachedSizeHint(const Size& s) const { cachedSizeHint_ = s; sizeHintDirty_ = false; }
 
 private:
     Widget* parent_ = nullptr;
@@ -87,6 +96,9 @@ private:
     bool focused_ = false;
     bool needsLayout_ = true;
     Window* window_ = nullptr;
+
+    mutable Size cachedSizeHint_;
+    mutable bool sizeHintDirty_ = true;
 };
 
 } // namespace ltgui

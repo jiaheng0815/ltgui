@@ -35,6 +35,11 @@ Win32Canvas::~Win32Canvas() {
     delete currentFont_;
     delete brush_;
     delete pen_;
+    delete measureBitmap_;
+    delete measureGraphics_;
+    // Flush caches
+    for (auto& pair : fontCache_) delete pair.second;
+    for (auto& pair : imageCache_) delete pair.second;
     shutdownGdiPlus();
 }
 
@@ -72,36 +77,31 @@ void Win32Canvas::endPaint() {
 }
 
 void Win32Canvas::setColor(const Color& color) {
-    currentColor_ = toGdiColor(color);
-    if (brush_) {
-        delete brush_;
-        brush_ = new Gdiplus::SolidBrush(currentColor_);
-    }
-    if (pen_) {
-        pen_->SetColor(currentColor_);
-    }
+    Gdiplus::Color newColor = toGdiColor(color);
+    if (newColor.GetValue() == currentColor_.GetValue()) return;
+    currentColor_ = newColor;
+    // Reuse brush and pen — only update their color
+    brush_->SetColor(currentColor_);
+    pen_->SetColor(currentColor_);
 }
 
 void Win32Canvas::setFont(const Font& font) {
+    if (font == currentFontDesc_) return;
     currentFontDesc_ = font;
-    if (currentFont_) {
-        delete currentFont_;
-        currentFont_ = nullptr;
-    }
     currentFont_ = getOrCreateFont(font);
 }
 
 Gdiplus::Font* Win32Canvas::getOrCreateFont(const Font& f) {
-    if (currentFont_) {
-        delete currentFont_;
+    auto it = fontCache_.find(f);
+    if (it != fontCache_.end()) {
+        return it->second;
     }
 
     int len = MultiByteToWideChar(CP_UTF8, 0, f.family.c_str(), -1, nullptr, 0);
     std::wstring wfamily(len, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, f.family.c_str(), -1, &wfamily[0], len);
-    if (len > 0) wfamily.resize(len - 1);  // Remove null terminator
+    if (len > 0) wfamily.resize(len - 1);
 
-    // Use LOGFONTW for better CJK/charset support
     HDC screenDC = GetDC(nullptr);
     LOGFONTW lf = {};
     lf.lfHeight = -f.size;
@@ -115,6 +115,8 @@ Gdiplus::Font* Win32Canvas::getOrCreateFont(const Font& f) {
 
     Gdiplus::Font* font = new Gdiplus::Font(screenDC, &lf);
     ReleaseDC(nullptr, screenDC);
+
+    fontCache_[f] = font;
     return font;
 }
 
@@ -206,6 +208,88 @@ void Win32Canvas::strokeEllipse(const Rect& rect, int lineWidth) {
     graphics_->DrawEllipse(pen_, rect.x, rect.y, rect.width, rect.height);
 }
 
+void Win32Canvas::fillRoundedRect(const Rect& rect, int radius) {
+    if (!graphics_ || !brush_) return;
+    int r = std::min(radius, std::min(rect.width, rect.height) / 2);
+    if (r <= 0) { fillRect(rect); return; }
+    int x = rect.x, y = rect.y, w = rect.width, h = rect.height;
+    int d = r * 2;
+    Gdiplus::GraphicsPath path;
+    path.AddArc(x, y, d, d, 180, 90);
+    path.AddArc(x + w - d, y, d, d, 270, 90);
+    path.AddArc(x + w - d, y + h - d, d, d, 0, 90);
+    path.AddArc(x, y + h - d, d, d, 90, 90);
+    path.CloseFigure();
+    graphics_->FillPath(brush_, &path);
+}
+
+void Win32Canvas::strokeRoundedRect(const Rect& rect, int radius, int lineWidth) {
+    if (!graphics_ || !pen_) return;
+    int r = std::min(radius, std::min(rect.width, rect.height) / 2);
+    if (r <= 0) { strokeRect(rect, lineWidth); return; }
+    int x = rect.x, y = rect.y, w = rect.width, h = rect.height;
+    int d = r * 2;
+    Gdiplus::GraphicsPath path;
+    path.AddArc(x, y, d, d, 180, 90);
+    path.AddArc(x + w - d, y, d, d, 270, 90);
+    path.AddArc(x + w - d, y + h - d, d, d, 0, 90);
+    path.AddArc(x, y + h - d, d, d, 90, 90);
+    path.CloseFigure();
+    pen_->SetWidth(static_cast<Gdiplus::REAL>(lineWidth));
+    graphics_->DrawPath(pen_, &path);
+}
+
+void Win32Canvas::drawImage(const std::string& path, const Rect& rect) {
+    if (!graphics_) return;
+
+    // Cache lookup
+    auto it = imageCache_.find(path);
+    if (it == imageCache_.end()) {
+        int len = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+        std::wstring wpath(len, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &wpath[0], len);
+        if (len > 0) wpath.resize(len - 1);
+        Gdiplus::Image* img = new Gdiplus::Image(wpath.c_str());
+        if (img->GetLastStatus() != Gdiplus::Ok) {
+            delete img;
+            return;
+        }
+        it = imageCache_.insert({path, img}).first;
+    }
+    graphics_->DrawImage(it->second, rect.x, rect.y, rect.width, rect.height);
+}
+
+Size Win32Canvas::imageSize(const std::string& path) {
+    auto it = imageCache_.find(path);
+    if (it != imageCache_.end()) {
+        return {static_cast<int>(it->second->GetWidth()),
+                static_cast<int>(it->second->GetHeight())};
+    }
+
+    int len = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+    std::wstring wpath(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, &wpath[0], len);
+    if (len > 0) wpath.resize(len - 1);
+    Gdiplus::Image* image = new Gdiplus::Image(wpath.c_str());
+    if (image->GetLastStatus() == Gdiplus::Ok) {
+        int w = static_cast<int>(image->GetWidth());
+        int h = static_cast<int>(image->GetHeight());
+        imageCache_[path] = image;
+        return {w, h};
+    }
+    delete image;
+    return {};
+}
+
+void Win32Canvas::drawPixelBuffer(const uint8_t* rgba, int w, int h, const Rect& rect) {
+    if (!graphics_ || !rgba || w <= 0 || h <= 0) return;
+
+    Gdiplus::Bitmap bitmap(w, h, w * 4, PixelFormat32bppARGB, const_cast<uint8_t*>(rgba));
+    if (bitmap.GetLastStatus() == Gdiplus::Ok) {
+        graphics_->DrawImage(&bitmap, rect.x, rect.y, rect.width, rect.height);
+    }
+}
+
 Size Win32Canvas::measureText(const std::string& text) {
     int len = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
     std::wstring wtext(len, L'\0');
@@ -217,11 +301,15 @@ Size Win32Canvas::measureText(const std::string& text) {
         font = getOrCreateFont(Font("Segoe UI", 12));
     }
 
-    // Create a temporary bitmap + graphics for measurement
-    Gdiplus::Bitmap temp(1, 1, PixelFormat32bppARGB);
-    Gdiplus::Graphics tempGraphics(&temp);
+    // Reuse a small measurement bitmap instead of creating one per call
+    if (!measureBitmap_) {
+        measureBitmap_ = new Gdiplus::Bitmap(1, 1, PixelFormat32bppARGB);
+        measureGraphics_ = new Gdiplus::Graphics(measureBitmap_);
+    }
+
     Gdiplus::RectF boundRect;
-    tempGraphics.MeasureString(wtext.c_str(), -1, font, Gdiplus::PointF(0, 0), &boundRect);
+    measureGraphics_->MeasureString(wtext.c_str(), -1, font,
+                                     Gdiplus::PointF(0, 0), &boundRect);
 
     return {static_cast<int>(boundRect.Width + 0.5f),
             static_cast<int>(boundRect.Height + 0.5f)};

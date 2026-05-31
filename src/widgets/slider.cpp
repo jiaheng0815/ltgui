@@ -1,4 +1,5 @@
 #include "widgets/slider.h"
+#include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
 
@@ -26,85 +27,104 @@ void Slider::setRange(int min, int max) {
 }
 
 Size Slider::sizeHint() const {
-    return {150, 28};
+    if (!sizeHintDirty()) return cachedSizeHint();
+    setCachedSizeHint({150, 28});
+    return cachedSizeHint();
 }
 
 int Slider::thumbPos() const {
     int range = max_ - min_;
-    if (range == 0) return 0;
-    int trackW = width() - 16;
-    return 8 + (trackW * (value_ - min_)) / range;
+    if (range == 0) return 16;
+    int usableW = width() - 32; // track margins (8+8) + thumb radius (8+8)
+    return 16 + (usableW * (value_ - min_)) / range;
 }
 
 void Slider::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    Theme t = currentTheme();
+
+    int trackW = r.width - 16;
+    int trackX = r.x + 8;
+    int trackY = r.y + r.height / 2 - 3;
 
     // Track
-    int trackY = r.y + r.height / 2 - 2;
-    Rect trackRect(r.x + 8, trackY, r.width - 16, 4);
-    canvas->setColor(Color::LightGray);
-    canvas->fillRect(trackRect);
-    canvas->setColor(Color::Gray);
-    canvas->strokeRect(trackRect);
+    Rect trackRect(trackX, trackY, trackW, 6);
+    canvas->setColor(t.bgTertiary);
+    canvas->fillRoundedRect(trackRect, 3);
 
-    // Filled portion
+    // Filled portion (tpos is widget-local, so fill width = tpos - 8)
     int tpos = thumbPos();
-    Rect filledRect(r.x + 8, trackY, tpos - 8, 4);
-    canvas->setColor(Color(0, 120, 215));
-    canvas->fillRect(filledRect);
+    int fillW = tpos - 8;
+    if (fillW > 0) {
+        Rect filledRect(trackX, trackY, fillW, 6);
+        canvas->setColor(t.accent);
+        canvas->fillRoundedRect(filledRect, 3);
+        // Clear the right rounded corner of the fill when it overlaps
+        if (fillW < trackW - 3) {
+            canvas->fillRect(Rect(trackX + fillW - 3, trackY, 3, 6));
+        }
+    }
 
-    // Thumb
-    int thumbSize = 14;
-    Rect thumbRect(r.x + tpos - thumbSize / 2, r.y + (r.height - thumbSize) / 2, thumbSize, thumbSize);
-    canvas->setColor(Color::ButtonFace);
+    // Thumb (tpos is widget-local, convert to absolute)
+    int thumbSize = 16;
+    int thumbAbsX = r.x + tpos - thumbSize / 2;
+    int thumbY = r.y + (r.height - thumbSize) / 2;
+    Rect thumbRect(thumbAbsX, thumbY, thumbSize, thumbSize);
+
+    canvas->setColor(t.bgSecondary);
     canvas->fillEllipse(thumbRect);
-    canvas->setColor(Color::Gray);
-    canvas->strokeEllipse(thumbRect);
+    canvas->setColor(hovered_ || dragging_ ? t.accent : t.border);
+    canvas->strokeEllipse(thumbRect, 2);
 }
 
 bool Slider::handleEvent(Event& event) {
     if (!isEnabled()) return false;
 
     int localX = event.pos.x - x();
-    int localY = event.pos.y - y();
 
     switch (event.type) {
+    case EventType::MouseMove: {
+        int thumbSize = 16;
+        int tpos = thumbPos();
+        // Thumb center in absolute coordinates
+        int thumbCenterX = x() + tpos;
+        int thumbCenterY = y() + height() / 2;
+        int dx = event.pos.x - thumbCenterX;
+        int dy = event.pos.y - thumbCenterY;
+        bool over = (dx * dx + dy * dy) < (thumbSize * thumbSize / 2);
+        if (over != hovered_) {
+            hovered_ = over;
+            update();
+        }
+        if (dragging_) {
+            int trackW = width() - 16;
+            int clickX = std::max(0, std::min(trackW, localX - 8));
+            int range = max_ - min_;
+            if (range > 0) setValue(min_ + (clickX * range) / trackW);
+        }
+        event.accepted = true;
+        return true;
+    }
     case EventType::MouseDown:
         if (event.button == MouseButton::Left) {
             dragging_ = true;
-            // Calculate value from click position
             int trackW = width() - 16;
-            int clickX = localX - 8;
-            clickX = std::max(0, std::min(trackW, clickX));
+            int clickX = std::max(0, std::min(trackW, localX - 8));
             int range = max_ - min_;
-            if (range > 0) {
-                setValue(min_ + (clickX * range) / trackW);
-            }
+            if (range > 0) setValue(min_ + (clickX * range) / trackW);
             event.accepted = true;
             return true;
         }
         break;
     case EventType::MouseUp:
         dragging_ = false;
+        update();
         event.accepted = true;
         return true;
-    case EventType::MouseMove:
-        if (dragging_) {
-            int trackW = width() - 16;
-            int clickX = localX - 8;
-            clickX = std::max(0, std::min(trackW, clickX));
-            int range = max_ - min_;
-            if (range > 0) {
-                setValue(min_ + (clickX * range) / trackW);
-            }
-            event.accepted = true;
-            return true;
-        }
-        break;
     default:
         break;
     }
-    return Widget::handleEvent(event);
+    return false;
 }
 
 } // namespace ltgui
