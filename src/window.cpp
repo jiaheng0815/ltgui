@@ -42,7 +42,19 @@ bool Window::create(int width, int height, const std::string& title) {
         return false;
     }
 
+    // Always get native canvas as fallback first
     canvas_ = nativeWindow_->getCanvas();
+
+    // Try GPU acceleration
+    gpuCanvas_ = std::make_unique<gpu::GpuCanvas>();
+    if (gpuCanvas_->initialize(nativeWindow_->nativeHandle(), width, height)) {
+        canvas_ = gpuCanvas_.get();
+        useGpu_ = true;
+        printf("[ltgui] GPU acceleration enabled: %s\n", gpuCanvas_->gpuInfo().name.c_str());
+    } else {
+        gpuCanvas_.reset();
+        printf("[ltgui] Using software renderer (GDI+/X11)\n");
+    }
 
     return true;
 }

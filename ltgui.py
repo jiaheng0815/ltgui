@@ -71,7 +71,7 @@ def get_platform_libs(platform):
         return ["-lgdi32", "-lgdiplus", "-luser32", "-lcomctl32", "-lole32", "-limm32",
                 "-ld3d11", "-ldxgi", "-ld3dcompiler"]
     elif platform == "linux":
-        return ["-lX11", "-lXft", "-lXrender", "-lfontconfig"]
+        return ["-lX11", "-lXft", "-lXrender", "-lfontconfig", "-lEGL", "-lGLESv2"]
     elif platform == "macos":
         return ["-framework", "Cocoa", "-framework", "CoreGraphics", "-framework", "CoreText"]
     return []

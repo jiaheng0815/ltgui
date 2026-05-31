@@ -3,6 +3,7 @@
 #include "event.h"
 #include "platform/native_window.h"
 #include "platform/native_canvas.h"
+#include "platform/gpu/gpu_canvas.h"
 #include <string>
 #include <memory>
 
@@ -32,6 +33,7 @@ public:
     void* nativeHandle() const;
 
     NativeCanvas* canvas() { return canvas_; }
+    bool isGpuAccelerated() const { return useGpu_; }
 
 protected:
     virtual void onPaint(NativeCanvas* canvas, const Rect& dirtyRect);
@@ -44,11 +46,13 @@ private:
     void setFocusWidget(Widget* w);
 
     std::unique_ptr<NativeWindow> nativeWindow_;
+    std::unique_ptr<gpu::GpuCanvas> gpuCanvas_;
     NativeCanvas* canvas_ = nullptr;
     Widget* centralWidget_ = nullptr;
     Widget* focusWidget_ = nullptr;
     Rect accumulatedDirty_;
     bool dirtyValid_ = false;
+    bool useGpu_ = false;
 };
 
 } // namespace ltgui

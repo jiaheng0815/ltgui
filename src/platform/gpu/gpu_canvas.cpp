@@ -10,8 +10,9 @@
 namespace ltgui {
 namespace gpu {
 
-// Factory function declared in d3d11_device.cpp
+// Factory functions
 GpuDevice* CreateD3D11Device();
+GpuDevice* CreateGLDevice();
 
 // ---- GDI+ helper for image decoding (Windows only) ----
 #ifdef LTGUI_PLATFORM_WINDOWS
@@ -56,9 +57,10 @@ bool GpuCanvas::initialize(void* windowHandle, int width, int height) {
 
 #ifdef LTGUI_PLATFORM_WINDOWS
     device_ = CreateD3D11Device();
+#elif defined(LTGUI_PLATFORM_LINUX)
+    device_ = CreateGLDevice();
 #else
     (void)windowHandle;
-    printf("[GpuCanvas] OpenGL backend not yet implemented.\n");
     device_ = nullptr;
 #endif
 
