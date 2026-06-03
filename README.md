@@ -1,6 +1,6 @@
 # ltgui
 
-[![CI](https://github.com/ltgui-ui/ltgui/actions/workflows/ci.yml/badge.svg)](https://github.com/ltgui-ui/ltgui/actions/workflows/ci.yml)
+[![CI](https://github.com/jiaheng0815/ltgui/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaheng0815/ltgui/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A from-scratch, cross-platform retained-mode GUI framework in C++17.
