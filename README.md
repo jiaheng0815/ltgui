@@ -1,8 +1,5 @@
 # ltgui
 
-[![CI](https://github.com/jiaheng0815/ltgui/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaheng0815/ltgui/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
 A from-scratch, cross-platform retained-mode GUI framework in C++17.
 Zero dependencies beyond platform APIs.
 一个从零构建的跨平台保留模式 C++17 GUI 框架，除平台 API 外零外部依赖。
