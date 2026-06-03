@@ -35,7 +35,7 @@ struct Font {
 
     static Font systemDefault(int size = 12) {
 #ifdef LTGUI_PLATFORM_WINDOWS
-        return {"SimFang", size};
+        return {"Deng", size};
 #elif defined(LTGUI_PLATFORM_MACOS)
         return {".AppleSystemUIFont", size};
 #else

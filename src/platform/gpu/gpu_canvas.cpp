@@ -83,9 +83,11 @@ bool GpuCanvas::initialize(void* windowHandle, int width, int height) {
     // Load a default system font so text rendering works out of the box.
     // Try platform-specific system font paths; if none work, text will be
     // invisible (caller should use loadFontFile to provide a font).
-    Font defaultFont = Font::systemDefault(12);
+    Font defaultFont = Font("Deng", 12);
     const char* fontPaths[] = {
 #ifdef LTGUI_PLATFORM_WINDOWS
+        "D:/code/ltgui/font/Deng.ttf",
+        "font/Deng.ttf",
         "C:/Windows/Fonts/simfang.ttf",
         "C:/Windows/Fonts/simsun.ttf",
         "C:/Windows/Fonts/msyh.ttf",
