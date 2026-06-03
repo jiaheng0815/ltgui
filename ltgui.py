@@ -371,7 +371,7 @@ def build_example(name, platform, is_release, lib_path, compiler, is_msvc):
     result = subprocess.run(flags, capture_output=True, text=True)
     if result.returncode != 0:
         cprint(f"  Error building {name}:", Color.RED, bold=True)
-        cprint(result.stderr, Color.RED)
+        cprint(result.stderr or result.stdout or "(no output)", Color.RED)
         return False
 
     cprint(f"  Created {exe_path}", Color.GREEN)
@@ -414,7 +414,7 @@ def build_app(name, platform, is_release, lib_path, compiler, is_msvc):
     result = subprocess.run(flags, capture_output=True, text=True)
     if result.returncode != 0:
         cprint(f"  Error building {name}:", Color.RED, bold=True)
-        cprint(result.stderr, Color.RED)
+        cprint(result.stderr or result.stdout or "(no output)", Color.RED)
         return False
 
     cprint(f"  Created {exe_path}", Color.GREEN)
