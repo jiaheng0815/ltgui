@@ -4,6 +4,9 @@
 #include "animation.h"
 
 #ifdef LTGUI_PLATFORM_WINDOWS
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #elif defined(LTGUI_PLATFORM_LINUX)
 #include "platform/x11/x11_window.h"

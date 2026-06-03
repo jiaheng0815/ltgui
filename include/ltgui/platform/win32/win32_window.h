@@ -3,6 +3,9 @@
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 #include "platform/native_window.h"
 
