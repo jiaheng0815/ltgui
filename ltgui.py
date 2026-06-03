@@ -68,15 +68,23 @@ def check_platform_clean():
 
 # --- Compiler resolution ---
 def resolve_compiler(compiler_arg):
-    """Resolve --compiler flag to the C++ compiler binary name."""
+    """Resolve --compiler flag to compiler ID."""
     if compiler_arg is None:
-        return "clang++"
+        # Auto-detect: prefer clang++, then MSVC on Windows, then g++
+        if sys.platform == "win32":
+            if shutil.which("clang++"):
+                return ("clang++", False)
+            if shutil.which("cl"):
+                return ("cl", True)  # MSVC
+        return ("clang++", False)
     c = compiler_arg.lower()
     if c in ("clang", "clang++"):
-        return "clang++"
+        return ("clang++", False)
     if c in ("gcc", "g++", "gcc++"):
-        return "g++"
-    return compiler_arg  # custom path
+        return ("g++", False)
+    if c in ("msvc", "cl", "msbuild"):
+        return ("cl", True)
+    return (compiler_arg, False)  # custom path
 
 # --- Flag parsing ---
 def parse_flags(args):
@@ -102,8 +110,11 @@ def parse_flags(args):
     return positional, flags
 
 # --- Platform libs / flags ---
-def get_platform_libs(platform):
+def get_platform_libs(platform, is_msvc=False):
     if platform == "windows":
+        if is_msvc:
+            return ["gdi32.lib", "gdiplus.lib", "user32.lib", "comctl32.lib",
+                    "ole32.lib", "imm32.lib", "d3d11.lib", "dxgi.lib", "d3dcompiler.lib"]
         return ["-lgdi32", "-lgdiplus", "-luser32", "-lcomctl32", "-lole32", "-limm32",
                 "-ld3d11", "-ldxgi", "-ld3dcompiler"]
     elif platform == "linux":
@@ -112,9 +123,11 @@ def get_platform_libs(platform):
         return ["-framework", "Cocoa", "-framework", "CoreGraphics", "-framework", "CoreText"]
     return []
 
-def get_platform_flags(platform):
+def get_platform_flags(platform, is_msvc=False):
     if platform == "windows":
-        return ["-D_UNICODE", "-DUNICODE"]
+        if is_msvc:
+            return ["/D_UNICODE", "/DUNICODE", "/DLTGUI_PLATFORM_WINDOWS"]
+        return ["-D_UNICODE", "-DUNICODE", "-DLTGUI_PLATFORM_WINDOWS"]
     elif platform == "linux":
         return ["-I/usr/include/freetype2"]
     return []
@@ -177,29 +190,38 @@ def _object_is_fresh(obj_path, src_path):
             return False
     return True
 
-def compile_source(src_path, platform, is_release, compiler, pic=False):
+def compile_source(src_path, platform, is_release, compiler, is_msvc, pic=False):
     rel = os.path.relpath(src_path, SRC_DIR)
-    obj_path = os.path.join(OBJ_DIR, rel + ".o")
+    ext = ".obj" if is_msvc else ".o"
+    obj_path = os.path.join(OBJ_DIR, rel + ext)
     os.makedirs(os.path.dirname(obj_path), exist_ok=True)
 
     if _object_is_fresh(obj_path, src_path):
         return obj_path
 
-    flags = [compiler, "-c", "-std=c++17", "-fexec-charset=UTF-8"]
-    if pic:
-        flags.append("-fPIC")
-    if is_release:
-        flags += ["-O2", "-DNDEBUG"]
+    if is_msvc:
+        flags = [compiler, "/nologo", "/c", "/std:c++17", "/EHsc"]
+        if is_release:
+            flags += ["/O2", "/DNDEBUG"]
+        else:
+            flags += ["/Zi", "/Od", "/D_DEBUG"]
+        flags += ["/W3"]
+        flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
+        flags += get_platform_flags(platform, is_msvc=True)
+        flags += [src_path, f"/Fo{obj_path}"]
     else:
-        flags += ["-g", "-O0"]
-
-    flags += ["-Wall", "-Wextra", "-Wpedantic"]
-    # Not errors in ltgui, but noisy from vendor/system headers:
-    flags += ["-Wno-unused-parameter", "-Wno-missing-field-initializers"]
-
-    flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
-    flags += get_platform_flags(platform)
-    flags += [src_path, "-o", obj_path]
+        flags = [compiler, "-c", "-std=c++17", "-fexec-charset=UTF-8"]
+        if pic:
+            flags.append("-fPIC")
+        if is_release:
+            flags += ["-O2", "-DNDEBUG"]
+        else:
+            flags += ["-g", "-O0"]
+        flags += ["-Wall", "-Wextra", "-Wpedantic"]
+        flags += ["-Wno-unused-parameter", "-Wno-missing-field-initializers"]
+        flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
+        flags += get_platform_flags(platform)
+        flags += [src_path, "-o", obj_path]
 
     cprint(f"  Compiling {rel}...", Color.CYAN)
     result = subprocess.run(flags, capture_output=True, text=True)
@@ -262,7 +284,7 @@ def build_shared_lib(platform, is_release, compiler):
     cprint(f"  Created {dll_path}", Color.GREEN)
     return dll_path
 
-def build_lib(platform, is_release, compiler):
+def build_lib(platform, is_release, compiler, is_msvc):
     sources = get_source_files()
     if not sources:
         cprint("No source files found in src/", Color.RED)
@@ -274,7 +296,7 @@ def build_lib(platform, is_release, compiler):
 
     object_files = []
     for src in sources:
-        obj = compile_source(src, platform, is_release, compiler)
+        obj = compile_source(src, platform, is_release, compiler, is_msvc)
         if obj:
             object_files.append(obj)
         else:
@@ -286,8 +308,11 @@ def build_lib(platform, is_release, compiler):
 
     cprint(f"  Creating {lib_name}...", Color.CYAN)
 
-    if platform == "windows" and "clang" in compiler:
-        # llvm-lib for clang toolchain on Windows
+    if is_msvc:
+        result = subprocess.run(
+            ["lib", "/nologo", f"/OUT:{lib_path}"] + object_files,
+            capture_output=True, text=True)
+    elif platform == "windows" and "clang" in compiler:
         result = subprocess.run(
             ["llvm-lib"] + object_files + ["/OUT:" + lib_path],
             capture_output=True, text=True)
@@ -307,7 +332,7 @@ def build_lib(platform, is_release, compiler):
     cprint(f"  Created {lib_path}", Color.GREEN)
     return lib_path
 
-def build_example(name, platform, is_release, lib_path, compiler):
+def build_example(name, platform, is_release, lib_path, compiler, is_msvc):
     src = os.path.join(EXAMPLES_DIR, name + ".cpp")
     if not os.path.exists(src):
         cprint(f"Example '{name}' not found at {src}", Color.RED)
@@ -315,17 +340,29 @@ def build_example(name, platform, is_release, lib_path, compiler):
 
     exe_path = os.path.join(BUILD_DIR, name + (".exe" if platform == "windows" else ""))
 
-    flags = [compiler, "-std=c++17", "-fexec-charset=UTF-8"]
-    if is_release:
-        flags += ["-O2", "-DNDEBUG"]
+    if is_msvc:
+        flags = [compiler, "/nologo", "/std:c++17", "/EHsc",
+                 f"/Fe:{exe_path}"]
+        if is_release:
+            flags += ["/O2", "/DNDEBUG"]
+        else:
+            flags += ["/Zi", "/Od", "/D_DEBUG"]
+        flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
+        flags += get_platform_flags(platform, is_msvc=True)
+        flags += [src, lib_path]
+        flags += get_platform_libs(platform, is_msvc=True)
+        flags += ["/link", "/SUBSYSTEM:CONSOLE"]
     else:
-        flags += ["-g", "-O0"]
-
-    flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
-    flags += get_platform_flags(platform)
-    flags += [src, lib_path]
-    flags += get_platform_libs(platform)
-    flags += ["-o", exe_path]
+        flags = [compiler, "-std=c++17", "-fexec-charset=UTF-8"]
+        if is_release:
+            flags += ["-O2", "-DNDEBUG"]
+        else:
+            flags += ["-g", "-O0"]
+        flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
+        flags += get_platform_flags(platform)
+        flags += [src, lib_path]
+        flags += get_platform_libs(platform)
+        flags += ["-o", exe_path]
 
     cprint(f"  Building example: {name}...", Color.CYAN)
     result = subprocess.run(flags, capture_output=True, text=True)
@@ -337,7 +374,7 @@ def build_example(name, platform, is_release, lib_path, compiler):
     cprint(f"  Created {exe_path}", Color.GREEN)
     return True
 
-def build_app(name, platform, is_release, lib_path, compiler):
+def build_app(name, platform, is_release, lib_path, compiler, is_msvc):
     src = os.path.join(APP_DIR, name + ".cpp")
     if not os.path.exists(src):
         cprint(f"App '{name}' not found at {src}", Color.RED)
@@ -345,17 +382,29 @@ def build_app(name, platform, is_release, lib_path, compiler):
 
     exe_path = os.path.join(BUILD_DIR, name + (".exe" if platform == "windows" else ""))
 
-    flags = [compiler, "-std=c++17", "-fexec-charset=UTF-8"]
-    if is_release:
-        flags += ["-O2", "-DNDEBUG"]
+    if is_msvc:
+        flags = [compiler, "/nologo", "/std:c++17", "/EHsc",
+                 f"/Fe:{exe_path}"]
+        if is_release:
+            flags += ["/O2", "/DNDEBUG"]
+        else:
+            flags += ["/Zi", "/Od", "/D_DEBUG"]
+        flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
+        flags += get_platform_flags(platform, is_msvc=True)
+        flags += [src, lib_path]
+        flags += get_platform_libs(platform, is_msvc=True)
+        flags += ["/link", "/SUBSYSTEM:CONSOLE"]
     else:
-        flags += ["-g", "-O0"]
-
-    flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
-    flags += get_platform_flags(platform)
-    flags += [src, lib_path]
-    flags += get_platform_libs(platform)
-    flags += ["-o", exe_path]
+        flags = [compiler, "-std=c++17", "-fexec-charset=UTF-8"]
+        if is_release:
+            flags += ["-O2", "-DNDEBUG"]
+        else:
+            flags += ["-g", "-O0"]
+        flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
+        flags += get_platform_flags(platform)
+        flags += [src, lib_path]
+        flags += get_platform_libs(platform)
+        flags += ["-o", exe_path]
 
     cprint(f"  Building app: {name}...", Color.CYAN)
     result = subprocess.run(flags, capture_output=True, text=True)
@@ -687,7 +736,7 @@ def export_sdk(lib_path, target_dir, platform):
 def cmd_build(positional, flags):
     is_release = len(positional) >= 2 and positional[1] == "release"
 
-    compiler = resolve_compiler(flags.get("compiler"))
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
     single_example = flags.get("example")
     single_app = flags.get("app")
 
@@ -704,21 +753,21 @@ def cmd_build(positional, flags):
         cprint("\nBuild complete.", Color.GREEN, bold=True)
         return
 
-    lib_path = build_lib(platform, is_release, compiler)
+    lib_path = build_lib(platform, is_release, compiler, is_msvc)
     if not lib_path:
         return
 
     if single_example:
-        build_example(single_example, platform, is_release, lib_path, compiler)
+        build_example(single_example, platform, is_release, lib_path, compiler, is_msvc)
     elif single_app:
-        build_app(single_app, platform, is_release, lib_path, compiler)
+        build_app(single_app, platform, is_release, lib_path, compiler, is_msvc)
     else:
-        build_apps(platform, is_release, lib_path, compiler)
-        build_examples(platform, is_release, lib_path, compiler)
+        build_apps(platform, is_release, lib_path, compiler, is_msvc)
+        build_examples(platform, is_release, lib_path, compiler, is_msvc)
 
     cprint("\nBuild complete.", Color.GREEN, bold=True)
 
-def build_apps(platform, is_release, lib_path, compiler):
+def build_apps(platform, is_release, lib_path, compiler, is_msvc):
     if not os.path.exists(APP_DIR):
         return True
 
@@ -728,11 +777,11 @@ def build_apps(platform, is_release, lib_path, compiler):
 
     cprint("Building apps...", Color.BLUE, bold=True)
     for app in apps:
-        if not build_app(app, platform, is_release, lib_path, compiler):
+        if not build_app(app, platform, is_release, lib_path, compiler, is_msvc):
             return False
     return True
 
-def build_examples(platform, is_release, lib_path, compiler):
+def build_examples(platform, is_release, lib_path, compiler, is_msvc):
     if not os.path.exists(EXAMPLES_DIR):
         return True
 
@@ -742,7 +791,7 @@ def build_examples(platform, is_release, lib_path, compiler):
 
     cprint("Building examples...", Color.BLUE, bold=True)
     for ex in examples:
-        if not build_example(ex, platform, is_release, lib_path, compiler):
+        if not build_example(ex, platform, is_release, lib_path, compiler, is_msvc):
             return False
     return True
 
@@ -770,7 +819,7 @@ def cmd_run(positional, flags):
         return
 
     name = positional[1]
-    compiler = resolve_compiler(flags.get("compiler"))
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
 
     # Determine if it's an app or example
     app_src = os.path.join(APP_DIR, name + ".cpp")
@@ -784,15 +833,15 @@ def cmd_run(positional, flags):
     check_platform_clean()
     platform = detect_platform()
 
-    lib_path = build_lib(platform, is_release=False, compiler=compiler)
+    lib_path = build_lib(platform, is_release=False, compiler=compiler, is_msvc=is_msvc)
     if not lib_path:
         return
 
     if is_app:
-        if not build_app(name, platform, False, lib_path, compiler):
+        if not build_app(name, platform, False, lib_path, compiler, is_msvc):
             return
     else:
-        if not build_example(name, platform, False, lib_path, compiler):
+        if not build_example(name, platform, False, lib_path, compiler, is_msvc):
             return
 
     exe_name = name + (".exe" if platform == "windows" else "")
@@ -803,7 +852,7 @@ def cmd_run(positional, flags):
 
 def cmd_test(positional, flags):
     """Build and run all tests in test/."""
-    compiler = resolve_compiler(flags.get("compiler"))
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
 
     check_platform_clean()
     platform = detect_platform()
@@ -813,7 +862,7 @@ def cmd_test(positional, flags):
         cprint("No test files found in test/", Color.YELLOW)
         return
 
-    lib_path = build_lib(platform, is_release=False, compiler=compiler)
+    lib_path = build_lib(platform, is_release=False, compiler=compiler, is_msvc=is_msvc)
     if not lib_path:
         cprint("Library build failed, cannot run tests.", Color.RED)
         return
@@ -828,14 +877,24 @@ def cmd_test(positional, flags):
         exe_name = tf[:-4] + (".exe" if platform == "windows" else "")
         exe_path = os.path.join(BUILD_DIR, exe_name)
 
-        flags_list = [compiler, "-std=c++17", "-g", "-O0"]
-        if platform == "windows":
-            flags_list.append("-mconsole")
-        flags_list += ["-I", INCLUDE_DIR, "-I", os.path.join(SCRIPT_DIR, "vendor")]
-        flags_list += get_platform_flags(platform)
-        flags_list += [src, lib_path]
-        flags_list += get_platform_libs(platform)
-        flags_list += ["-o", exe_path]
+        if is_msvc:
+            flags_list = [compiler, "/nologo", "/std:c++17", "/EHsc",
+                          "/Zi", "/Od", "/D_DEBUG",
+                          f"/Fe:{exe_path}"]
+            flags_list += ["/I", INCLUDE_DIR, "/I", os.path.join(SCRIPT_DIR, "vendor")]
+            flags_list += get_platform_flags(platform, is_msvc=True)
+            flags_list += [src, lib_path]
+            flags_list += get_platform_libs(platform, is_msvc=True)
+            flags_list += ["/link", "/SUBSYSTEM:CONSOLE"]
+        else:
+            flags_list = [compiler, "-std=c++17", "-g", "-O0"]
+            if platform == "windows":
+                flags_list.append("-mconsole")
+            flags_list += ["-I", INCLUDE_DIR, "-I", os.path.join(SCRIPT_DIR, "vendor")]
+            flags_list += get_platform_flags(platform)
+            flags_list += [src, lib_path]
+            flags_list += get_platform_libs(platform)
+            flags_list += ["-o", exe_path]
 
         cprint(f"  {tf}... ", Color.CYAN, end="")
         result = subprocess.run(flags_list, capture_output=True, text=True)
@@ -877,13 +936,14 @@ def print_usage():
     print("  test                Build and run all tests")
     print()
     print("Options:")
-    print("  --compiler <val>    clang (default), gcc, or custom path")
+    print("  --compiler <val>    clang (default), msvc, gcc, or custom path")
     print("  --example <name>    Build only this example (with 'build')")
     print("  --app <name>        Build only this app (with 'build')")
     print("  --dll <dir>         Build shared library (.dll/.so/.dylib) + headers to dir")
     print()
     print("Examples:")
     print("  python ltgui.py build")
+    print("  python ltgui.py build --compiler msvc")
     print("  python ltgui.py build release --compiler gcc")
     print("  python ltgui.py build --compiler /usr/bin/g++-13 --example hello")
     print("  python ltgui.py build --dll ./sdk")

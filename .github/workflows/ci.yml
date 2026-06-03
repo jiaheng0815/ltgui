@@ -24,7 +24,7 @@ jobs:
       - name: Test
         run: python3 ltgui.py test
 
-  windows:
+  windows-clang:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,3 +40,16 @@ jobs:
 
       - name: Test
         run: python ltgui.py test
+
+  windows-msvc:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build
+        run: python ltgui.py build --compiler msvc
+
+      - name: Test
+        run: python ltgui.py test --compiler msvc

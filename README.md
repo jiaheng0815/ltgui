@@ -37,15 +37,20 @@ Zero dependencies beyond platform APIs.
 
 ### Prerequisites
 
-- **clang++** (C++17) or MSVC
+- **C++17 compiler** — clang++, MSVC, or g++
 - **Python 3**
-- Windows: MSYS2 clang64 recommended
 
 ### Build
 
 ```bash
-# Debug build
+# Debug build (auto-detects clang++ or MSVC on Windows)
 python ltgui.py build
+
+# With MSVC (Visual Studio Developer Command Prompt)
+python ltgui.py build --compiler msvc
+
+# With clang
+python ltgui.py build --compiler clang
 
 # Release build
 python ltgui.py build release
@@ -377,20 +382,25 @@ MIT
 
 ### 环境要求
 
-- **clang++** (C++17) 或 MSVC
+- **C++17 编译器** — clang++、MSVC 或 g++
 - **Python 3**
-- Windows: 推荐 MSYS2 clang64 工具链
 
 ### 编译
 
 ```bash
-# 调试编译
+# 调试编译（Windows 自动检测 clang++ 或 MSVC）
 python ltgui.py build
+
+# 使用 MSVC（在 Visual Studio Developer Command Prompt 中）
+python ltgui.py build --compiler msvc
+
+# 使用 clang
+python ltgui.py build --compiler clang
 
 # 发布编译
 python ltgui.py build release
 
-# 运行测试 (15 个测试套件)
+# 运行测试（15 个测试套件）
 python ltgui.py test
 
 # CMake
