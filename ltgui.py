@@ -126,7 +126,8 @@ def get_platform_libs(platform, is_msvc=False):
 def get_platform_flags(platform, is_msvc=False):
     if platform == "windows":
         if is_msvc:
-            return ["/D_UNICODE", "/DUNICODE", "/DLTGUI_PLATFORM_WINDOWS"]
+            # /utf-8 fixes C4819 warnings on Chinese locale systems
+            return ["/D_UNICODE", "/DUNICODE", "/utf-8"]
         return ["-D_UNICODE", "-DUNICODE", "-DLTGUI_PLATFORM_WINDOWS"]
     elif platform == "linux":
         return ["-I/usr/include/freetype2"]
@@ -206,7 +207,7 @@ def compile_source(src_path, platform, is_release, compiler, is_msvc, pic=False)
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
-            flags += ["/Zi", "/Od", "/D_DEBUG"]
+            flags += ["/Zi", "/Od"]
         flags += ["/W3"]
         flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
         flags += get_platform_flags(platform, is_msvc=True)
@@ -347,7 +348,7 @@ def build_example(name, platform, is_release, lib_path, compiler, is_msvc):
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
-            flags += ["/Zi", "/Od", "/D_DEBUG"]
+            flags += ["/Zi", "/Od"]
         flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
         flags += get_platform_flags(platform, is_msvc=True)
         flags += [f"/Fe:{exe_path}"]
@@ -390,7 +391,7 @@ def build_app(name, platform, is_release, lib_path, compiler, is_msvc):
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
-            flags += ["/Zi", "/Od", "/D_DEBUG"]
+            flags += ["/Zi", "/Od"]
         flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
         flags += get_platform_flags(platform, is_msvc=True)
         flags += [f"/Fe:{exe_path}"]
@@ -883,7 +884,7 @@ def cmd_test(positional, flags):
 
         if is_msvc:
             flags_list = [compiler, "/nologo", "/std:c++17", "/EHsc",
-                          "/Zi", "/Od", "/D_DEBUG"]
+                          "/Zi", "/Od"]
             flags_list += ["/I", INCLUDE_DIR, "/I", os.path.join(SCRIPT_DIR, "vendor")]
             flags_list += get_platform_flags(platform, is_msvc=True)
             flags_list += [f"/Fe:{exe_path}"]
