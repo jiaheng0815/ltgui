@@ -29,6 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup LLVM
+        run: |
+          if (-not (Get-Command "clang++" -ErrorAction SilentlyContinue)) {
+            choco install llvm -y --no-progress
+          }
+
       - name: Build
         run: python ltgui.py build
 
