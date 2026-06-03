@@ -127,7 +127,8 @@ def get_platform_flags(platform, is_msvc=False):
     if platform == "windows":
         if is_msvc:
             # /utf-8 fixes C4819 warnings on Chinese locale systems
-            return ["/D_UNICODE", "/DUNICODE", "/utf-8"]
+            # LTGUI_PLATFORM_WINDOWS is also defined in platform.h; dup is harmless
+            return ["/D_UNICODE", "/DUNICODE", "/DLTGUI_PLATFORM_WINDOWS", "/utf-8"]
         return ["-D_UNICODE", "-DUNICODE", "-DLTGUI_PLATFORM_WINDOWS"]
     elif platform == "linux":
         return ["-I/usr/include/freetype2"]
