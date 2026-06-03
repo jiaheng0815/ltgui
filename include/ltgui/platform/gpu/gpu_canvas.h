@@ -44,6 +44,10 @@ public:
 
     Size measureText(const std::string& text) override;
 
+    // Explicitly load a .ttf font file for GPU text rendering.
+    // Returns false if the file can't be read or parsed.
+    bool loadFontFile(const Font& font, const char* ttfPath);
+
     // GPU info
     const GpuInfo& gpuInfo() const { return gpuInfo_; }
     bool isGpuAccelerated() const { return device_ != nullptr; }

@@ -86,9 +86,12 @@ bool GpuCanvas::initialize(void* windowHandle, int width, int height) {
     Font defaultFont = Font::systemDefault(12);
     const char* fontPaths[] = {
 #ifdef LTGUI_PLATFORM_WINDOWS
-        "C:\\Windows\\Fonts\\segoeui.ttf",
-        "C:\\Windows\\Fonts\\arial.ttf",
-        "C:\\Windows\\Fonts\\calibri.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/seguiemj.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/calibri.ttf",
+        "C:/Windows/Fonts/tahoma.ttf",
+        "C:/Windows/Fonts/consola.ttf",
 #elif defined(LTGUI_PLATFORM_LINUX)
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
@@ -100,11 +103,17 @@ bool GpuCanvas::initialize(void* windowHandle, int width, int height) {
         "/Library/Fonts/Arial.ttf",
 #endif
     };
+    bool fontLoaded = false;
     for (const char* path : fontPaths) {
         if (fontAtlas_->loadFontFile(defaultFont, path)) {
             LOG_INFO("GPU", "Loaded default font: %s", path);
+            fontLoaded = true;
             break;
         }
+    }
+    if (!fontLoaded) {
+        LOG_WARN("GPU", "No system font found. Text will be invisible. "
+                        "Call GpuCanvas::loadFontFile() with a .ttf path.");
     }
 
     LOG_INFO("GPU", "Initialized: %s, %dx%d", device_->name(), width, height);
@@ -244,6 +253,11 @@ void GpuCanvas::drawPixelBuffer(const uint8_t* rgba, int w, int h, const Rect& r
 Size GpuCanvas::measureText(const std::string& text) {
     if (renderer_) return renderer_->measureText(text, currentFont_);
     return {0, 0};
+}
+
+bool GpuCanvas::loadFontFile(const Font& font, const char* ttfPath) {
+    if (!fontAtlas_) return false;
+    return fontAtlas_->loadFontFile(font, ttfPath);
 }
 
 void GpuCanvas::loadImageTexture(const std::string& path) {
