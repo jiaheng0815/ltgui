@@ -359,8 +359,9 @@ public:
         context_->PSSetSamplers(0, 1, &sampler_);
 
         // Upload screen dimensions for NDC vertex transform
-        float screenSize[2] = { (float)width_, (float)height_ };
-        context_->UpdateSubresource(screenCB_, 0, nullptr, screenSize, 0, 0);
+        // D3D11 constant buffers must be multiples of 16 bytes
+        float cbData[4] = { (float)width_, (float)height_, 0, 0 };
+        context_->UpdateSubresource(screenCB_, 0, nullptr, cbData, 0, 0);
         context_->VSSetConstantBuffers(0, 1, &screenCB_);
 
         float blendFactor[4] = { 1, 1, 1, 1 };
