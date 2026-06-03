@@ -350,7 +350,7 @@ public:
 
     void beginFrame() override {
         if (!rtView_) return;
-        float clearColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+        float clearColor[4] = { 0.2f, 0.2f, 0.3f, 1.0f }; // dark blue-grey debug
         context_->ClearRenderTargetView(rtView_, clearColor);
         context_->OMSetRenderTargets(1, &rtView_, nullptr);
 
@@ -361,6 +361,7 @@ public:
         // Upload screen dimensions for NDC vertex transform
         // D3D11 constant buffers must be multiples of 16 bytes
         float cbData[4] = { (float)width_, (float)height_, 0, 0 };
+        LOG_INFO("D3D11", "CB upload: %.0fx%.0f", cbData[0], cbData[1]);
         context_->UpdateSubresource(screenCB_, 0, nullptr, cbData, 0, 0);
         context_->VSSetConstantBuffers(0, 1, &screenCB_);
 
