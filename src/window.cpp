@@ -139,7 +139,9 @@ void Window::handleEvent(Event& event) {
     case EventType::Paint:
         if (canvas_) {
             canvas_->beginPaint();
-            if (!dirtyValid_) {
+            // GPU clears the entire backbuffer each frame, so we must
+            // paint the full window regardless of accumulated dirty rects.
+            if (!dirtyValid_ || useGpu_) {
                 Size sz = getSize();
                 accumulatedDirty_ = Rect(0, 0, sz.width, sz.height);
             }
