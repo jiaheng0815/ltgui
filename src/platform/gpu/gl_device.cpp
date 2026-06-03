@@ -17,12 +17,9 @@ namespace gpu {
 static const char* kSolidVS = R"(#version 300 es
 in vec2 aPos;
 in vec4 aCol;
-uniform vec2 uScreenSize;
 out vec4 vCol;
 void main() {
-    float x = (aPos.x / uScreenSize.x) * 2.0 - 1.0;
-    float y = 1.0 - (aPos.y / uScreenSize.y) * 2.0;
-    gl_Position = vec4(x, y, 0.0, 1.0);
+    gl_Position = vec4(aPos, 0.0, 1.0);
     vCol = aCol;
 }
 )";
@@ -44,11 +41,8 @@ in vec4 aParams;
 out vec2 vUV;
 out vec4 vCol;
 out vec4 vParams;
-uniform vec2 uScreenSize;
 void main() {
-    float x = (aPos.x / uScreenSize.x) * 2.0 - 1.0;
-    float y = 1.0 - (aPos.y / uScreenSize.y) * 2.0;
-    gl_Position = vec4(x, y, 0.0, 1.0);
+    gl_Position = vec4(aPos, 0.0, 1.0);
     vUV = aUV;
     vCol = aCol;
     vParams = aParams;
@@ -117,13 +111,10 @@ static const char* kTextureVS = R"(#version 300 es
 in vec2 aPos;
 in vec2 aUV;
 in vec4 aCol;
-uniform vec2 uScreenSize;
 out vec2 vUV;
 out vec4 vCol;
 void main() {
-    float x = (aPos.x / uScreenSize.x) * 2.0 - 1.0;
-    float y = 1.0 - (aPos.y / uScreenSize.y) * 2.0;
-    gl_Position = vec4(x, y, 0.0, 1.0);
+    gl_Position = vec4(aPos, 0.0, 1.0);
     vUV = aUV;
     vCol = aCol;
 }
@@ -376,9 +367,6 @@ public:
         default: curProg_ = solidProg_; break;
         }
         glUseProgram(curProg_);
-        // Upload screen dimensions for NDC vertex transform
-        GLint loc = glGetUniformLocation(curProg_, "uScreenSize");
-        if (loc >= 0) glUniform2f(loc, (float)w_, (float)h_);
     }
 
     void bindTexture(int slot, GpuTexture* tex) override {

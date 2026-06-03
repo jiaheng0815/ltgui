@@ -25,13 +25,9 @@ static const char* kSolidShader = R"(
 struct VS_IN { float2 pos : POSITION; float4 col : COLOR; };
 struct VS_OUT { float4 pos : SV_POSITION; float4 col : COLOR; };
 
-cbuffer ScreenCB : register(b0) { float2 screenSize; };
-
 VS_OUT VSMain(VS_IN input) {
     VS_OUT output;
-    float x = (input.pos.x / screenSize.x) * 2.0 - 1.0;
-    float y = 1.0 - (input.pos.y / screenSize.y) * 2.0;
-    output.pos = float4(x, y, 0.0, 1.0);
+    output.pos = float4(input.pos, 0.0, 1.0);
     output.col = input.col;
     return output;
 }
@@ -49,9 +45,7 @@ cbuffer ScreenCB : register(b0) { float2 screenSize; };
 
 VS_OUT VSMain(VS_IN input) {
     VS_OUT output;
-    float x = (input.pos.x / screenSize.x) * 2.0 - 1.0;
-    float y = 1.0 - (input.pos.y / screenSize.y) * 2.0;
-    output.pos = float4(x, y, 0.0, 1.0);
+    output.pos = float4(input.pos, 0.0, 1.0);
     output.uv = input.uv;
     output.col = input.col;
     output.params = input.params;
@@ -91,13 +85,9 @@ static const char* kEllipseShader = R"(
 struct VS_IN { float2 pos : POSITION; float2 uv : TEXCOORD; float4 col : COLOR; float4 params : TEXCOORD1; };
 struct VS_OUT { float4 pos : SV_POSITION; float2 uv : TEXCOORD; float4 col : COLOR; float4 params : TEXCOORD1; };
 
-cbuffer ScreenCB : register(b0) { float2 screenSize; };
-
 VS_OUT VSMain(VS_IN input) {
     VS_OUT output;
-    float x = (input.pos.x / screenSize.x) * 2.0 - 1.0;
-    float y = 1.0 - (input.pos.y / screenSize.y) * 2.0;
-    output.pos = float4(x, y, 0.0, 1.0);
+    output.pos = float4(input.pos, 0.0, 1.0);
     output.uv = input.uv;
     output.col = input.col;
     output.params = input.params;
@@ -130,15 +120,12 @@ static const char* kTextureShader = R"(
 struct VS_IN { float2 pos : POSITION; float2 uv : TEXCOORD; float4 col : COLOR; };
 struct VS_OUT { float4 pos : SV_POSITION; float2 uv : TEXCOORD; float4 col : COLOR; };
 
-cbuffer ScreenCB : register(b0) { float2 screenSize; };
 SamplerState smp : register(s0);
 Texture2D tex : register(t0);
 
 VS_OUT VSMain(VS_IN input) {
     VS_OUT output;
-    float x = (input.pos.x / screenSize.x) * 2.0 - 1.0;
-    float y = 1.0 - (input.pos.y / screenSize.y) * 2.0;
-    output.pos = float4(x, y, 0.0, 1.0);
+    output.pos = float4(input.pos, 0.0, 1.0);
     output.uv = input.uv;
     output.col = input.col;
     return output;
@@ -300,13 +287,6 @@ public:
         sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
         device_->CreateSamplerState(&sampDesc, &sampler_);
 
-        // Constant buffer for screen dimensions (NDC vertex transform)
-        D3D11_BUFFER_DESC cbDesc = {};
-        cbDesc.Usage = D3D11_USAGE_DEFAULT;
-        cbDesc.ByteWidth = 16; // float2 + padding to 16 bytes
-        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-        device_->CreateBuffer(&cbDesc, nullptr, &screenCB_);
-
         return true;
     }
 
@@ -325,7 +305,6 @@ public:
         if (texPS_) { texPS_->Release(); texPS_ = nullptr; }
         if (ilSolid_) { ilSolid_->Release(); ilSolid_ = nullptr; }
         if (ilRounded_) { ilRounded_->Release(); ilRounded_ = nullptr; }
-        if (screenCB_) { screenCB_->Release(); screenCB_ = nullptr; }
         if (context_) { context_->ClearState(); context_->Release(); context_ = nullptr; }
         if (swapChain_) { swapChain_->Release(); swapChain_ = nullptr; }
         if (device_) { device_->Release(); device_ = nullptr; }
@@ -357,13 +336,6 @@ public:
         D3D11_VIEWPORT vp = { 0, 0, (float)width_, (float)height_, 0, 1 };
         context_->RSSetViewports(1, &vp);
         context_->PSSetSamplers(0, 1, &sampler_);
-
-        // Upload screen dimensions for NDC vertex transform
-        // D3D11 constant buffers must be multiples of 16 bytes
-        float cbData[4] = { (float)width_, (float)height_, 0, 0 };
-        LOG_INFO("D3D11", "CB upload: %.0fx%.0f", cbData[0], cbData[1]);
-        context_->UpdateSubresource(screenCB_, 0, nullptr, cbData, 0, 0);
-        context_->VSSetConstantBuffers(0, 1, &screenCB_);
 
         float blendFactor[4] = { 1, 1, 1, 1 };
         context_->OMSetBlendState(blendState_, blendFactor, 0xFFFFFFFF);
@@ -588,9 +560,6 @@ private:
     // Input layouts
     ID3D11InputLayout* ilSolid_ = nullptr;
     ID3D11InputLayout* ilRounded_ = nullptr;
-
-    // Screen-dimension constant buffer for NDC vertex transform
-    ID3D11Buffer* screenCB_ = nullptr;
 
     float orthoProj_[16] = {};
     int width_ = 0, height_ = 0;

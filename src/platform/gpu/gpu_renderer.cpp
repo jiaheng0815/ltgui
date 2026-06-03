@@ -248,11 +248,17 @@ void Renderer2D::flushBatch() {
     }
 }
 
+// Convert pixel coordinate to NDC [-1, 1] for GPU vertex shader
+static inline float toNdcX(float px, int screenW) { return (px / (float)screenW) * 2.0f - 1.0f; }
+static inline float toNdcY(float py, int screenH) { return 1.0f - (py / (float)screenH) * 2.0f; }
+
 void Renderer2D::emitQuad(std::vector<Vertex2D>& out, const Rect& r,
                            float u0, float v0, float u1, float v1, uint32_t color,
                            float p0, float p1, float p2, float p3) {
-    float x0 = static_cast<float>(r.x), y0 = static_cast<float>(r.y);
-    float x1 = static_cast<float>(r.right()), y1 = static_cast<float>(r.bottom());
+    float x0 = toNdcX(static_cast<float>(r.x), width_);
+    float y0 = toNdcY(static_cast<float>(r.y), height_);
+    float x1 = toNdcX(static_cast<float>(r.right()), width_);
+    float y1 = toNdcY(static_cast<float>(r.bottom()), height_);
     Vertex2D v[] = {
         {x0, y0, u0, v0, color, p0, p1, p2, p3},
         {x1, y0, u1, v0, color, p0, p1, p2, p3},
@@ -265,8 +271,10 @@ void Renderer2D::emitQuad(std::vector<Vertex2D>& out, const Rect& r,
 }
 
 void Renderer2D::emitStrokeRect(std::vector<Vertex2D>& out, const Rect& r, uint32_t color) {
-    float x0 = static_cast<float>(r.x), y0 = static_cast<float>(r.y);
-    float x1 = static_cast<float>(r.right()), y1 = static_cast<float>(r.bottom());
+    float x0 = toNdcX(static_cast<float>(r.x), width_);
+    float y0 = toNdcY(static_cast<float>(r.y), height_);
+    float x1 = toNdcX(static_cast<float>(r.right()), width_);
+    float y1 = toNdcY(static_cast<float>(r.bottom()), height_);
     Vertex2D lines[8] = {
         {x0, y0, 0,0,color, 0,0,0,0}, {x1, y0, 0,0,color, 0,0,0,0},
         {x1, y0, 0,0,color, 0,0,0,0}, {x1, y1, 0,0,color, 0,0,0,0},
@@ -284,8 +292,10 @@ void Renderer2D::emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, ui
         float a0 = 2.0f * 3.14159265f * i / kSegments;
         float a1 = 2.0f * 3.14159265f * (i + 1) / kSegments;
         Vertex2D v[] = {
-            {cx + rx * cosf(a0), cy + ry * sinf(a0), 0,0,color, 0,0,0,0},
-            {cx + rx * cosf(a1), cy + ry * sinf(a1), 0,0,color, 0,0,0,0},
+            {toNdcX(cx + rx * cosf(a0), width_),
+             toNdcY(cy + ry * sinf(a0), height_), 0,0,color, 0,0,0,0},
+            {toNdcX(cx + rx * cosf(a1), width_),
+             toNdcY(cy + ry * sinf(a1), height_), 0,0,color, 0,0,0,0},
         };
         out.insert(out.end(), v, v + 2);
     }
@@ -293,8 +303,10 @@ void Renderer2D::emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, ui
 
 void Renderer2D::emitLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2, uint32_t color) {
     Vertex2D v[] = {
-        {static_cast<float>(p1.x), static_cast<float>(p1.y), 0,0,color, 0,0,0,0},
-        {static_cast<float>(p2.x), static_cast<float>(p2.y), 0,0,color, 0,0,0,0},
+        {toNdcX(static_cast<float>(p1.x), width_),
+         toNdcY(static_cast<float>(p1.y), height_), 0,0,color, 0,0,0,0},
+        {toNdcX(static_cast<float>(p2.x), width_),
+         toNdcY(static_cast<float>(p2.y), height_), 0,0,color, 0,0,0,0},
     };
     out.insert(out.end(), v, v + 2);
 }
