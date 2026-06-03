@@ -1,3 +1,4 @@
+#define STB_TRUETYPE_IMPLEMENTATION
 #include "platform/gpu/gpu_font_atlas.h"
 #include <cstring>
 #include <cstdio>
