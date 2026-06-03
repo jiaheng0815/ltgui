@@ -51,15 +51,15 @@ def detect_platform():
     else:
         raise RuntimeError(f"Unsupported platform: {sys.platform}")
 
-def check_platform_clean():
-    """Auto-clean if platform changed since last build."""
+def check_platform_clean(compiler_id="clang++"):
+    """Auto-clean if platform or compiler changed since last build."""
     fingerprint = os.path.join(BUILD_DIR, ".platform")
-    current = detect_platform()
+    current = f"{detect_platform()}:{compiler_id}"
     if os.path.exists(fingerprint):
         with open(fingerprint, "r") as f:
             previous = f.read().strip()
         if previous != current:
-            cprint(f"Platform changed ({previous} -> {current}), cleaning...", Color.YELLOW)
+            cprint(f"Build config changed ({previous} -> {current}), cleaning...", Color.YELLOW)
             if os.path.exists(BUILD_DIR):
                 shutil.rmtree(BUILD_DIR)
     os.makedirs(BUILD_DIR, exist_ok=True)
@@ -745,7 +745,7 @@ def cmd_build(positional, flags):
     single_example = flags.get("example")
     single_app = flags.get("app")
 
-    check_platform_clean()
+    check_platform_clean(compiler)
     platform = detect_platform()
 
     # SDK export (--dll) — build shared lib only, skip examples/apps
@@ -835,7 +835,7 @@ def cmd_run(positional, flags):
         cprint(f"Program '{name}' not found in app/ or examples/", Color.RED)
         return
 
-    check_platform_clean()
+    check_platform_clean(compiler)
     platform = detect_platform()
 
     lib_path = build_lib(platform, is_release=False, compiler=compiler, is_msvc=is_msvc)
@@ -859,7 +859,7 @@ def cmd_test(positional, flags):
     """Build and run all tests in test/."""
     compiler, is_msvc = resolve_compiler(flags.get("compiler"))
 
-    check_platform_clean()
+    check_platform_clean(compiler)
     platform = detect_platform()
 
     test_files = sorted([f for f in os.listdir(TEST_DIR) if f.endswith(".cpp")])
