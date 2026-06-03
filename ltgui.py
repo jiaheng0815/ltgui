@@ -132,11 +132,13 @@ def get_platform_flags(platform, is_msvc=False):
         return ["-I/usr/include/freetype2"]
     return []
 
-def get_source_files():
+def get_source_files(is_msvc=False):
     sources = []
     for root, dirs, files in os.walk(SRC_DIR):
         for f in files:
-            if f.endswith(".cpp") or f.endswith(".mm"):
+            if f.endswith(".cpp"):
+                sources.append(os.path.join(root, f))
+            elif f.endswith(".mm") and not is_msvc:
                 sources.append(os.path.join(root, f))
     return sorted(sources)
 
@@ -285,7 +287,7 @@ def build_shared_lib(platform, is_release, compiler):
     return dll_path
 
 def build_lib(platform, is_release, compiler, is_msvc):
-    sources = get_source_files()
+    sources = get_source_files(is_msvc)
     if not sources:
         cprint("No source files found in src/", Color.RED)
         return None

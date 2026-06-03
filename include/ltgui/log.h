@@ -88,7 +88,17 @@ private:
     int categoryCount_ = 0;
 };
 
-// Convenience macros — shorter than Logger::instance().log(...)
+// Convenience macros — cross-compiler variadic support
+#ifdef _MSC_VER
+#define LOG_DEBUG(cat, fmt, ...) \
+    do { ltgui::Logger::instance().log(ltgui::LogLevel::Debug, cat, fmt, __VA_ARGS__); } while(0)
+#define LOG_INFO(cat, fmt, ...) \
+    do { ltgui::Logger::instance().log(ltgui::LogLevel::Info,  cat, fmt, __VA_ARGS__); } while(0)
+#define LOG_WARN(cat, fmt, ...) \
+    do { ltgui::Logger::instance().log(ltgui::LogLevel::Warn,  cat, fmt, __VA_ARGS__); } while(0)
+#define LOG_ERROR(cat, fmt, ...) \
+    do { ltgui::Logger::instance().log(ltgui::LogLevel::Error, cat, fmt, __VA_ARGS__); } while(0)
+#else
 #define LOG_DEBUG(cat, fmt, ...) \
     do { ltgui::Logger::instance().log(ltgui::LogLevel::Debug, cat, fmt, ##__VA_ARGS__); } while(0)
 #define LOG_INFO(cat, fmt, ...) \
@@ -97,5 +107,6 @@ private:
     do { ltgui::Logger::instance().log(ltgui::LogLevel::Warn,  cat, fmt, ##__VA_ARGS__); } while(0)
 #define LOG_ERROR(cat, fmt, ...) \
     do { ltgui::Logger::instance().log(ltgui::LogLevel::Error, cat, fmt, ##__VA_ARGS__); } while(0)
+#endif
 
 } // namespace ltgui
