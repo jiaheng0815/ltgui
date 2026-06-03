@@ -7,6 +7,7 @@
 #include "color.h"
 #include "font.h"
 #include <string>
+#include <memory>
 #include <unordered_map>
 
 namespace ltgui {
@@ -49,11 +50,10 @@ public:
 
 private:
     void loadImageTexture(const std::string& path);
-    void rasterizeText(const std::string& text, const Rect& rect, int flags);
 
-    GpuDevice* device_ = nullptr;
-    Renderer2D* renderer_ = nullptr;
-    FontAtlas* fontAtlas_ = nullptr;
+    std::unique_ptr<GpuDevice> device_;
+    std::unique_ptr<Renderer2D> renderer_;
+    std::unique_ptr<FontAtlas> fontAtlas_;
 
     Color currentColor_;
     Font currentFont_;
@@ -66,6 +66,7 @@ private:
     };
     std::unordered_map<std::string, CachedImage> imageCache_;
     GpuInfo gpuInfo_;
+    int tempTexId_ = -1; // transient texture from drawPixelBuffer, released on next call
 
     bool initialized_ = false;
 };

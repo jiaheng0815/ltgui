@@ -2,56 +2,54 @@
 #include "window.h"
 #include "layout.h"
 #include "platform/native_canvas.h"
+#include <algorithm>
 
 namespace ltgui {
 
 Widget::Widget(Widget* parent) : parent_(parent) {
     style_ = Style::defaultStyle();
-    if (parent_) {
-        parent_->addChild(this);
-    }
 }
 
 Widget::~Widget() {
-    delete layout_;
-
-    // Remove from parent
-    if (parent_) {
-        parent_->removeChild(this);
+    // Clear focus before destruction — must happen while window_ is still valid
+    if (window_ && window_->focusWidget_ == this) {
+        window_->setFocusWidget(nullptr);
     }
-
-    // Delete children (copy list since removeChild modifies it)
-    auto kids = children_;
-    for (auto* child : kids) {
-        delete child;
-    }
+    // layout_ and children_ destroyed automatically via unique_ptr
 }
 
-void Widget::addChild(Widget* child) {
-    if (child && child->parent_ != this) {
-        if (child->parent_) {
-            child->parent_->removeChild(child);
-        }
-        child->parent_ = this;
-        children_.push_back(child);
-        child->propagateWindow(window_);
-        child->needsLayout_ = true;
+Widget* Widget::addChild(std::unique_ptr<Widget> child) {
+    if (!child) return nullptr;
+    if (child->parent_ && child->parent_ != this) {
+        child->parent_->removeChild(child.get());
     }
+    child->parent_ = this;
+    Widget* raw = child.get();
+    raw->propagateWindow(window_);
+    raw->needsLayout_ = true;
+    children_.push_back(std::move(child));
+    invalidateSizeHint();
+    return raw;
 }
 
-void Widget::removeChild(Widget* child) {
-    auto it = std::find(children_.begin(), children_.end(), child);
+std::unique_ptr<Widget> Widget::removeChild(Widget* child) {
+    auto it = std::find_if(children_.begin(), children_.end(),
+        [child](const auto& p) { return p.get() == child; });
     if (it != children_.end()) {
-        child->parent_ = nullptr;
-        child->propagateWindow(nullptr);
+        (*it)->parent_ = nullptr;
+        (*it)->propagateWindow(nullptr);
+        auto result = std::move(*it);
         children_.erase(it);
         needsLayout_ = true;
+        invalidateSizeHint();
+        return result;
     }
+    return nullptr;
 }
 
 Widget* Widget::childAt(int index) const {
     if (index >= 0 && index < static_cast<int>(children_.size())) {
-        return children_[index];
+        return children_[index].get();
     }
     return nullptr;
 }
@@ -69,7 +67,6 @@ Rect Widget::absoluteRect() const {
 void Widget::setGeometry(const Rect& rect) {
     if (geometry_ != rect) {
         geometry_ = rect;
-        // Re-layout children if we have a layout
         if (layout_) {
             layout_->layout(this);
         }
@@ -91,9 +88,8 @@ Size Widget::minimumSize() const {
     return {0, 0};
 }
 
-void Widget::setLayout(Layout* layout) {
-    delete layout_;
-    layout_ = layout;
+void Widget::setLayout(std::unique_ptr<Layout> layout) {
+    layout_ = std::move(layout);
     needsLayout_ = true;
 }
 
@@ -121,9 +117,21 @@ void Widget::claimFocus() {
     }
 }
 
+void Widget::raiseToTop() {
+    if (!parent_) return;
+    auto& siblings = parent_->children_;
+    auto it = std::find_if(siblings.begin(), siblings.end(),
+        [this](const auto& p) { return p.get() == this; });
+    if (it != siblings.end() && it != siblings.end() - 1) {
+        auto self = std::move(*it);
+        siblings.erase(it);
+        siblings.push_back(std::move(self));
+    }
+}
+
 void Widget::propagateWindow(Window* window) {
     window_ = window;
-    for (auto* child : children_) {
+    for (auto& child : children_) {
         child->propagateWindow(window);
     }
 }
@@ -134,8 +142,11 @@ void Widget::paint(NativeCanvas* canvas, const Rect& dirtyRect) {
     Rect abs = absoluteRect();
     if (!abs.intersects(dirtyRect)) return;
 
+    // Only fill the dirty portion — the backbuffer retains the rest from the
+    // previous frame. Painting the full widget rect would erase sibling widgets
+    // that don't intersect the dirty region.
     canvas->setColor(style_.bgColor);
-    canvas->fillRect(abs);
+    canvas->fillRect(abs.intersected(dirtyRect));
 
     paintSelf(canvas);
     paintBorder(canvas);
@@ -143,11 +154,10 @@ void Widget::paint(NativeCanvas* canvas, const Rect& dirtyRect) {
 }
 
 void Widget::paintSelf(NativeCanvas* /*canvas*/) {
-    // Override in subclasses
 }
 
 void Widget::paintChildren(NativeCanvas* canvas, const Rect& dirtyRect) {
-    for (auto* child : children_) {
+    for (auto& child : children_) {
         if (child->visible_) {
             child->paint(canvas, dirtyRect);
         }
@@ -167,7 +177,7 @@ void Widget::paintBorder(NativeCanvas* canvas) {
 
 void Widget::update() {
     if (window_) {
-        window_->update();
+        window_->invalidate(absoluteRect());
     }
 }
 
@@ -182,21 +192,78 @@ void Widget::update(const Rect& dirtyLocalRect) {
     }
 }
 
+Widget* Widget::nextFocusWidget() {
+    // Depth-first pre-order traversal: try children first, then siblings.
+    if (!children_.empty()) {
+        for (auto& child : children_) {
+            if (child->isEnabled() && child->isVisible()) {
+                Widget* found = child->nextFocusWidget();
+                if (found) return found;
+            }
+        }
+    }
+    // If this widget can accept focus, return it
+    if (isEnabled() && isVisible() && widgetType() != WidgetType::Label) {
+        return this;
+    }
+    return nullptr;
+}
+
+Widget* Widget::previousFocusWidget() {
+    // Find the last focusable widget in the tree above/left of this one.
+    if (!parent_) return nullptr;
+
+    auto& siblings = parent_->children_;
+    // Find our index
+    int myIdx = -1;
+    for (int i = 0; i < static_cast<int>(siblings.size()); i++) {
+        if (siblings[i].get() == this) { myIdx = i; break; }
+    }
+    if (myIdx < 0) return nullptr;
+
+    // Check siblings before us (in reverse order)
+    for (int i = myIdx - 1; i >= 0; i--) {
+        Widget* sib = siblings[i].get();
+        if (sib->isEnabled() && sib->isVisible()) {
+            Widget* last = sib->lastFocusableDescendant();
+            if (last) return last;
+        }
+    }
+
+    // Move up to parent
+    if (parent_->isEnabled() && parent_->isVisible()) return parent_;
+    return parent_->previousFocusWidget();
+}
+
+Widget* Widget::lastFocusableDescendant() {
+    // Find the rightmost/deepest focusable widget in this subtree
+    if (children_.empty()) {
+        if (isEnabled() && isVisible() && widgetType() != WidgetType::Label)
+            return this;
+        return nullptr;
+    }
+    for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
+        Widget* child = it->get();
+        if (child->isEnabled() && child->isVisible()) {
+            Widget* found = child->lastFocusableDescendant();
+            if (found) return found;
+        }
+    }
+    if (isEnabled() && isVisible() && widgetType() != WidgetType::Label)
+        return this;
+    return nullptr;
+}
+
 bool Widget::handleEvent(Event& event) {
     if (!enabled_ || !visible_) return false;
 
-    // Handle mouse events: hit test children first
     switch (event.type) {
     case EventType::MouseDown:
-    case EventType::MouseUp:
-    case EventType::MouseMove:
     case EventType::MouseWheel: {
-        // Translate event position to local coordinates
+        // Targeted dispatch — only the child under the cursor gets the event.
         Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
-
-        // Try children in reverse z-order
         for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
-            Widget* child = *it;
+            Widget* child = it->get();
             if (child->visible_ && child->enabled_ &&
                 child->effectiveGeometry().contains(localPos)) {
                 Point savedPos = event.pos;
@@ -208,6 +275,28 @@ bool Widget::handleEvent(Event& event) {
                     return true;
                 }
             }
+        }
+        break;
+    }
+    case EventType::MouseUp:
+    case EventType::MouseMove: {
+        // Broadcast — every child gets the event so hover/pressed state
+        // can be cleared when the cursor leaves the widget bounds.
+        Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
+        bool handledAny = false;
+        for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
+            Widget* child = it->get();
+            if (child->visible_ && child->enabled_) {
+                Point savedPos = event.pos;
+                event.pos = localPos;
+                if (child->handleEvent(event))
+                    handledAny = true;
+                event.pos = savedPos;
+            }
+        }
+        if (handledAny) {
+            event.accepted = true;
+            return true;
         }
         break;
     }
@@ -223,9 +312,8 @@ Widget* Widget::hitTest(const Point& pos) {
 
     Point local = {pos.x - geometry_.x, pos.y - geometry_.y};
 
-    // Check children in reverse z-order
     for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
-        Widget* child = *it;
+        Widget* child = it->get();
         if (child->geometry().contains(local)) {
             Widget* hit = child->hitTest(local);
             if (hit) return hit;

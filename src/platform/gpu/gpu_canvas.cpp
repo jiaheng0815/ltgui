@@ -1,5 +1,5 @@
 #include "platform/gpu/gpu_canvas.h"
-#include <cstdio>
+#include "log.h"
 #include <cstring>
 #include <cmath>
 
@@ -32,51 +32,78 @@ namespace {
 
 GpuCanvas::GpuCanvas()
     : currentColor_(Color::Black)
-    , currentFont_("Segoe UI", 12) {}
+    , currentFont_(Font::systemDefault(12)) {}
 
 GpuCanvas::~GpuCanvas() {
+    if (tempTexId_ >= 0 && renderer_) {
+        renderer_->textures().release(tempTexId_);
+    }
     for (auto& kv : imageCache_) {
         if (kv.second.texId >= 0 && renderer_) {
             renderer_->textures().release(kv.second.texId);
         }
     }
-    if (renderer_) delete renderer_;
-    if (fontAtlas_) delete fontAtlas_;
+    // renderer_, fontAtlas_, device_ destroyed automatically via unique_ptr
     if (device_) {
         device_->shutdown();
-        delete device_;
     }
 }
 
 bool GpuCanvas::initialize(void* windowHandle, int width, int height) {
     gpuInfo_ = selectBestGpu();
     if (gpuInfo_.backend == GpuBackend::None) {
-        printf("[GpuCanvas] No GPU found, falling back to CPU rendering.\n");
+        LOG_INFO("GPU", "No GPU found, falling back to CPU rendering.");
         return false;
     }
 
 #ifdef LTGUI_PLATFORM_WINDOWS
-    device_ = CreateD3D11Device();
+    device_.reset(CreateD3D11Device());
 #elif defined(LTGUI_PLATFORM_LINUX)
-    device_ = CreateGLDevice();
+    device_.reset(CreateGLDevice());
 #else
     (void)windowHandle;
-    device_ = nullptr;
 #endif
 
     if (!device_ || !device_->initialize(windowHandle, width, height)) {
-        printf("[GpuCanvas] GPU device init failed.\n");
-        delete device_; device_ = nullptr;
+        LOG_INFO("GPU", "GPU device init failed.");
+        device_.reset();
         return false;
     }
 
-    renderer_ = new Renderer2D(device_);
+    renderer_ = std::make_unique<Renderer2D>(device_.get());
     renderer_->setSize(width, height);
 
-    fontAtlas_ = new FontAtlas(device_);
-    renderer_->setFontAtlas(fontAtlas_);
+    fontAtlas_ = std::make_unique<FontAtlas>(device_.get());
+    renderer_->setFontAtlas(fontAtlas_.get());
 
-    printf("[GpuCanvas] Initialized: %s, %dx%d\n", device_->name(), width, height);
+    // Load a default system font so text rendering works out of the box.
+    // Try platform-specific system font paths; if none work, text will be
+    // invisible (caller should use loadFontFile to provide a font).
+    Font defaultFont = Font::systemDefault(12);
+    const char* fontPaths[] = {
+#ifdef LTGUI_PLATFORM_WINDOWS
+        "C:\\Windows\\Fonts\\segoeui.ttf",
+        "C:\\Windows\\Fonts\\arial.ttf",
+        "C:\\Windows\\Fonts\\calibri.ttf",
+#elif defined(LTGUI_PLATFORM_LINUX)
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+#elif defined(LTGUI_PLATFORM_MACOS)
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/SFNSText.ttf",
+        "/Library/Fonts/Arial.ttf",
+#endif
+    };
+    for (const char* path : fontPaths) {
+        if (fontAtlas_->loadFontFile(defaultFont, path)) {
+            LOG_INFO("GPU", "Loaded default font: %s", path);
+            break;
+        }
+    }
+
+    LOG_INFO("GPU", "Initialized: %s, %dx%d", device_->name(), width, height);
     initialized_ = true;
     return true;
 }
@@ -155,12 +182,16 @@ void GpuCanvas::drawText(const std::string& text, const Rect& rect, int flags) {
         const GlyphEntry* g = fontAtlas_->getGlyph(cp, currentFont_);
         if (g && g->texId >= 0 && g->w > 0) {
             Rect dst((int)x + g->offsetX, (int)y + g->offsetY, g->w, g->h);
-            renderer_->drawGlyph(g->texId, dst, {}, currentColor_);
+            Rect src(g->atlasX, g->atlasY, g->w, g->h);
+            renderer_->drawGlyph(g->texId, dst, src, currentColor_);
         }
         if (g) x += g->advance;
     }
 #else
-    renderer_->fillRect(rect, currentColor_);
+    // No stb_truetype — draw a crossed-out placeholder so the user can see
+    // text is missing rather than a misleading solid color block.
+    renderer_->drawLine({rect.x, rect.y}, {rect.right(), rect.bottom()}, 1.0f, currentColor_);
+    renderer_->drawLine({rect.right(), rect.y}, {rect.x, rect.bottom()}, 1.0f, currentColor_);
 #endif
     (void)flags;
 }
@@ -174,8 +205,7 @@ void GpuCanvas::fillEllipse(const Rect& rect) {
 }
 
 void GpuCanvas::strokeEllipse(const Rect& rect, int lineWidth) {
-    if (renderer_) renderer_->fillEllipse(rect, currentColor_);
-    (void)lineWidth;
+    if (renderer_) renderer_->strokeEllipse(rect, static_cast<float>(lineWidth), currentColor_);
 }
 
 void GpuCanvas::drawImage(const std::string& path, const Rect& rect) {
@@ -198,8 +228,13 @@ Size GpuCanvas::imageSize(const std::string& path) {
 
 void GpuCanvas::drawPixelBuffer(const uint8_t* rgba, int w, int h, const Rect& rect) {
     if (!renderer_ || !rgba) return;
-    int texId = renderer_->textures().upload(w, h, rgba);
-    renderer_->drawImage(texId, rect);
+    // Release previously temp-allocated texture if any
+    if (tempTexId_ >= 0) {
+        renderer_->textures().release(tempTexId_);
+        tempTexId_ = -1;
+    }
+    tempTexId_ = renderer_->textures().upload(w, h, rgba);
+    renderer_->drawImage(tempTexId_, rect);
 }
 
 Size GpuCanvas::measureText(const std::string& text) {

@@ -10,6 +10,19 @@ namespace ltgui {
 
 bool Win32Window::classRegistered_ = false;
 
+static void setDpiAwareness() {
+    // Try PerMonitorV2 (Win10 1703+), fall back to System DPI awareness
+    HMODULE shcore = LoadLibraryA("shcore.dll");
+    if (shcore) {
+        typedef HRESULT(WINAPI* SetProcessDpiAwarenessFunc)(int);
+        auto fn = (SetProcessDpiAwarenessFunc)GetProcAddress(shcore, "SetProcessDpiAwareness");
+        if (fn) fn(2); // PROCESS_PER_MONITOR_DPI_AWARE = 2
+        FreeLibrary(shcore);
+    } else {
+        SetProcessDPIAware();
+    }
+}
+
 Win32Window::Win32Window() {
     registerClass();
 }
@@ -22,6 +35,8 @@ Win32Window::~Win32Window() {
 
 void Win32Window::registerClass() {
     if (classRegistered_) return;
+
+    setDpiAwareness();
 
     WNDCLASSEXW wc = {};
     wc.cbSize = sizeof(WNDCLASSEXW);
@@ -71,6 +86,13 @@ bool Win32Window::create(int width, int height, const std::string& title) {
 
     size_.width = width;
     size_.height = height;
+
+    // Query DPI scale for this window
+    HDC hdc = GetDC(hwnd_);
+    if (hdc) {
+        dpiScale_ = GetDeviceCaps(hdc, LOGPIXELSX) / 96.0f;
+        ReleaseDC(hwnd_, hdc);
+    }
 
     canvas_ = new Win32Canvas(hwnd_);
     canvas_->resize(width, height);
@@ -133,6 +155,22 @@ void Win32Window::invalidate(const Rect& rect) {
         RECT r = {rect.x, rect.y, rect.right(), rect.bottom()};
         InvalidateRect(hwnd_, &r, FALSE);
     }
+}
+
+void Win32Window::setCursor(CursorShape shape) {
+    LPCWSTR id = IDC_ARROW;
+    switch (shape) {
+    case CursorShape::Arrow:     id = IDC_ARROW;   break;
+    case CursorShape::IBeam:     id = IDC_IBEAM;   break;
+    case CursorShape::Wait:      id = IDC_WAIT;    break;
+    case CursorShape::Crosshair: id = IDC_CROSS;   break;
+    case CursorShape::SizeWE:    id = IDC_SIZEWE;  break;
+    case CursorShape::SizeNS:    id = IDC_SIZENS;  break;
+    case CursorShape::SizeAll:   id = IDC_SIZEALL; break;
+    case CursorShape::Hand:      id = IDC_HAND;    break;
+    case CursorShape::Denied:    id = IDC_NO;      break;
+    }
+    SetCursor(LoadCursorW(nullptr, id));
 }
 
 void* Win32Window::nativeHandle() const {
@@ -273,6 +311,9 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_SYSKEYDOWN: {
         Event ev;
         ev.type = EventType::KeyDown;
+        // Track modifier state
+        if (GetKeyState(VK_CONTROL) & 0x8000) ev.modifiers |= 2;
+        if (GetKeyState(VK_SHIFT)   & 0x8000) ev.modifiers |= 1;
         // Map common virtual keys
         switch (wParam) {
         case VK_BACK:   ev.key = Key::Backspace; break;

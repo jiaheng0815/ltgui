@@ -13,6 +13,10 @@ inline int codePointLen(unsigned char c) {
 }
 
 inline std::string encode(unsigned int cp) {
+    // Reject surrogates (U+D800–U+DFFF) and out-of-range codepoints
+    if ((cp >= 0xD800 && cp <= 0xDFFF) || cp >= 0x110000)
+        return {};
+
     std::string out;
     if (cp < 0x80) {
         out += static_cast<char>(cp);
@@ -23,7 +27,7 @@ inline std::string encode(unsigned int cp) {
         out += static_cast<char>(0xE0 | (cp >> 12));
         out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
         out += static_cast<char>(0x80 | (cp & 0x3F));
-    } else if (cp < 0x110000) {
+    } else {
         out += static_cast<char>(0xF0 | (cp >> 18));
         out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
         out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));

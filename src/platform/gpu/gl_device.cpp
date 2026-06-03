@@ -4,6 +4,7 @@
 
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
+#include "log.h"
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -16,9 +17,12 @@ namespace gpu {
 static const char* kSolidVS = R"(#version 300 es
 in vec2 aPos;
 in vec4 aCol;
+uniform vec2 uScreenSize;
 out vec4 vCol;
 void main() {
-    gl_Position = vec4(aPos, 0.0, 1.0);
+    float x = (aPos.x / uScreenSize.x) * 2.0 - 1.0;
+    float y = 1.0 - (aPos.y / uScreenSize.y) * 2.0;
+    gl_Position = vec4(x, y, 0.0, 1.0);
     vCol = aCol;
 }
 )";
@@ -42,7 +46,9 @@ out vec4 vCol;
 out vec4 vParams;
 uniform vec2 uScreenSize;
 void main() {
-    gl_Position = vec4(aPos, 0.0, 1.0);
+    float x = (aPos.x / uScreenSize.x) * 2.0 - 1.0;
+    float y = 1.0 - (aPos.y / uScreenSize.y) * 2.0;
+    gl_Position = vec4(x, y, 0.0, 1.0);
     vUV = aUV;
     vCol = aCol;
     vParams = aParams;
@@ -111,10 +117,13 @@ static const char* kTextureVS = R"(#version 300 es
 in vec2 aPos;
 in vec2 aUV;
 in vec4 aCol;
+uniform vec2 uScreenSize;
 out vec2 vUV;
 out vec4 vCol;
 void main() {
-    gl_Position = vec4(aPos, 0.0, 1.0);
+    float x = (aPos.x / uScreenSize.x) * 2.0 - 1.0;
+    float y = 1.0 - (aPos.y / uScreenSize.y) * 2.0;
+    gl_Position = vec4(x, y, 0.0, 1.0);
     vUV = aUV;
     vCol = aCol;
 }
@@ -142,7 +151,7 @@ static GLuint compileShader(GLenum type, const char* src) {
     if (!ok) {
         char log[512];
         glGetShaderInfoLog(shader, 512, nullptr, log);
-        fprintf(stderr, "[GL] Shader compile error: %s\n", log);
+        LOG_ERROR("GL", "Shader compile error: %s", log);
         glDeleteShader(shader);
         return 0;
     }
@@ -164,7 +173,7 @@ static GLuint createProgram(const char* vsSrc, const char* fsSrc) {
     if (!ok) {
         char log[512];
         glGetProgramInfoLog(prog, 512, nullptr, log);
-        fprintf(stderr, "[GL] Link error: %s\n", log);
+        LOG_ERROR("GL", "Link error: %s", log);
         glDeleteProgram(prog);
         return 0;
     }
@@ -215,13 +224,13 @@ public:
         // Get native display and window
         auto* display = (EGLNativeDisplayType)eglGetDisplay(EGL_DEFAULT_DISPLAY);
         if (display == EGL_NO_DISPLAY) {
-            fprintf(stderr, "[GL] eglGetDisplay failed\n");
+            LOG_ERROR("GL", "eglGetDisplay failed");
             return false;
         }
 
         EGLint major, minor;
         if (!eglInitialize(display, &major, &minor)) {
-            fprintf(stderr, "[GL] eglInitialize failed\n");
+            LOG_ERROR("GL", "eglInitialize failed");
             return false;
         }
 
@@ -239,7 +248,7 @@ public:
             // Try ES2 fallback
             configAttr[3] = EGL_OPENGL_ES2_BIT;
             if (!eglChooseConfig(display, configAttr, &config, 1, &numConfigs) || numConfigs == 0) {
-                fprintf(stderr, "[GL] No suitable EGL config\n");
+                LOG_ERROR("GL", "No suitable EGL config");
                 return false;
             }
         }
@@ -252,20 +261,20 @@ public:
             ctx = eglCreateContext(display, config, EGL_NO_CONTEXT, ctxAttr);
         }
         if (ctx == EGL_NO_CONTEXT) {
-            fprintf(stderr, "[GL] eglCreateContext failed\n");
+            LOG_ERROR("GL", "eglCreateContext failed");
             return false;
         }
 
         EGLSurface surface = eglCreateWindowSurface(display, config,
             (EGLNativeWindowType)windowHandle, nullptr);
         if (surface == EGL_NO_SURFACE) {
-            fprintf(stderr, "[GL] eglCreateWindowSurface failed\n");
+            LOG_ERROR("GL", "eglCreateWindowSurface failed");
             eglDestroyContext(display, ctx);
             return false;
         }
 
         if (!eglMakeCurrent(display, surface, surface, ctx)) {
-            fprintf(stderr, "[GL] eglMakeCurrent failed\n");
+            LOG_ERROR("GL", "eglMakeCurrent failed");
             eglDestroySurface(display, surface);
             eglDestroyContext(display, ctx);
             return false;
@@ -293,6 +302,7 @@ public:
     }
 
     void shutdown() override {
+        if (vbo_) { glDeleteBuffers(1, &vbo_); vbo_ = 0; vboSize_ = 0; }
         if (display_ != EGL_NO_DISPLAY) {
             eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
             if (surface_ != EGL_NO_SURFACE) eglDestroySurface(display_, surface_);
@@ -323,19 +333,21 @@ public:
     }
 
     void drawTriangles(const Vertex2D* verts, int count) override {
-        glUseProgram(solidProg_);
-        glUniformMatrix4fv(glGetUniformLocation(solidProg_, "uProj"), 1, GL_FALSE, ortho_);
-        uploadAndDraw(verts, count, 2, GL_TRIANGLES);
+        GLuint prog = curProg_ ? curProg_ : solidProg_;
+        glUseProgram(prog);
+        uploadAndDraw(verts, count, GL_TRIANGLES);
     }
 
     void drawTriangleStrip(const Vertex2D* verts, int count) override {
-        glUseProgram(solidProg_);
-        uploadAndDraw(verts, count, 2, GL_TRIANGLE_STRIP);
+        GLuint prog = curProg_ ? curProg_ : solidProg_;
+        glUseProgram(prog);
+        uploadAndDraw(verts, count, GL_TRIANGLE_STRIP);
     }
 
     void drawLines(const Vertex2D* verts, int count) override {
-        glUseProgram(solidProg_);
-        uploadAndDraw(verts, count, 2, GL_LINES);
+        GLuint prog = curProg_ ? curProg_ : solidProg_;
+        glUseProgram(prog);
+        uploadAndDraw(verts, count, GL_LINES);
     }
 
     GpuTexture* createTexture(int w, int h, const uint8_t* rgba) override {
@@ -355,6 +367,24 @@ public:
 
     void clearScissor() override { glDisable(GL_SCISSOR_TEST); }
 
+    void selectShader(int type) override {
+        switch (type) {
+        case 0: curProg_ = solidProg_; break;
+        case 1: curProg_ = roundedProg_; break;
+        case 2: curProg_ = ellipseProg_; break;
+        case 3: curProg_ = texProg_; break;
+        default: curProg_ = solidProg_; break;
+        }
+        glUseProgram(curProg_);
+        // Upload screen dimensions for NDC vertex transform
+        GLint loc = glGetUniformLocation(curProg_, "uScreenSize");
+        if (loc >= 0) glUniform2f(loc, (float)w_, (float)h_);
+    }
+
+    void bindTexture(int slot, GpuTexture* tex) override {
+        if (tex) tex->bind(slot);
+    }
+
 private:
     bool compileShaders() {
         solidProg_   = createProgram(kSolidVS, kSolidFS);
@@ -364,30 +394,69 @@ private:
         return solidProg_ && roundedProg_ && ellipseProg_ && texProg_;
     }
 
-    void uploadAndDraw(const Vertex2D* verts, int count, int components, GLenum mode) {
-        GLuint vbo;
-        glGenBuffers(1, &vbo);
-        glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferData(GL_ARRAY_BUFFER, count * sizeof(Vertex2D), verts, GL_DYNAMIC_DRAW);
+    void uploadAndDraw(const Vertex2D* verts, int count, GLenum mode) {
+        GLsizei byteSize = count * sizeof(Vertex2D);
 
-        GLint aPos = glGetAttribLocation(solidProg_, "aPos");
-        GLint aCol = glGetAttribLocation(solidProg_, "aCol");
-        glEnableVertexAttribArray(aPos);
-        glEnableVertexAttribArray(aCol);
-        glVertexAttribPointer(aPos, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex2D), (void*)0);
-        glVertexAttribPointer(aCol, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vertex2D), (void*)8);
+        // Grow the reusable VBO if needed
+        if (!vbo_ || vboSize_ < byteSize) {
+            if (vbo_) glDeleteBuffers(1, &vbo_);
+            vboSize_ = byteSize + byteSize / 2; // 1.5x headroom
+            glGenBuffers(1, &vbo_);
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+            glBufferData(GL_ARRAY_BUFFER, vboSize_, nullptr, GL_DYNAMIC_DRAW);
+        } else {
+            glBindBuffer(GL_ARRAY_BUFFER, vbo_);
+        }
+
+        // Upload: orphan + map
+        glBufferData(GL_ARRAY_BUFFER, byteSize, nullptr, GL_DYNAMIC_DRAW);
+        void* ptr = glMapBufferRange(GL_ARRAY_BUFFER, 0, byteSize,
+                                     GL_MAP_WRITE_BIT | GL_MAP_INVALIDATE_BUFFER_BIT);
+        if (ptr) {
+            memcpy(ptr, verts, byteSize);
+            glUnmapBuffer(GL_ARRAY_BUFFER);
+        }
+
+        GLuint prog = curProg_ ? curProg_ : solidProg_;
+        // Position at offset 0
+        GLint aPos = glGetAttribLocation(prog, "aPos");
+        if (aPos >= 0) {
+            glEnableVertexAttribArray(aPos);
+            glVertexAttribPointer(aPos, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex2D), (void*)0);
+        }
+        // Color at offset 16 (after x,y,u,v = 4+4+4+4 bytes)
+        GLint aCol = glGetAttribLocation(prog, "aCol");
+        if (aCol >= 0) {
+            glEnableVertexAttribArray(aCol);
+            glVertexAttribPointer(aCol, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(Vertex2D), (void*)16);
+        }
+        // UV at offset 8
+        GLint aUV = glGetAttribLocation(prog, "aUV");
+        if (aUV >= 0) {
+            glEnableVertexAttribArray(aUV);
+            glVertexAttribPointer(aUV, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex2D), (void*)8);
+        }
+        // Params at offset 20
+        GLint aParams = glGetAttribLocation(prog, "aParams");
+        if (aParams >= 0) {
+            glEnableVertexAttribArray(aParams);
+            glVertexAttribPointer(aParams, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex2D), (void*)20);
+        }
 
         glDrawArrays(mode, 0, count);
 
-        glDisableVertexAttribArray(aPos);
-        glDisableVertexAttribArray(aCol);
-        glDeleteBuffers(1, &vbo);
+        if (aPos >= 0) glDisableVertexAttribArray(aPos);
+        if (aCol >= 0) glDisableVertexAttribArray(aCol);
+        if (aUV >= 0) glDisableVertexAttribArray(aUV);
+        if (aParams >= 0) glDisableVertexAttribArray(aParams);
     }
 
     EGLDisplay display_ = EGL_NO_DISPLAY;
     EGLSurface surface_ = EGL_NO_SURFACE;
     EGLContext context_ = EGL_NO_CONTEXT;
-    GLuint solidProg_ = 0, roundedProg_ = 0, ellipseProg_ = 0, texProg_ = 0;
+    GLuint solidProg_ = 0, roundedProg_ = 0, ellipseProg_ = 0, texProg_ = 0, curProg_ = 0;
+    GLuint vbo_ = 0;
+    GLsizei vboSize_ = 0;
     float ortho_[16] = {};
     int w_ = 0, h_ = 0;
 };

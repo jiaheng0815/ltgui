@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libx11-dev libxft-dev libxrender-dev libfontconfig-dev libegl-dev libgles-dev
+
+      - name: Build
+        run: python ltgui.py build
+
+      - name: Test
+        run: python ltgui.py test
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install LLVM
+        run: choco install llvm --version=18.1.8 -y
+
+      - name: Build
+        run: python ltgui.py build
+
+      - name: Test
+        run: python ltgui.py test

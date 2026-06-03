@@ -18,6 +18,7 @@ enum class DrawOp : uint8_t {
     FillEllipse,
     StrokeRect,
     StrokeRounded,
+    StrokeEllipse,
     DrawGlyph,
     DrawImage,
     DrawLine,
@@ -66,6 +67,7 @@ public:
     void strokeRect(const Rect& r, float lineWidth, const Color& c);
     void strokeRoundedRect(const Rect& r, float radius, float lineWidth, const Color& c);
     void drawLine(const Point& p1, const Point& p2, float lineWidth, const Color& c);
+    void strokeEllipse(const Rect& r, float lineWidth, const Color& c);
     void drawGlyph(int texId, const Rect& dst, const Rect& src, const Color& c);
     void drawImage(int texId, const Rect& dst);
 
@@ -91,14 +93,17 @@ public:
 
 private:
     void flushBatch();
-    void emitSolidQuad(const Rect& r, const Color& c);
-    void emitTexturedQuad(const Rect& r, float u0, float v0, float u1, float v1, uint32_t color);
+    void emitQuad(std::vector<Vertex2D>& out, const Rect& r,
+                  float u0, float v0, float u1, float v1, uint32_t color,
+                  float p0, float p1, float p2, float p3);
+    void emitStrokeRect(std::vector<Vertex2D>& out, const Rect& r, uint32_t color);
+    void emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, uint32_t color);
+    void emitLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2, uint32_t color);
 
     GpuDevice* device_;
     TextureManager texMgr_;
     FontAtlas* fontAtlas_ = nullptr;
     std::vector<DrawCmd> cmds_;
-    std::vector<Vertex2D> verts_;
 
     int width_ = 0, height_ = 0;
     bool scissorActive_ = false;

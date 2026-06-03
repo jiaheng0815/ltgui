@@ -52,6 +52,9 @@ public:
     // Load a font from memory (TTF/OTF data)
     bool loadFont(const Font& fontDesc, const uint8_t* ttfData, int ttfSize);
 
+    // Load a font from a file path (returns false if file cannot be read)
+    bool loadFontFile(const Font& fontDesc, const char* ttfPath);
+
     // Get or rasterize a glyph
     const GlyphEntry* getGlyph(uint32_t codepoint, const Font& fontDesc);
 
@@ -65,6 +68,8 @@ public:
     void flush();
 
     bool hasFont(const Font& f) const { return loadedFonts_.count(f) > 0; }
+    int atlasW() const { return atlasW_; }
+    int atlasH() const { return atlasH_; }
 
 private:
 #ifdef LTGUI_HAS_STB_TRUETYPE

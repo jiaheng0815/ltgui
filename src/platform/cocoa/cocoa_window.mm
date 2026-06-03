@@ -221,9 +221,14 @@ Size CocoaWindow::getSize() const {
     return size_;
 }
 
-void CocoaWindow::invalidate(const Rect& /*rect*/) {
+void CocoaWindow::invalidate(const Rect& rect) {
     if (view_) {
-        [view_ setNeedsDisplay:YES];
+        if (rect.width > 0 && rect.height > 0) {
+            NSRect r = NSMakeRect(rect.x, rect.y, rect.width, rect.height);
+            [view_ setNeedsDisplayInRect:r];
+        } else {
+            [view_ setNeedsDisplay:YES];
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 #include "app.h"
 #include "window.h"
+#include "timer.h"
 #include "animation.h"
 
 #ifdef LTGUI_PLATFORM_WINDOWS
@@ -55,7 +56,19 @@ int Application::run() {
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     [NSApp activateIgnoringOtherApps:YES];
-    [NSApp run];
+    [NSApp finishLaunching];
+
+    while (running_) {
+        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                            untilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]
+                               inMode:NSDefaultRunLoopMode
+                              dequeue:YES];
+        if (event) {
+            [NSApp sendEvent:event];
+        }
+        AnimationManager::instance().tick();
+        processEvents();
+    }
 #endif
 
     return 0;
@@ -73,6 +86,19 @@ void Application::quit() {
 void Application::processEvents() {
     auto& anim = AnimationManager::instance();
     anim.tick();
+
+    uint64_t now = anim.nowMs();
+
+    // Tick timers (iterate backwards so stopped timers can be removed safely)
+    for (size_t i = timers_.size(); i > 0; i--) {
+        // Timer may stop itself during tick(), invalidating the pointer.
+        // But stop() removes from timers_, so we re-fetch each time.
+        if (i - 1 < timers_.size()) {
+            Timer* t = timers_[i - 1];
+            if (t) t->tick(now);
+        }
+    }
+
     if (anim.hasActive()) {
         for (auto* w : windows_) {
             w->update();
@@ -88,6 +114,18 @@ void Application::unregisterWindow(Window* window) {
     auto it = std::find(windows_.begin(), windows_.end(), window);
     if (it != windows_.end()) {
         windows_.erase(it);
+    }
+}
+
+void Application::registerTimer(Timer* timer) {
+    if (std::find(timers_.begin(), timers_.end(), timer) == timers_.end())
+        timers_.push_back(timer);
+}
+
+void Application::unregisterTimer(Timer* timer) {
+    auto it = std::find(timers_.begin(), timers_.end(), timer);
+    if (it != timers_.end()) {
+        timers_.erase(it);
     }
 }
 

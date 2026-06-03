@@ -44,7 +44,7 @@ void BoxLayout::layout(Widget* container) {
     int totalStretch = 0;
 
     for (int i = 0; i < n; i++) {
-        Widget* child = children[i];
+        Widget* child = children[i].get();
         if (!child->isVisible()) continue;
         visibleCount++;
 
@@ -73,7 +73,7 @@ void BoxLayout::layout(Widget* container) {
     int pos = margin_;
 
     for (int i = 0; i < n; i++) {
-        Widget* child = children[i];
+        Widget* child = children[i].get();
         if (!child->isVisible()) continue;
 
         Size hint = child->sizeHint();
@@ -112,7 +112,7 @@ Size BoxLayout::preferredSize(const Widget* container) const {
     int maxW = 0, maxH = 0;
     int visibleCount = 0;
 
-    for (auto* child : children) {
+    for (auto& child : children) {
         if (!child->isVisible()) continue;
         visibleCount++;
         Size hint = child->sizeHint();

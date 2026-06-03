@@ -10,7 +10,7 @@ Tooltip::Tooltip(Widget* parent) : Widget(parent) {
     style().fgColor = Color::White;
     style().borderRadius = 4;
     style().setPadding(8, 4);
-    style().font = Font("Segoe UI", 11);
+    style().font = Font::systemDefault(11);
 }
 
 void Tooltip::setText(const std::string& text) {
@@ -74,10 +74,9 @@ void Tooltip::show(Widget* target, const std::string& text) {
     if (parent) {
         auto& kids = parent->children();
         for (int i = static_cast<int>(kids.size()) - 1; i >= 0; --i) {
-            auto* ttp = dynamic_cast<Tooltip*>(kids[i]);
+            auto* ttp = dynamic_cast<Tooltip*>(kids[i].get());
             if (ttp) {
-                parent->removeChild(ttp);
-                delete ttp;
+                parent->removeChild(ttp); // destroys the tooltip
             }
         }
     }
@@ -85,9 +84,10 @@ void Tooltip::show(Widget* target, const std::string& text) {
     Rect targetAbs = target->absoluteRect();
     Point pos(targetAbs.x + 8, targetAbs.bottom() + 4);
 
-    auto* tooltip = new Tooltip(parent);
+    auto tooltip = std::make_unique<Tooltip>();
     tooltip->setText(text);
     tooltip->showAt(pos);
+    if (parent) parent->addChild(std::move(tooltip));
 }
 
 } // namespace ltgui

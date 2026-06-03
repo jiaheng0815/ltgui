@@ -11,7 +11,7 @@ Style Style::defaultStyle() {
     s.borderColor = t.border;
     s.borderWidth = 1;
     s.borderRadius = 4;
-    s.font = Font("Segoe UI", 12);
+    s.font = Font::systemDefault(12);
     s.setPadding(8, 4);
     s.setMargin(2);
     return s;

@@ -14,198 +14,173 @@ int main() {
         return 1;
     }
 
-    auto* root = new Widget();
+    auto root = std::make_unique<Widget>();
     root->style().bgColor = currentTheme().bgPrimary;
 
-    auto* mainLayout = new BoxLayout(BoxLayout::TopToBottom, 0, 0);
+    auto mainLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 0, 0);
     mainLayout->addStretch(0);
     mainLayout->addStretch(1);
-    root->setLayout(mainLayout);
+    root->setLayout(std::move(mainLayout));
 
     // --- Header ---
-    auto* header = new Widget();
+    auto* header = root->makeChild<Widget>();
     header->style().bgColor = currentTheme().bgSecondary;
 
-    auto* headerLayout = new BoxLayout(BoxLayout::LeftToRight, 8, 12);
+    auto headerLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 12);
     headerLayout->addStretch(0);
     headerLayout->addStretch(1);
     headerLayout->addStretch(0);
 
-    auto* title = new Label("ltgui Framework");
+    auto* title = header->makeChild<Label>("ltgui Framework");
     title->style().font = Font("Segoe UI", 18, FontWeight::Bold);
     title->style().fgColor = currentTheme().accent;
 
     // Theme toggle button
     bool darkTheme = false;
-    auto* themeBtn = new Button("Dark Theme");
+    auto* themeBtn = header->makeChild<Button>("Dark Theme");
     themeBtn->onClick([&]() {
         darkTheme = !darkTheme;
         setTheme(darkTheme ? Theme::Dark() : Theme::Light());
         themeBtn->setText(darkTheme ? "Light Theme" : "Dark Theme");
     });
 
-    header->addChild(title);
-    header->addChild(new Widget()); // spacer
-    header->addChild(themeBtn);
-    header->setLayout(headerLayout);
+    header->addChild(std::make_unique<Widget>()); // spacer
+    header->setLayout(std::move(headerLayout));
 
     // --- Tab Widget ---
-    auto* tabs = new TabWidget();
+    auto* tabs = root->makeChild<TabWidget>();
 
     // ===== Tab 1: Widgets =====
     int tab1 = tabs->addTab("Widgets");
     auto* w1 = tabs->tabContent(tab1);
-    auto* w1Layout = new BoxLayout(BoxLayout::TopToBottom, 8, 12);
+    auto w1Layout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12);
 
     // Buttons section
-    auto* btnSection = new Widget();
+    auto* btnSection = w1->makeChild<Widget>();
     btnSection->style().bgColor = Color::Transparent;
-    auto* btnSectionLayout = new BoxLayout(BoxLayout::TopToBottom, 6, 0);
+    auto btnSectionLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 6, 0);
 
-    auto* btnTitle = new Label("Buttons");
+    auto* btnTitle = btnSection->makeChild<Label>("Buttons");
     btnTitle->style().font = Font("Segoe UI", 14, FontWeight::SemiBold);
 
-    auto* btnRow = new Widget();
+    auto* btnRow = btnSection->makeChild<Widget>();
     btnRow->style().bgColor = Color::Transparent;
-    auto* btnRowLayout = new BoxLayout(BoxLayout::LeftToRight, 8, 0);
+    auto btnRowLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 0);
 
-    auto* normalBtn = new Button("Normal Button");
-    auto* primaryBtn = new Button("Primary Action");
+    auto* normalBtn = btnRow->makeChild<Button>("Normal Button");
+    auto* primaryBtn = btnRow->makeChild<Button>("Primary Action");
     primaryBtn->style().bgColor = currentTheme().accent;
     primaryBtn->style().fgColor = Color::White;
 
-    auto* counterBtn = new Button("Clicked: 0 times");
+    auto* counterBtn = btnRow->makeChild<Button>("Clicked: 0 times");
     counterBtn->onClick([&]() {
         g_clickCount++;
         counterBtn->setText("Clicked: " + std::to_string(g_clickCount) + " times");
     });
 
-    btnRow->addChild(normalBtn);
-    btnRow->addChild(primaryBtn);
-    btnRow->addChild(counterBtn);
-    btnRow->setLayout(btnRowLayout);
+    btnRow->setLayout(std::move(btnRowLayout));
 
-    btnSection->addChild(btnTitle);
-    btnSection->addChild(btnRow);
-    btnSection->setLayout(btnSectionLayout);
+    btnSection->setLayout(std::move(btnSectionLayout));
 
     // Input section
-    auto* inputSection = new Widget();
+    auto* inputSection = w1->makeChild<Widget>();
     inputSection->style().bgColor = Color::Transparent;
-    auto* inputSectionLayout = new BoxLayout(BoxLayout::TopToBottom, 6, 0);
+    auto inputSectionLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 6, 0);
 
-    auto* inputTitle = new Label("Input Controls");
+    auto* inputTitle = inputSection->makeChild<Label>("Input Controls");
     inputTitle->style().font = Font("Segoe UI", 14, FontWeight::SemiBold);
 
-    auto* inputRow = new Widget();
+    auto* inputRow = inputSection->makeChild<Widget>();
     inputRow->style().bgColor = Color::Transparent;
-    auto* inputRowLayout = new BoxLayout(BoxLayout::LeftToRight, 8, 0);
+    auto inputRowLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 0);
 
-    auto* nameLabel = new Label("Name:");
-    auto* nameBox = new TextBox("Type your name...");
+    auto* nameLabel = inputRow->makeChild<Label>("Name:");
+    auto* nameBox = inputRow->makeChild<TextBox>("Type your name...");
 
-    auto* cb1 = new CheckBox("Accept terms");
-    auto* cb2 = new CheckBox("Subscribe");
+    auto* cb1 = inputRow->makeChild<CheckBox>("Accept terms");
+    auto* cb2 = inputRow->makeChild<CheckBox>("Subscribe");
 
-    inputRow->addChild(nameLabel);
-    inputRow->addChild(nameBox);
-    inputRow->addChild(cb1);
-    inputRow->addChild(cb2);
-    inputRow->setLayout(inputRowLayout);
     inputRowLayout->addStretch(0);
     inputRowLayout->addStretch(1);
     inputRowLayout->addStretch(0);
     inputRowLayout->addStretch(0);
+    inputRow->setLayout(std::move(inputRowLayout));
 
-    inputSection->addChild(inputTitle);
-    inputSection->addChild(inputRow);
-    inputSection->setLayout(inputSectionLayout);
+    inputSection->setLayout(std::move(inputSectionLayout));
 
     // Radio + select section
-    auto* selectSection = new Widget();
+    auto* selectSection = w1->makeChild<Widget>();
     selectSection->style().bgColor = Color::Transparent;
-    auto* selectSectionLayout = new BoxLayout(BoxLayout::LeftToRight, 16, 0);
+    auto selectSectionLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 16, 0);
 
-    auto* rbGroup = new Widget();
+    auto* rbGroup = selectSection->makeChild<Widget>();
     rbGroup->style().bgColor = Color::Transparent;
-    auto* rbLayout = new BoxLayout(BoxLayout::LeftToRight, 8, 0);
-    auto* rb1 = new RadioButton("Red");
-    auto* rb2 = new RadioButton("Green");
-    auto* rb3 = new RadioButton("Blue");
+    auto rbLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 0);
+    auto* rb1 = rbGroup->makeChild<RadioButton>("Red");
+    auto* rb2 = rbGroup->makeChild<RadioButton>("Green");
+    auto* rb3 = rbGroup->makeChild<RadioButton>("Blue");
     rb1->setChecked(true);
-    rbGroup->addChild(rb1);
-    rbGroup->addChild(rb2);
-    rbGroup->addChild(rb3);
-    rbGroup->setLayout(rbLayout);
+    rbGroup->setLayout(std::move(rbLayout));
 
-    auto* combo = new ComboBox();
+    auto* combo = selectSection->makeChild<ComboBox>();
     combo->addItem("Small");
     combo->addItem("Medium");
     combo->addItem("Large");
     combo->addItem("X-Large");
     combo->setCurrentIndex(1);
 
-    auto* comboLabel = new Label("Size: Medium");
+    auto* comboLabel = selectSection->makeChild<Label>("Size: Medium");
     combo->onSelectionChanged([&](int index) {
+        (void)index;
         comboLabel->setText("Size: " + combo->currentText());
     });
 
-    selectSection->addChild(rbGroup);
-    selectSection->addChild(combo);
-    selectSection->addChild(comboLabel);
-    selectSection->setLayout(selectSectionLayout);
+    selectSection->setLayout(std::move(selectSectionLayout));
 
     // Slider + Progress
-    auto* progSection = new Widget();
+    auto* progSection = w1->makeChild<Widget>();
     progSection->style().bgColor = Color::Transparent;
-    auto* progSectionLayout = new BoxLayout(BoxLayout::LeftToRight, 12, 0);
+    auto progSectionLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 12, 0);
 
-    auto* slider = new Slider();
+    auto* slider = progSection->makeChild<Slider>();
     slider->setRange(0, 100);
     slider->setValue(60);
-    auto* slValue = new Label("60%");
-    auto* progress = new ProgressBar();
+    auto* slValue = progSection->makeChild<Label>("60%");
+    auto* progress = progSection->makeChild<ProgressBar>();
     progress->setValue(60);
     slider->onValueChanged([&](int v) {
         slValue->setText(std::to_string(v) + "%");
         progress->setValue(v);
     });
 
-    progSection->addChild(new Label("Progress:"));
-    progSection->addChild(slider);
-    progSection->addChild(slValue);
-    progSection->addChild(progress);
-    progSection->setLayout(progSectionLayout);
+    progSection->addChild(std::make_unique<Label>("Progress:"));
     progSectionLayout->addStretch(0);
     progSectionLayout->addStretch(1);
     progSectionLayout->addStretch(0);
     progSectionLayout->addStretch(1);
+    progSection->setLayout(std::move(progSectionLayout));
 
     // Assemble tab 1
-    w1->addChild(btnSection);
-    w1->addChild(inputSection);
-    w1->addChild(selectSection);
-    w1->addChild(progSection);
-    w1->setLayout(w1Layout);
     w1Layout->addStretch(0);
     w1Layout->addStretch(0);
     w1Layout->addStretch(0);
     w1Layout->addStretch(1);
+    w1->setLayout(std::move(w1Layout));
 
     // ===== Tab 2: List & Tree =====
     int tab2 = tabs->addTab("List & Tree");
     auto* w2 = tabs->tabContent(tab2);
-    auto* w2Layout = new BoxLayout(BoxLayout::LeftToRight, 8, 12);
+    auto w2Layout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 12);
 
     // ListBox
-    auto* listCol = new Widget();
+    auto* listCol = w2->makeChild<Widget>();
     listCol->style().bgColor = Color::Transparent;
-    auto* listColLayout = new BoxLayout(BoxLayout::TopToBottom, 4, 0);
+    auto listColLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 4, 0);
 
-    auto* listTitle = new Label("ListBox");
+    auto* listTitle = listCol->makeChild<Label>("ListBox");
     listTitle->style().font = Font("Segoe UI", 14, FontWeight::SemiBold);
 
-    auto* listBox = new ListBox();
+    auto* listBox = listCol->makeChild<ListBox>();
     listBox->addItem("Apple");
     listBox->addItem("Banana");
     listBox->addItem("Cherry");
@@ -218,21 +193,19 @@ int main() {
     listBox->addItem("Lemon");
     listBox->setSelected(2);
 
-    listCol->addChild(listTitle);
-    listCol->addChild(listBox);
-    listCol->setLayout(listColLayout);
     listColLayout->addStretch(0);
     listColLayout->addStretch(1);
+    listCol->setLayout(std::move(listColLayout));
 
     // TreeView
-    auto* treeCol = new Widget();
+    auto* treeCol = w2->makeChild<Widget>();
     treeCol->style().bgColor = Color::Transparent;
-    auto* treeColLayout = new BoxLayout(BoxLayout::TopToBottom, 4, 0);
+    auto treeColLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 4, 0);
 
-    auto* treeTitle = new Label("TreeView");
+    auto* treeTitle = treeCol->makeChild<Label>("TreeView");
     treeTitle->style().font = Font("Segoe UI", 14, FontWeight::SemiBold);
 
-    auto* treeView = new TreeView();
+    auto* treeView = treeCol->makeChild<TreeView>();
     auto* treeRoot = treeView->rootItem();
     treeRoot->setExpanded(true);
 
@@ -256,31 +229,27 @@ int main() {
     grain->addChild("Wheat");
     grain->addChild("Oats");
 
-    treeCol->addChild(treeTitle);
-    treeCol->addChild(treeView);
-    treeCol->setLayout(treeColLayout);
     treeColLayout->addStretch(0);
     treeColLayout->addStretch(1);
+    treeCol->setLayout(std::move(treeColLayout));
 
-    w2->addChild(listCol);
-    w2->addChild(treeCol);
-    w2->setLayout(w2Layout);
     w2Layout->addStretch(1);
     w2Layout->addStretch(1);
+    w2->setLayout(std::move(w2Layout));
 
     // ===== Tab 3: About =====
     int tab3 = tabs->addTab("About");
     auto* w3 = tabs->tabContent(tab3);
-    auto* w3Layout = new BoxLayout(BoxLayout::TopToBottom, 12, 20);
+    auto w3Layout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 12, 20);
 
-    auto* aboutTitle = new Label("About ltgui");
+    auto* aboutTitle = w3->makeChild<Label>("About ltgui");
     aboutTitle->style().font = Font("Segoe UI", 22, FontWeight::Bold);
     aboutTitle->style().fgColor = currentTheme().accent;
 
-    auto* aboutText = new Label("A from-scratch cross-platform retained-mode C++ GUI framework.");
+    auto* aboutText = w3->makeChild<Label>("A from-scratch cross-platform retained-mode C++ GUI framework.");
     aboutText->style().font = Font("Segoe UI", 13);
 
-    auto* aboutFeatures = new Label(
+    auto* aboutFeatures = w3->makeChild<Label>(
         "Features:\n"
         "  - Zero external dependencies (beyond platform APIs)\n"
         "  - Cross-platform: Windows (GDI+), Linux (X11/Xft), macOS (Cocoa)\n"
@@ -293,19 +262,12 @@ int main() {
     aboutFeatures->style().font = Font("Segoe UI", 12);
     aboutFeatures->style().fgColor = currentTheme().textSecondary;
 
-    w3->addChild(aboutTitle);
-    w3->addChild(aboutText);
-    w3->addChild(aboutFeatures);
-    w3->setLayout(w3Layout);
     w3Layout->addStretch(0);
     w3Layout->addStretch(0);
     w3Layout->addStretch(1);
+    w3->setLayout(std::move(w3Layout));
 
-    // Assemble
-    root->addChild(header);
-    root->addChild(tabs);
-
-    window.setCentralWidget(root);
+    window.setCentralWidget(std::move(root));
     window.show();
 
     return Application::instance().run();

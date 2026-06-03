@@ -46,22 +46,25 @@ Win32Canvas::~Win32Canvas() {
 void Win32Canvas::resize(int width, int height) {
     if (width <= 0 || height <= 0) return;
 
+    // Allocate new objects before deleting old ones — if allocation
+    // fails, the old canvas remains intact.
+    Gdiplus::Bitmap* newBuf = new Gdiplus::Bitmap(width, height, PixelFormat32bppARGB);
+    Gdiplus::Graphics* newGfx = new Gdiplus::Graphics(newBuf);
+    newGfx->SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    newGfx->SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
+
     delete backbuffer_;
     delete graphics_;
+    backbuffer_ = newBuf;
+    graphics_ = newGfx;
 
     canvasWidth_ = width;
     canvasHeight_ = height;
-
-    backbuffer_ = new Gdiplus::Bitmap(width, height, PixelFormat32bppARGB);
-    graphics_ = new Gdiplus::Graphics(backbuffer_);
-    graphics_->SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
-    graphics_->SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 }
 
 void Win32Canvas::beginPaint() {
-    if (graphics_) {
-        graphics_->Clear(Gdiplus::Color(255, 255, 255, 255));
-    }
+    // Don't clear the backbuffer — dirty-rect painting means only
+    // the invalidated areas get repainted; the rest must persist.
 }
 
 void Win32Canvas::endPaint() {
@@ -183,7 +186,7 @@ void Win32Canvas::drawText(const std::string& text, const Rect& rect, int flags)
 
     Gdiplus::Font* font = currentFont_;
     if (!font) {
-        font = getOrCreateFont(Font("Segoe UI", 12));
+        font = getOrCreateFont(Font::systemDefault(12));
     }
 
     if (brush_) {
@@ -298,7 +301,7 @@ Size Win32Canvas::measureText(const std::string& text) {
 
     Gdiplus::Font* font = currentFont_;
     if (!font) {
-        font = getOrCreateFont(Font("Segoe UI", 12));
+        font = getOrCreateFont(Font::systemDefault(12));
     }
 
     // Reuse a small measurement bitmap instead of creating one per call

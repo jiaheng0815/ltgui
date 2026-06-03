@@ -94,7 +94,7 @@ void ProgressBar::paintSelf(NativeCanvas* canvas) {
         // Percentage text
         if (r.width > 60) {
             canvas->setColor(t.textPrimary);
-            canvas->setFont(Font("Segoe UI", 11));
+            canvas->setFont(Font::systemDefault(11));
             int pctInt = static_cast<int>(pct * 100.0f + 0.5f);
             std::string pctText = std::to_string(pctInt) + "%";
             canvas->drawText(pctText, r,

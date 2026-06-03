@@ -3,6 +3,7 @@
 #include "animation.h"
 #include <string>
 #include <vector>
+#include <memory>
 #include <functional>
 
 namespace ltgui {
@@ -21,7 +22,7 @@ public:
     void setExpanded(bool expanded);
 
     TreeViewItem* parent() const { return parent_; }
-    const std::vector<TreeViewItem*>& children() const { return children_; }
+    const std::vector<std::unique_ptr<TreeViewItem>>& children() const { return children_; }
     int childCount() const { return static_cast<int>(children_.size()); }
 
     TreeViewItem* addChild(const std::string& text);
@@ -30,7 +31,7 @@ public:
 private:
     friend class TreeView;
     std::string text_;
-    std::vector<TreeViewItem*> children_;
+    std::vector<std::unique_ptr<TreeViewItem>> children_;
     TreeViewItem* parent_ = nullptr;
     TreeView* treeView_ = nullptr;
     bool expanded_ = false;
@@ -49,6 +50,7 @@ public:
     using SelectionChangedCallback = std::function<void(TreeViewItem*)>;
     void onSelectionChanged(SelectionChangedCallback cb) { selectionCallback_ = std::move(cb); }
 
+    WidgetType widgetType() const override { return WidgetType::TreeView; }
     Size sizeHint() const override;
 
 protected:
@@ -56,7 +58,7 @@ protected:
     bool handleEvent(Event& event) override;
 
 private:
-    TreeViewItem* root_ = nullptr;
+    std::unique_ptr<TreeViewItem> root_;
     TreeViewItem* selected_ = nullptr;
     AnimatedFloat scrollAnim_{0.0f};
     int scrollTarget_ = 0;

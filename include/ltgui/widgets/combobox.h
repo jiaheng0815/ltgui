@@ -9,6 +9,7 @@ namespace ltgui {
 class ComboBox : public Widget {
 public:
     explicit ComboBox(Widget* parent = nullptr);
+    ~ComboBox() override;
 
     void addItem(const std::string& item);
     void removeItem(int index);
@@ -22,6 +23,7 @@ public:
     using SelectionChangedCallback = std::function<void(int)>;
     void onSelectionChanged(SelectionChangedCallback cb) { selectionCallback_ = std::move(cb); }
 
+    WidgetType widgetType() const override { return WidgetType::ComboBox; }
     Size sizeHint() const override;
     Rect effectiveGeometry() const override;
 
@@ -35,11 +37,12 @@ protected:
 private:
     void openDropdown();
     void closeDropdown();
+    void invalidateExtended();
 
     std::vector<std::string> items_;
     int selected_ = -1;
-    bool dropped_ = false;
-    bool dropDown_ = true;
+    bool dropdownOpen_ = false;
+    bool opensDownward_ = true;
     int dropHeight_ = 0;
     SelectionChangedCallback selectionCallback_;
 

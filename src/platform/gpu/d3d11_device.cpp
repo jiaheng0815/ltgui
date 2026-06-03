@@ -6,6 +6,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 #include <d3dcompiler.h>
+#include "log.h"
 #include <cstdio>
 
 #pragma comment(lib, "d3d11.lib")
@@ -21,9 +22,13 @@ static const char* kSolidShader = R"(
 struct VS_IN { float2 pos : POSITION; float4 col : COLOR; };
 struct VS_OUT { float4 pos : SV_POSITION; float4 col : COLOR; };
 
+cbuffer ScreenCB : register(b0) { float2 screenSize; };
+
 VS_OUT VSMain(VS_IN input) {
     VS_OUT output;
-    output.pos = float4(input.pos, 0.0, 1.0);
+    float x = (input.pos.x / screenSize.x) * 2.0 - 1.0;
+    float y = 1.0 - (input.pos.y / screenSize.y) * 2.0;
+    output.pos = float4(x, y, 0.0, 1.0);
     output.col = input.col;
     return output;
 }
@@ -41,7 +46,9 @@ cbuffer ScreenCB : register(b0) { float2 screenSize; };
 
 VS_OUT VSMain(VS_IN input) {
     VS_OUT output;
-    output.pos = float4(input.pos, 0.0, 1.0);
+    float x = (input.pos.x / screenSize.x) * 2.0 - 1.0;
+    float y = 1.0 - (input.pos.y / screenSize.y) * 2.0;
+    output.pos = float4(x, y, 0.0, 1.0);
     output.uv = input.uv;
     output.col = input.col;
     output.params = input.params;
@@ -81,9 +88,13 @@ static const char* kEllipseShader = R"(
 struct VS_IN { float2 pos : POSITION; float2 uv : TEXCOORD; float4 col : COLOR; float4 params : TEXCOORD1; };
 struct VS_OUT { float4 pos : SV_POSITION; float2 uv : TEXCOORD; float4 col : COLOR; float4 params : TEXCOORD1; };
 
+cbuffer ScreenCB : register(b0) { float2 screenSize; };
+
 VS_OUT VSMain(VS_IN input) {
     VS_OUT output;
-    output.pos = float4(input.pos, 0.0, 1.0);
+    float x = (input.pos.x / screenSize.x) * 2.0 - 1.0;
+    float y = 1.0 - (input.pos.y / screenSize.y) * 2.0;
+    output.pos = float4(x, y, 0.0, 1.0);
     output.uv = input.uv;
     output.col = input.col;
     output.params = input.params;
@@ -116,12 +127,15 @@ static const char* kTextureShader = R"(
 struct VS_IN { float2 pos : POSITION; float2 uv : TEXCOORD; float4 col : COLOR; };
 struct VS_OUT { float4 pos : SV_POSITION; float2 uv : TEXCOORD; float4 col : COLOR; };
 
+cbuffer ScreenCB : register(b0) { float2 screenSize; };
 SamplerState smp : register(s0);
 Texture2D tex : register(t0);
 
 VS_OUT VSMain(VS_IN input) {
     VS_OUT output;
-    output.pos = float4(input.pos, 0.0, 1.0);
+    float x = (input.pos.x / screenSize.x) * 2.0 - 1.0;
+    float y = 1.0 - (input.pos.y / screenSize.y) * 2.0;
+    output.pos = float4(x, y, 0.0, 1.0);
     output.uv = input.uv;
     output.col = input.col;
     return output;
@@ -153,13 +167,22 @@ public:
         init.pSysMem = rgba;
         init.SysMemPitch = w * 4;
 
-        dev->CreateTexture2D(&desc, rgba ? &init : nullptr, &tex_);
+        HRESULT hr = dev->CreateTexture2D(&desc, rgba ? &init : nullptr, &tex_);
+        if (FAILED(hr)) {
+            LOG_ERROR("D3D11", "CreateTexture2D failed: 0x%08lx", hr);
+            tex_ = nullptr;
+            return;
+        }
 
         D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
         srvDesc.Format = desc.Format;
         srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
         srvDesc.Texture2D.MipLevels = 1;
-        dev->CreateShaderResourceView(tex_, &srvDesc, &srv_);
+        hr = dev->CreateShaderResourceView(tex_, &srvDesc, &srv_);
+        if (FAILED(hr)) {
+            LOG_ERROR("D3D11", "CreateShaderResourceView failed: 0x%08lx", hr);
+            srv_ = nullptr;
+        }
     }
 
     ~D3D11Texture() override {
@@ -274,11 +297,19 @@ public:
         sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
         device_->CreateSamplerState(&sampDesc, &sampler_);
 
+        // Constant buffer for screen dimensions (NDC vertex transform)
+        D3D11_BUFFER_DESC cbDesc = {};
+        cbDesc.Usage = D3D11_USAGE_DEFAULT;
+        cbDesc.ByteWidth = 16; // float2 + padding to 16 bytes
+        cbDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+        device_->CreateBuffer(&cbDesc, nullptr, &screenCB_);
+
         return true;
     }
 
     void shutdown() override {
         if (rtView_) { rtView_->Release(); rtView_ = nullptr; }
+        if (vertexBuffer_) { vertexBuffer_->Release(); vertexBuffer_ = nullptr; vertexBufferSize_ = 0; }
         if (blendState_) { blendState_->Release(); blendState_ = nullptr; }
         if (sampler_) { sampler_->Release(); sampler_ = nullptr; }
         if (solidVS_) { solidVS_->Release(); solidVS_ = nullptr; }
@@ -291,6 +322,7 @@ public:
         if (texPS_) { texPS_->Release(); texPS_ = nullptr; }
         if (ilSolid_) { ilSolid_->Release(); ilSolid_ = nullptr; }
         if (ilRounded_) { ilRounded_->Release(); ilRounded_ = nullptr; }
+        if (screenCB_) { screenCB_->Release(); screenCB_ = nullptr; }
         if (context_) { context_->ClearState(); context_->Release(); context_ = nullptr; }
         if (swapChain_) { swapChain_->Release(); swapChain_ = nullptr; }
         if (device_) { device_->Release(); device_ = nullptr; }
@@ -300,8 +332,10 @@ public:
         width_ = w; height_ = h;
         if (rtView_) { rtView_->Release(); rtView_ = nullptr; }
         if (swapChain_) {
-            swapChain_->ResizeBuffers(2, w, h, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
-            createRenderTarget();
+            HRESULT hr = swapChain_->ResizeBuffers(2, w, h, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+            if (SUCCEEDED(hr)) {
+                createRenderTarget();
+            }
         }
 
         float L = 0.0f, R = (float)w, T = 0.0f, B = (float)h;
@@ -312,6 +346,7 @@ public:
     }
 
     void beginFrame() override {
+        if (!rtView_) return;
         float clearColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
         context_->ClearRenderTargetView(rtView_, clearColor);
         context_->OMSetRenderTargets(1, &rtView_, nullptr);
@@ -319,6 +354,11 @@ public:
         D3D11_VIEWPORT vp = { 0, 0, (float)width_, (float)height_, 0, 1 };
         context_->RSSetViewports(1, &vp);
         context_->PSSetSamplers(0, 1, &sampler_);
+
+        // Upload screen dimensions for NDC vertex transform
+        float screenSize[2] = { (float)width_, (float)height_ };
+        context_->UpdateSubresource(screenCB_, 0, nullptr, screenSize, 0, 0);
+        context_->VSSetConstantBuffers(0, 1, &screenCB_);
 
         float blendFactor[4] = { 1, 1, 1, 1 };
         context_->OMSetBlendState(blendState_, blendFactor, 0xFFFFFFFF);
@@ -329,18 +369,31 @@ public:
     }
 
     void drawTriangles(const Vertex2D* verts, int count) override {
-        useShader(ShaderType::Solid);
         mapVertices(verts, count, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     }
 
     void drawTriangleStrip(const Vertex2D* verts, int count) override {
-        useShader(ShaderType::Solid);
         mapVertices(verts, count, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
     }
 
     void drawLines(const Vertex2D* verts, int count) override {
-        useShader(ShaderType::Solid);
         mapVertices(verts, count, D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
+    }
+
+    void selectShader(int type) override {
+        switch (type) {
+        case 0: useShader(ShaderType::Solid); break;
+        case 1: useShader(ShaderType::Rounded); break;
+        case 2: useShader(ShaderType::Ellipse); break;
+        case 3: useShader(ShaderType::Texture); break;
+        default: useShader(ShaderType::Solid); break;
+        }
+    }
+
+    void bindTexture(int slot, GpuTexture* tex) override {
+        if (tex) {
+            tex->bind(slot);
+        }
     }
 
     GpuTexture* createTexture(int w, int h, const uint8_t* rgba) override {
@@ -375,7 +428,7 @@ private:
             HRESULT hr = D3DCompile(src, strlen(src), nullptr, nullptr, nullptr,
                                     entry, target, 0, 0, blob, &err);
             if (FAILED(hr) && err) {
-                fprintf(stderr, "[D3D11] Shader compile error (%s): %s\n",
+                LOG_ERROR("D3D11", "Shader compile error (%s): %s",
                         entry, (const char*)err->GetBufferPointer());
                 err->Release();
                 return false;
@@ -436,10 +489,16 @@ private:
 
     void createRenderTarget() {
         ID3D11Texture2D* backBuffer = nullptr;
-        swapChain_->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backBuffer);
-        if (backBuffer) {
-            device_->CreateRenderTargetView(backBuffer, nullptr, &rtView_);
-            backBuffer->Release();
+        HRESULT hr = swapChain_->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backBuffer);
+        if (FAILED(hr) || !backBuffer) {
+            LOG_ERROR("D3D11", "GetBuffer failed: 0x%08lx", hr);
+            return;
+        }
+        hr = device_->CreateRenderTargetView(backBuffer, nullptr, &rtView_);
+        backBuffer->Release();
+        if (FAILED(hr)) {
+            LOG_ERROR("D3D11", "CreateRenderTargetView failed: 0x%08lx", hr);
+            rtView_ = nullptr;
         }
     }
 
@@ -469,25 +528,35 @@ private:
     }
 
     void mapVertices(const Vertex2D* verts, int count, D3D11_PRIMITIVE_TOPOLOGY topology) {
-        D3D11_BUFFER_DESC desc = {};
-        desc.Usage = D3D11_USAGE_DYNAMIC;
-        desc.ByteWidth = count * sizeof(Vertex2D);
-        desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-
-        D3D11_SUBRESOURCE_DATA data = {};
-        data.pSysMem = verts;
-
-        ID3D11Buffer* vb = nullptr;
-        device_->CreateBuffer(&desc, &data, &vb);
-
         UINT stride = sizeof(Vertex2D);
+        UINT byteSize = count * stride;
+
+        // Grow the reusable dynamic vertex buffer if needed
+        if (!vertexBuffer_ || vertexBufferSize_ < byteSize) {
+            if (vertexBuffer_) {
+                vertexBuffer_->Release();
+                vertexBuffer_ = nullptr;
+            }
+            vertexBufferSize_ = byteSize + byteSize / 2; // allocate 1.5x headroom
+
+            D3D11_BUFFER_DESC desc = {};
+            desc.Usage = D3D11_USAGE_DYNAMIC;
+            desc.ByteWidth = vertexBufferSize_;
+            desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+            desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+            device_->CreateBuffer(&desc, nullptr, &vertexBuffer_);
+        }
+
+        // Map and update
+        D3D11_MAPPED_SUBRESOURCE mapped = {};
+        context_->Map(vertexBuffer_, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+        memcpy(mapped.pData, verts, byteSize);
+        context_->Unmap(vertexBuffer_, 0);
+
         UINT offset = 0;
-        context_->IASetVertexBuffers(0, 1, &vb, &stride, &offset);
+        context_->IASetVertexBuffers(0, 1, &vertexBuffer_, &stride, &offset);
         context_->IASetPrimitiveTopology(topology);
         context_->Draw(count, 0);
-
-        vb->Release();
     }
 
     ID3D11Device* device_ = nullptr;
@@ -496,6 +565,10 @@ private:
     ID3D11RenderTargetView* rtView_ = nullptr;
     ID3D11BlendState* blendState_ = nullptr;
     ID3D11SamplerState* sampler_ = nullptr;
+
+    // Dynamic vertex buffer (reused across frames)
+    ID3D11Buffer* vertexBuffer_ = nullptr;
+    UINT vertexBufferSize_ = 0;
 
     // Shaders
     ID3D11VertexShader* solidVS_ = nullptr;
@@ -510,6 +583,9 @@ private:
     // Input layouts
     ID3D11InputLayout* ilSolid_ = nullptr;
     ID3D11InputLayout* ilRounded_ = nullptr;
+
+    // Screen-dimension constant buffer for NDC vertex transform
+    ID3D11Buffer* screenCB_ = nullptr;
 
     float orthoProj_[16] = {};
     int width_ = 0, height_ = 0;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "platform/platform.h"
 #include "geometry.h"
 #include "color.h"
 #include "font.h"
@@ -27,3 +28,4 @@
 #include "widgets/tabwidget.h"
 #include "widgets/image.h"
 #include "widgets/treeview.h"
+#include "widgets/contextmenu.h"

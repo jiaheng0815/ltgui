@@ -11,6 +11,7 @@ public:
     std::string text() const { return text_; }
     void setText(const std::string& text);
 
+    WidgetType widgetType() const override { return WidgetType::Label; }
     Size sizeHint() const override;
 
 protected:

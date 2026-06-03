@@ -10,40 +10,35 @@ int main() {
         return 1;
     }
 
-    // Create a root widget
-    auto* root = new Widget();
+    auto root = std::make_unique<Widget>();
     root->setStyle(Style::defaultStyle());
     root->style().bgColor = Color::WindowBg;
 
-    // Vertical layout
-    auto* layout = new BoxLayout(BoxLayout::TopToBottom, 8, 12);
+    auto layout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12);
 
-    auto* label = new Label("Welcome to ltgui!");
+    auto* label = root->makeChild<Label>("Welcome to ltgui!");
     label->style().font = Font("Segoe UI", 18, FontWeight::Bold);
     label->style().fgColor = Color::DarkBlue;
 
-    auto* button = new Button("Click Me!");
+    auto* button = root->makeChild<Button>("Click Me!");
     int clickCount = 0;
     button->onClick([&]() {
         clickCount++;
         button->setText("Clicked: " + std::to_string(clickCount) + " times");
     });
 
-    auto* quitBtn = new Button("Quit");
+    auto* quitBtn = root->makeChild<Button>("Quit");
     quitBtn->onClick([&]() {
         window.close();
     });
 
-    layout->addStretch(0); // label doesn't stretch
-    layout->addStretch(0); // button doesn't stretch
-    layout->addStretch(0); // quit doesn't stretch
+    layout->addStretch(0);
+    layout->addStretch(0);
+    layout->addStretch(0);
 
-    root->addChild(label);
-    root->addChild(button);
-    root->addChild(quitBtn);
-    root->setLayout(layout);
+    root->setLayout(std::move(layout));
 
-    window.setCentralWidget(root);
+    window.setCentralWidget(std::move(root));
     window.show();
 
     return Application::instance().run();

@@ -28,10 +28,29 @@ bool FontAtlas::loadFont(const Font& fontDesc, const uint8_t* ttfData, int ttfSi
 
     cache.scale = stbtt_ScaleForPixelHeight(&cache.info, (float)fontDesc.size);
     stbtt_GetFontVMetrics(&cache.info, &cache.ascent, &cache.descent, &cache.lineGap);
-    loadedFonts_[fontDesc] = cache;
+    loadedFonts_[fontDesc] = std::move(cache);
     return true;
 #else
     (void)fontDesc; (void)ttfData; (void)ttfSize;
+    return false;
+#endif
+}
+
+bool FontAtlas::loadFontFile(const Font& fontDesc, const char* ttfPath) {
+#ifdef LTGUI_HAS_STB_TRUETYPE
+    FILE* f = fopen(ttfPath, "rb");
+    if (!f) return false;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (size <= 0) { fclose(f); return false; }
+    std::vector<uint8_t> data(size);
+    size_t read = fread(data.data(), 1, size, f);
+    fclose(f);
+    if (read != (size_t)size) return false;
+    return loadFont(fontDesc, data.data(), (int)size);
+#else
+    (void)fontDesc; (void)ttfPath;
     return false;
 #endif
 }

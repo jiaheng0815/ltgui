@@ -8,6 +8,18 @@ namespace ltgui {
 
 class NativeCanvas;
 
+enum class CursorShape {
+    Arrow,
+    IBeam,
+    Wait,
+    Crosshair,
+    SizeWE,
+    SizeNS,
+    SizeAll,
+    Hand,
+    Denied,
+};
+
 class NativeWindow {
 public:
     using EventCallback = std::function<void(Event&)>;
@@ -24,6 +36,8 @@ public:
     virtual Size getSize() const = 0;
     virtual void invalidate(const Rect& rect) = 0;
     virtual void* nativeHandle() const = 0;
+    virtual float dpiScale() const { return 1.0f; }
+    virtual void setCursor(CursorShape) {} // default: no-op
 
     virtual NativeCanvas* getCanvas() = 0;
 

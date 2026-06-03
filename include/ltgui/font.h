@@ -33,6 +33,16 @@ struct Font {
          FontStyle style = FontStyle::Normal)
         : family(family), size(size), weight(weight), style(style) {}
 
+    static Font systemDefault(int size = 12) {
+#ifdef LTGUI_PLATFORM_WINDOWS
+        return {"Segoe UI", size};
+#elif defined(LTGUI_PLATFORM_MACOS)
+        return {".AppleSystemUIFont", size};
+#else
+        return {"Sans", size};
+#endif
+    }
+
     bool operator==(const Font& o) const {
         return family == o.family && size == o.size && weight == o.weight && style == o.style;
     }

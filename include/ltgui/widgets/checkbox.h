@@ -18,6 +18,7 @@ public:
     using ToggleCallback = std::function<void(bool)>;
     void onToggled(ToggleCallback cb) { toggleCallback_ = std::move(cb); }
 
+    WidgetType widgetType() const override { return WidgetType::CheckBox; }
     Size sizeHint() const override;
 
 protected:

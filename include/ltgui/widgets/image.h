@@ -13,6 +13,7 @@ public:
 
     void setFitMode(char mode); // 'f'=fill, 'c'=contain, 's'=stretch
 
+    WidgetType widgetType() const override { return WidgetType::Image; }
     Size sizeHint() const override;
 
 protected:

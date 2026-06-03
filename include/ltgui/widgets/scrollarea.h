@@ -8,9 +8,11 @@ class ScrollArea : public Widget {
 public:
     explicit ScrollArea(Widget* parent = nullptr);
 
-    void setWidget(Widget* widget);
-    Widget* widget() const { return contentWidget_; }
+    void setWidget(std::unique_ptr<Widget> widget);
+    Widget* widget() const;
+    Widget* contentWidget() const;
 
+    WidgetType widgetType() const override { return WidgetType::ScrollArea; }
     Size sizeHint() const override;
 
 protected:
@@ -18,12 +20,15 @@ protected:
     bool handleEvent(Event& event) override;
 
 private:
-    Widget* contentWidget_ = nullptr;
+    Widget* contentWidget_ = nullptr; // cached; validated by contentWidget()
     AnimatedFloat scrollYAnim_{0.0f};
     int scrollX_ = 0;
     int scrollY_ = 0;
     int contentWidth_ = 0;
     int contentHeight_ = 0;
+    bool draggingScrollbar_ = false;
+    int dragStartMouseY_ = 0;
+    int dragStartScrollY_ = 0;
 
     void updateScrollBars();
     void scrollTo(int x, int y);

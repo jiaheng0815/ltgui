@@ -1,6 +1,7 @@
 #include "platform/gpu/gpu_renderer.h"
 #include "platform/gpu/gpu_font_atlas.h"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace ltgui {
@@ -49,14 +50,12 @@ void TextureManager::bind(int texId, int slot) {
 Renderer2D::Renderer2D(GpuDevice* device)
     : device_(device), texMgr_(device) {
     cmds_.reserve(4096);
-    verts_.reserve(65536);
 }
 
 Renderer2D::~Renderer2D() = default;
 
 void Renderer2D::begin() {
     cmds_.clear();
-    verts_.clear();
     scissorActive_ = false;
 }
 
@@ -95,15 +94,20 @@ void Renderer2D::drawLine(const Point& p1, const Point& p2, float lineWidth, con
     cmds_.push_back({DrawOp::DrawLine, {}, c, 0, lineWidth, -1, 0, p1, p2});
 }
 
+void Renderer2D::strokeEllipse(const Rect& r, float lineWidth, const Color& c) {
+    if (c.a == 0) return;
+    cmds_.push_back({DrawOp::StrokeEllipse, r, c, 0, lineWidth});
+}
+
 void Renderer2D::drawGlyph(int texId, const Rect& dst, const Rect& src, const Color& c) {
     DrawCmd cmd;
     cmd.op = DrawOp::DrawGlyph;
     cmd.rect = dst;
     cmd.color = c;
     cmd.texId = texId;
-    // Encode src rect in radius+lineWidth temporarily
-    cmd.radius = (float)src.x;
-    cmd.lineWidth = (float)src.y;
+    // Store src rect (atlas coords) in p1/p2
+    cmd.p1 = {src.x, src.y};
+    cmd.p2 = {src.width, src.height};
     cmds_.push_back(cmd);
 }
 
@@ -133,106 +137,166 @@ void Renderer2D::clearScissor() {
 // ---- Internal ----
 
 void Renderer2D::flushBatch() {
-    // Sort by (texId, op, color) to minimize state changes
+    auto shaderFor = [](DrawOp op) -> int {
+        switch (op) {
+        case DrawOp::FillRect:          return 0; // Solid
+        case DrawOp::FillRoundedRect:   return 1; // Rounded
+        case DrawOp::StrokeRect:        return 1;
+        case DrawOp::StrokeRounded:     return 1;
+        case DrawOp::FillEllipse:       return 2; // Ellipse
+        case DrawOp::StrokeEllipse:     return 2;
+        case DrawOp::DrawGlyph:         return 3; // Texture
+        case DrawOp::DrawImage:         return 3;
+        case DrawOp::DrawLine:          return 0; // Solid (lines)
+        default: return 0;
+        }
+    };
+
+    auto isLineOp = [](DrawOp op) -> bool {
+        return op == DrawOp::DrawLine || op == DrawOp::StrokeRect ||
+               op == DrawOp::StrokeRounded || op == DrawOp::StrokeEllipse;
+    };
+
+    // Sort by (shaderType, isLine, texId, color) — isLine bit prevents
+    // mixing triangle and line primitives within the same batch group.
     for (auto& cmd : cmds_) {
+        int st = shaderFor(cmd.op);
+        int il = isLineOp(cmd.op) ? 1 : 0;
         uint32_t colorHash = cmd.color.toARGB();
-        cmd.sortKey = (cmd.texId << 20) | ((static_cast<int>(cmd.op) & 0xF) << 16) | (colorHash & 0xFFFF);
+        cmd.sortKey = (st << 28) | (il << 27) | ((cmd.texId & 0x7FF) << 16) | (colorHash & 0xFFFF);
     }
     std::sort(cmds_.begin(), cmds_.end(),
               [](const DrawCmd& a, const DrawCmd& b) { return a.sortKey < b.sortKey; });
 
-    for (auto& cmd : cmds_) {
-        switch (cmd.op) {
-        case DrawOp::FillRect:
-            emitSolidQuad(cmd.rect, cmd.color);
-            break;
-        case DrawOp::FillRoundedRect:
-            emitTexturedQuad(cmd.rect, 0, 0, 1, 1, cmd.color.toARGB());
-            // Filled rounded via shader with encoded params
-            // TODO: use rounded shader with params
-            emitSolidQuad(cmd.rect, cmd.color);
-            break;
-        case DrawOp::FillEllipse:
-            emitSolidQuad(cmd.rect, cmd.color);
-            break;
-        case DrawOp::StrokeRect:
-        case DrawOp::StrokeRounded: {
-            // Stroke = 4 line segments
-            float lw = cmd.lineWidth;
-            Rect r = cmd.rect;
-            Vertex2D lines[8];
-            // Top
-            lines[0] = {(float)r.x, (float)r.y, 0, 0, cmd.color.toARGB()};
-            lines[1] = {(float)r.right(), (float)r.y, 0, 0, cmd.color.toARGB()};
-            // Right
-            lines[2] = {(float)r.right(), (float)r.y, 0, 0, cmd.color.toARGB()};
-            lines[3] = {(float)r.right(), (float)r.bottom(), 0, 0, cmd.color.toARGB()};
-            // Bottom
-            lines[4] = {(float)r.right(), (float)r.bottom(), 0, 0, cmd.color.toARGB()};
-            lines[5] = {(float)r.x, (float)r.bottom(), 0, 0, cmd.color.toARGB()};
-            // Left
-            lines[6] = {(float)r.x, (float)r.bottom(), 0, 0, cmd.color.toARGB()};
-            lines[7] = {(float)r.x, (float)r.y, 0, 0, cmd.color.toARGB()};
-            verts_.insert(verts_.end(), lines, lines + 8);
-            break;
-        }
-        case DrawOp::DrawGlyph:
-        case DrawOp::DrawImage: {
-            Rect r = cmd.rect;
-            float u0 = 0, v0 = 0, u1 = 1, v1 = 1;
-            uint32_t col = cmd.color.toARGB();
-            Vertex2D v[] = {
-                {(float)r.x, (float)r.y, u0, v0, col},
-                {(float)r.right(), (float)r.y, u1, v0, col},
-                {(float)r.x, (float)r.bottom(), u0, v1, col},
-                {(float)r.x, (float)r.bottom(), u0, v1, col},
-                {(float)r.right(), (float)r.y, u1, v0, col},
-                {(float)r.right(), (float)r.bottom(), u1, v1, col},
-            };
-            verts_.insert(verts_.end(), v, v + 6);
-            break;
-        }
-        case DrawOp::DrawLine: {
-            Vertex2D v[] = {
-                {(float)cmd.p1.x, (float)cmd.p1.y, 0, 0, cmd.color.toARGB()},
-                {(float)cmd.p2.x, (float)cmd.p2.y, 0, 0, cmd.color.toARGB()},
-            };
-            verts_.insert(verts_.end(), v, v + 2);
-            break;
-        }
-        }
-    }
+    // Group by (shaderType, isLine, texId), emit vertices and draw per-group
+    size_t idx = 0;
+    while (idx < cmds_.size()) {
+        uint32_t groupKey = cmds_[idx].sortKey >> 16;
+        int groupShader = shaderFor(cmds_[idx].op);
+        int groupTexId  = (groupShader == 3) ? cmds_[idx].texId : -1;
+        bool isLines = isLineOp(cmds_[idx].op);
 
-    // Submit all accumulated vertices
-    if (!verts_.empty()) {
-        device_->drawTriangles(verts_.data(), static_cast<int>(verts_.size()));
-        verts_.clear();
+        size_t groupEnd = idx;
+        while (groupEnd < cmds_.size() && (cmds_[groupEnd].sortKey >> 16) == groupKey) {
+            groupEnd++;
+        }
+
+        // Select shader and bind texture for this group
+        device_->selectShader(groupShader);
+        if (groupTexId >= 0) {
+            texMgr_.bind(groupTexId, 0);
+        }
+
+        // Build vertices for this group
+        std::vector<Vertex2D> verts;
+        verts.reserve((groupEnd - idx) * 6);
+
+        for (size_t i = idx; i < groupEnd; i++) {
+            auto& cmd = cmds_[i];
+            uint32_t color = cmd.color.toARGB();
+
+            switch (cmd.op) {
+            case DrawOp::FillRect:
+                emitQuad(verts, cmd.rect, 0, 0, 1, 1, color, 0, 0, 0, 0);
+                break;
+            case DrawOp::FillRoundedRect:
+                emitQuad(verts, cmd.rect, 0, 0, 1, 1, color,
+                         static_cast<float>(cmd.rect.width), static_cast<float>(cmd.rect.height),
+                         cmd.radius, -1.0f);
+                break;
+            case DrawOp::FillEllipse:
+                emitQuad(verts, cmd.rect, 0, 0, 1, 1, color,
+                         static_cast<float>(cmd.rect.width), static_cast<float>(cmd.rect.height),
+                         0, -1.0f);
+                break;
+            case DrawOp::StrokeRect:
+                emitStrokeRect(verts, cmd.rect, color);
+                break;
+            case DrawOp::StrokeRounded:
+                emitStrokeRect(verts, cmd.rect, color);
+                break;
+            case DrawOp::StrokeEllipse:
+                emitStrokeEllipse(verts, cmd.rect, color);
+                break;
+            case DrawOp::DrawGlyph: {
+                float aw = fontAtlas_ ? (float)fontAtlas_->atlasW() : 2048.0f;
+                float ah = fontAtlas_ ? (float)fontAtlas_->atlasH() : 2048.0f;
+                float u0 = (float)cmd.p1.x / aw;
+                float v0 = (float)cmd.p1.y / ah;
+                float u1 = (float)(cmd.p1.x + cmd.p2.x) / aw;
+                float v1 = (float)(cmd.p1.y + cmd.p2.y) / ah;
+                emitQuad(verts, cmd.rect, u0, v0, u1, v1, color, 0, 0, 0, 0);
+                break;
+            }
+            case DrawOp::DrawImage:
+                emitQuad(verts, cmd.rect, 0, 0, 1, 1, color, 0, 0, 0, 0);
+                break;
+            case DrawOp::DrawLine:
+                emitLine(verts, cmd.p1, cmd.p2, color);
+                break;
+            }
+        }
+
+        if (!verts.empty()) {
+            if (isLines)
+                device_->drawLines(verts.data(), static_cast<int>(verts.size()));
+            else
+                device_->drawTriangles(verts.data(), static_cast<int>(verts.size()));
+        }
+
+        idx = groupEnd;
     }
 }
 
-void Renderer2D::emitSolidQuad(const Rect& r, const Color& c) {
-    uint32_t col = c.toARGB();
+void Renderer2D::emitQuad(std::vector<Vertex2D>& out, const Rect& r,
+                           float u0, float v0, float u1, float v1, uint32_t color,
+                           float p0, float p1, float p2, float p3) {
+    float x0 = static_cast<float>(r.x), y0 = static_cast<float>(r.y);
+    float x1 = static_cast<float>(r.right()), y1 = static_cast<float>(r.bottom());
     Vertex2D v[] = {
-        {(float)r.x, (float)r.y, 0, 0, col},
-        {(float)r.right(), (float)r.y, 0, 0, col},
-        {(float)r.x, (float)r.bottom(), 0, 0, col},
-        {(float)r.x, (float)r.bottom(), 0, 0, col},
-        {(float)r.right(), (float)r.y, 0, 0, col},
-        {(float)r.right(), (float)r.bottom(), 0, 0, col},
+        {x0, y0, u0, v0, color, p0, p1, p2, p3},
+        {x1, y0, u1, v0, color, p0, p1, p2, p3},
+        {x0, y1, u0, v1, color, p0, p1, p2, p3},
+        {x0, y1, u0, v1, color, p0, p1, p2, p3},
+        {x1, y0, u1, v0, color, p0, p1, p2, p3},
+        {x1, y1, u1, v1, color, p0, p1, p2, p3},
     };
-    verts_.insert(verts_.end(), v, v + 6);
+    out.insert(out.end(), v, v + 6);
 }
 
-void Renderer2D::emitTexturedQuad(const Rect& r, float u0, float v0, float u1, float v1, uint32_t color) {
-    Vertex2D v[] = {
-        {(float)r.x, (float)r.y, u0, v0, color},
-        {(float)r.right(), (float)r.y, u1, v0, color},
-        {(float)r.x, (float)r.bottom(), u0, v1, color},
-        {(float)r.x, (float)r.bottom(), u0, v1, color},
-        {(float)r.right(), (float)r.y, u1, v0, color},
-        {(float)r.right(), (float)r.bottom(), u1, v1, color},
+void Renderer2D::emitStrokeRect(std::vector<Vertex2D>& out, const Rect& r, uint32_t color) {
+    float x0 = static_cast<float>(r.x), y0 = static_cast<float>(r.y);
+    float x1 = static_cast<float>(r.right()), y1 = static_cast<float>(r.bottom());
+    Vertex2D lines[8] = {
+        {x0, y0, 0,0,color, 0,0,0,0}, {x1, y0, 0,0,color, 0,0,0,0},
+        {x1, y0, 0,0,color, 0,0,0,0}, {x1, y1, 0,0,color, 0,0,0,0},
+        {x1, y1, 0,0,color, 0,0,0,0}, {x0, y1, 0,0,color, 0,0,0,0},
+        {x0, y1, 0,0,color, 0,0,0,0}, {x0, y0, 0,0,color, 0,0,0,0},
     };
-    verts_.insert(verts_.end(), v, v + 6);
+    out.insert(out.end(), lines, lines + 8);
+}
+
+void Renderer2D::emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, uint32_t color) {
+    float rx = r.width * 0.5f, ry = r.height * 0.5f;
+    float cx = static_cast<float>(r.x) + rx, cy = static_cast<float>(r.y) + ry;
+    const int kSegments = 16;
+    for (int i = 0; i < kSegments; i++) {
+        float a0 = 2.0f * 3.14159265f * i / kSegments;
+        float a1 = 2.0f * 3.14159265f * (i + 1) / kSegments;
+        Vertex2D v[] = {
+            {cx + rx * cosf(a0), cy + ry * sinf(a0), 0,0,color, 0,0,0,0},
+            {cx + rx * cosf(a1), cy + ry * sinf(a1), 0,0,color, 0,0,0,0},
+        };
+        out.insert(out.end(), v, v + 2);
+    }
+}
+
+void Renderer2D::emitLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2, uint32_t color) {
+    Vertex2D v[] = {
+        {static_cast<float>(p1.x), static_cast<float>(p1.y), 0,0,color, 0,0,0,0},
+        {static_cast<float>(p2.x), static_cast<float>(p2.y), 0,0,color, 0,0,0,0},
+    };
+    out.insert(out.end(), v, v + 2);
 }
 
 } // namespace gpu

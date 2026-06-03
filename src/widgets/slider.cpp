@@ -82,45 +82,65 @@ bool Slider::handleEvent(Event& event) {
 
     int localX = event.pos.x - x();
 
-    switch (event.type) {
-    case EventType::MouseMove: {
+    // Helper: is the cursor over the thumb?
+    auto isOverThumb = [&]() -> bool {
         int thumbSize = 16;
         int tpos = thumbPos();
-        // Thumb center in absolute coordinates
         int thumbCenterX = x() + tpos;
         int thumbCenterY = y() + height() / 2;
         int dx = event.pos.x - thumbCenterX;
         int dy = event.pos.y - thumbCenterY;
-        bool over = (dx * dx + dy * dy) < (thumbSize * thumbSize / 2);
+        return (dx * dx + dy * dy) < (thumbSize * thumbSize / 2);
+    };
+
+    // Helper: snap value to click position on the track
+    auto snapToTrack = [&]() {
+        int trackW = width() - 16;
+        int clickX = std::max(0, std::min(trackW, localX - 8));
+        int range = max_ - min_;
+        if (range > 0) setValue(min_ + (clickX * range) / trackW);
+    };
+
+    switch (event.type) {
+    case EventType::MouseMove: {
+        bool over = isOverThumb();
         if (over != hovered_) {
             hovered_ = over;
             update();
         }
         if (dragging_) {
-            int trackW = width() - 16;
-            int clickX = std::max(0, std::min(trackW, localX - 8));
-            int range = max_ - min_;
-            if (range > 0) setValue(min_ + (clickX * range) / trackW);
+            snapToTrack();
+            event.accepted = true;
+            return true;
         }
-        event.accepted = true;
-        return true;
+        // Only consume MouseMove when we actually did something
+        if (over) {
+            event.accepted = true;
+            return true;
+        }
+        return false;
     }
     case EventType::MouseDown:
         if (event.button == MouseButton::Left) {
-            dragging_ = true;
-            int trackW = width() - 16;
-            int clickX = std::max(0, std::min(trackW, localX - 8));
-            int range = max_ - min_;
-            if (range > 0) setValue(min_ + (clickX * range) / trackW);
+            if (isOverThumb()) {
+                dragging_ = true;
+                event.accepted = true;
+                return true;
+            }
+            // Click on track (not thumb): jump value to click position
+            snapToTrack();
             event.accepted = true;
             return true;
         }
         break;
     case EventType::MouseUp:
-        dragging_ = false;
-        update();
-        event.accepted = true;
-        return true;
+        if (dragging_) {
+            dragging_ = false;
+            update();
+            event.accepted = true;
+            return true;
+        }
+        return false;
     default:
         break;
     }

@@ -19,22 +19,33 @@ void RadioButton::setText(const std::string& text) {
 }
 
 void RadioButton::setChecked(bool checked) {
-    if (checked_ != checked) {
-        if (checked && parent()) {
-            for (auto* child : parent()->children()) {
-                if (child != this && child->isRadioButton()) {
-                    auto* rb = static_cast<RadioButton*>(child);
+    // Radio buttons in a group cannot be unchecked by direct user action.
+    // Only allow unchecking programmatically or when another button becomes checked.
+    if (checked_ == checked) return;
+
+    if (checked) {
+        // Uncheck all sibling radio buttons
+        if (parent()) {
+            for (auto& child : parent()->children()) {
+                if (child.get() != this && child->widgetType() == WidgetType::RadioButton) {
+                    auto* rb = static_cast<RadioButton*>(child.get());
                     if (rb->isChecked()) {
                         rb->checked_ = false;
                         rb->update();
+                        if (rb->toggleCallback_) rb->toggleCallback_(false);
                     }
                 }
             }
         }
-        checked_ = checked;
-        update();
-        if (toggleCallback_) toggleCallback_(checked_);
     }
+    // If trying to uncheck the only checked button in group, ignore
+    if (!checked && checked_) {
+        return;
+    }
+
+    checked_ = checked;
+    update();
+    if (toggleCallback_) toggleCallback_(checked_);
 }
 
 Size RadioButton::sizeHint() const {

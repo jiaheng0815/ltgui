@@ -8,30 +8,27 @@ namespace ltgui {
 
 TreeViewItem::TreeViewItem(const std::string& text) : text_(text) {}
 
-TreeViewItem::~TreeViewItem() {
-    for (auto* child : children_) delete child;
-}
+TreeViewItem::~TreeViewItem() = default;
 
 void TreeViewItem::setText(const std::string& text) { text_ = text; }
 void TreeViewItem::setExpanded(bool expanded) { expanded_ = expanded; }
 
 TreeViewItem* TreeViewItem::addChild(const std::string& text) {
-    auto* child = new TreeViewItem(text);
+    auto child = std::make_unique<TreeViewItem>(text);
     child->parent_ = this;
     child->depth_ = depth_ + 1;
     child->treeView_ = treeView_;
-    children_.push_back(child);
-    return child;
+    TreeViewItem* raw = child.get();
+    children_.push_back(std::move(child));
+    return raw;
 }
 
 void TreeViewItem::removeChild(int index) {
     if (index >= 0 && index < static_cast<int>(children_.size())) {
-        // Notify owning TreeView to clear dangling selection
-        if (treeView_ && treeView_->selectedItem() == children_[index]) {
+        if (treeView_ && treeView_->selectedItem() == children_[index].get()) {
             treeView_->setSelectedItem(nullptr);
         }
-        delete children_[index];
-        children_.erase(children_.begin() + index);
+        children_.erase(children_.begin() + index); // destroys the child
     }
 }
 
@@ -43,14 +40,14 @@ TreeView::TreeView(Widget* parent) : Widget(parent) {
     style().borderWidth = 1;
     style().borderColor = currentTheme().border;
     style().borderRadius = 4;
-    root_ = new TreeViewItem("");
+    root_ = std::make_unique<TreeViewItem>("");
     root_->expanded_ = true;
     root_->treeView_ = this;
 }
 
-TreeView::~TreeView() { delete root_; }
+TreeView::~TreeView() = default;
 
-TreeViewItem* TreeView::rootItem() { return root_; }
+TreeViewItem* TreeView::rootItem() { return root_.get(); }
 
 void TreeView::setSelectedItem(TreeViewItem* item) {
     selected_ = item;
@@ -69,13 +66,13 @@ int TreeView::visibleItems() const { return std::max(1, (height() - 2) / itemHei
 int TreeView::countVisible(TreeViewItem* item) const {
     int count = 1;
     if (item->expanded_) {
-        for (auto* child : item->children_) count += countVisible(child);
+        for (auto& child : item->children_) count += countVisible(child.get());
     }
     return count;
 }
 
 int TreeView::totalRows() const {
-    return root_ ? countVisible(root_) : 0;
+    return root_ ? countVisible(root_.get()) : 0;
 }
 
 void TreeView::paintSelf(NativeCanvas* canvas) {
@@ -92,7 +89,7 @@ void TreeView::paintSelf(NativeCanvas* canvas) {
 
     if (!root_) return;
 
-    canvas->setFont(Font("Segoe UI", 12));
+    canvas->setFont(Font::systemDefault(12));
     int visible = visibleItems();
     int scrollOffset = static_cast<int>(scrollAnim_.value());
     int total = totalRows();
@@ -108,7 +105,7 @@ void TreeView::paintSelf(NativeCanvas* canvas) {
 
         if (relRow < 0 || relRow >= visible) {
             if (item->expanded_) {
-                for (auto* child : item->children_) drawItem(child, depth + 1);
+                for (auto& child : item->children_) drawItem(child.get(), depth + 1);
             }
             return;
         }
@@ -149,11 +146,11 @@ void TreeView::paintSelf(NativeCanvas* canvas) {
                          NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);
 
         if (item->expanded_) {
-            for (auto* child : item->children_) drawItem(child, depth + 1);
+            for (auto& child : item->children_) drawItem(child.get(), depth + 1);
         }
     };
 
-    drawItem(root_, 0);
+    drawItem(root_.get(), 0);
 }
 
 bool TreeView::handleEvent(Event& event) {
@@ -180,10 +177,10 @@ bool TreeView::handleEvent(Event& event) {
             }
             currentRow++;
             if (item->expanded_) {
-                for (auto* child : item->children_) findItem(child, depth + 1);
+                for (auto& child : item->children_) findItem(child.get(), depth + 1);
             }
         };
-        findItem(root_, 0);
+        findItem(root_.get(), 0);
 
         if (clicked) {
             int clickX = event.pos.x - x() - 4 - clickDepth * indentWidth_;

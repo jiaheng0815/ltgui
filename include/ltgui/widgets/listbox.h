@@ -23,6 +23,7 @@ public:
     using SelectionChangedCallback = std::function<void(int)>;
     void onSelectionChanged(SelectionChangedCallback cb) { selectionCallback_ = std::move(cb); }
 
+    WidgetType widgetType() const override { return WidgetType::ListBox; }
     Size sizeHint() const override;
 
 protected:

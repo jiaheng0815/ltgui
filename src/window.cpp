@@ -2,6 +2,7 @@
 #include "app.h"
 #include "widget.h"
 #include "widgets/combobox.h"
+#include "log.h"
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 #include "platform/win32/win32_window.h"
@@ -51,10 +52,11 @@ bool Window::create(int width, int height, const std::string& title) {
     if (gpuCanvas_->initialize(nativeWindow_->nativeHandle(), width, height)) {
         canvas_ = gpuCanvas_.get();
         useGpu_ = true;
-        printf("[ltgui] GPU acceleration enabled: %s\n", gpuCanvas_->gpuInfo().name.c_str());
+        LOG_INFO("Window", "GPU acceleration enabled: %s", gpuCanvas_->gpuInfo().name.c_str());
     } else {
         gpuCanvas_.reset();
-        printf("[ltgui] Using software renderer (GDI+/X11)\n");
+        // canvas_ stays on nativeWindow_->getCanvas() — no dangling pointer
+        LOG_INFO("Window", "Using software renderer (GDI+/X11)");
     }
 
     return true;
@@ -97,16 +99,13 @@ Size Window::getSize() const {
     return {};
 }
 
-void Window::setCentralWidget(Widget* widget) {
+void Window::setCentralWidget(std::unique_ptr<Widget> widget) {
+    centralWidget_ = std::move(widget);
     if (centralWidget_) {
-        delete centralWidget_;
-    }
-    centralWidget_ = widget;
-    if (widget) {
-        widget->setWindow(this);
+        centralWidget_->setWindow(this);
         Size sz = getSize();
         if (!sz.isEmpty()) {
-            widget->setGeometry(Rect(0, 0, sz.width, sz.height));
+            centralWidget_->setGeometry(Rect(0, 0, sz.width, sz.height));
         }
         update();
     }
@@ -164,8 +163,44 @@ void Window::handleEvent(Event& event) {
         event.accepted = true;
         break;
     case EventType::KeyDown:
+        // Check registered shortcuts first (before widget dispatch)
+        for (auto& entry : shortcuts_) {
+            if (entry.shortcut.matches(event.key,
+                    static_cast<KeyModifier>(event.modifiers))) {
+                if (entry.callback) entry.callback();
+                event.accepted = true;
+                return;
+            }
+        }
+        // Tab navigation: Tab = next, Shift+Tab = previous
+        if (event.key == Key::Tab && centralWidget_) {
+            bool shift = (event.modifiers &
+                          static_cast<int>(KeyModifier::Shift)) != 0;
+            Widget* next = nullptr;
+            if (shift) {
+                if (focusWidget_)
+                    next = focusWidget_->previousFocusWidget();
+                if (!next)
+                    next = centralWidget_->lastFocusableDescendant();
+            } else {
+                if (focusWidget_)
+                    next = focusWidget_->nextFocusWidget();
+                if (!next)
+                    next = centralWidget_->nextFocusWidget();
+            }
+            if (next && next != focusWidget_) {
+                next->claimFocus();
+            }
+            event.accepted = true;
+            return;
+        }
+        // Fall through to focus widget
+        if (validateFocusWidget()) {
+            focusWidget_->handleEvent(event);
+        }
+        break;
     case EventType::KeyUp:
-        if (focusWidget_) {
+        if (validateFocusWidget()) {
             focusWidget_->handleEvent(event);
         }
         break;
@@ -174,9 +209,11 @@ void Window::handleEvent(Event& event) {
         ComboBox::closeIfClickOutside(event.pos);
         if (centralWidget_) {
             Widget* prevFocus = focusWidget_;
-            centralWidget_->handleEvent(event);
-            // Clear focus if no widget claimed it
-            if (focusWidget_ == prevFocus) {
+            bool handled = centralWidget_->handleEvent(event);
+            // Clear focus only if no widget handled the click — a focused
+            // widget that claims focus again (setFocusWidget no-ops when
+            // same) must not lose focus here.
+            if (focusWidget_ == prevFocus && !handled) {
                 setFocusWidget(nullptr);
             }
         }
@@ -190,11 +227,19 @@ void Window::handleEvent(Event& event) {
     }
 }
 
+bool Window::validateFocusWidget() {
+    if (focusWidget_ && focusWidget_->window() != this) {
+        setFocusWidget(nullptr);
+        return false;
+    }
+    return focusWidget_ != nullptr;
+}
+
 void Window::setFocusWidget(Widget* w) {
     if (focusWidget_ == w) return;
 
     // Notify old focus widget
-    if (focusWidget_) {
+    if (validateFocusWidget()) {
         Event ev;
         ev.type = EventType::FocusOut;
         focusWidget_->handleEvent(ev);
@@ -213,6 +258,20 @@ void Window::setFocusWidget(Widget* w) {
 void Window::onPaint(NativeCanvas* canvas, const Rect& dirtyRect) {
     if (centralWidget_ && canvas) {
         centralWidget_->paint(canvas, dirtyRect);
+    }
+}
+
+void Window::registerShortcut(const Shortcut& sc, Shortcut::Callback cb) {
+    unregisterShortcut(sc); // avoid duplicates
+    shortcuts_.push_back({sc, std::move(cb)});
+}
+
+void Window::unregisterShortcut(const Shortcut& sc) {
+    for (auto it = shortcuts_.begin(); it != shortcuts_.end(); ++it) {
+        if (it->shortcut == sc) {
+            shortcuts_.erase(it);
+            return;
+        }
     }
 }
 

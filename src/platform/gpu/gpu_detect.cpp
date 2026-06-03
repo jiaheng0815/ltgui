@@ -1,6 +1,6 @@
 #include "platform/gpu/gpu_detect.h"
 #include "platform/platform.h"
-#include <cstdio>
+#include "log.h"
 #include <algorithm>
 
 #ifdef LTGUI_PLATFORM_WINDOWS
@@ -106,7 +106,7 @@ GpuInfo selectBestGpu() {
     if (gpus.empty()) return {};
 
     auto& best = gpus[0];
-    printf("[GPU] Detected %zu GPU(s), selected: %s (%s, %lld MB VRAM)\n",
+    LOG_INFO("GPU", "Detected %zu GPU(s), selected: %s (%s, %lld MB VRAM)",
            gpus.size(), best.name.c_str(),
            best.isIntegrated ? "integrated" : "discrete",
            best.vramBytes / (1024 * 1024));

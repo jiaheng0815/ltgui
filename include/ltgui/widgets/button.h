@@ -16,6 +16,7 @@ public:
     using ClickCallback = std::function<void()>;
     void onClick(ClickCallback cb) { clickCallback_ = std::move(cb); }
 
+    WidgetType widgetType() const override { return WidgetType::Button; }
     Size sizeHint() const override;
 
 protected:

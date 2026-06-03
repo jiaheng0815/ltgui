@@ -17,6 +17,10 @@ ComboBox::ComboBox(Widget* parent) : Widget(parent) {
     style().setPadding(8, 4);
 }
 
+ComboBox::~ComboBox() {
+    if (s_openCombo_ == this) s_openCombo_ = nullptr;
+}
+
 void ComboBox::addItem(const std::string& item) {
     items_.push_back(item);
     if (selected_ < 0) selected_ = 0;
@@ -35,7 +39,7 @@ void ComboBox::removeItem(int index) {
 void ComboBox::clear() {
     items_.clear();
     selected_ = -1;
-    dropped_ = false;
+    dropdownOpen_ = false;
     update();
 }
 
@@ -65,15 +69,11 @@ Size ComboBox::sizeHint() const {
 }
 
 Rect ComboBox::effectiveGeometry() const {
-    Rect r = absoluteRect();
-    if (dropped_ && !items_.empty()) {
+    // Return local-coordinate rect (relative to parent) extended to cover dropdown
+    Rect r = geometry();
+    if (dropdownOpen_ && !items_.empty()) {
         int dropH = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
-        bool dropDown = true;
-        if (auto* win = window()) {
-            int winH = win->getSize().height;
-            if (r.bottom() + dropH > winH - 4) dropDown = false;
-        }
-        if (dropDown) {
+        if (opensDownward_) {
             r.height += dropH;
         } else {
             r.y -= dropH;
@@ -91,8 +91,8 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
     canvas->fillRoundedRect(r, style().borderRadius);
 
     if (style().borderWidth > 0) {
-        canvas->setColor(dropped_ ? t.accent : style().borderColor);
-        canvas->strokeRoundedRect(r, style().borderRadius, dropped_ ? 2 : style().borderWidth);
+        canvas->setColor(dropdownOpen_ ? t.accent : style().borderColor);
+        canvas->strokeRoundedRect(r, style().borderRadius, dropdownOpen_ ? 2 : style().borderWidth);
     }
 
     // Selected text
@@ -113,9 +113,9 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
     canvas->drawLine({cx, cy + 2}, {cx + 4, cy - 2}, 2);
 
     // Dropdown list — uses cached direction and height from handleEvent
-    if (dropped_ && !items_.empty()) {
+    if (dropdownOpen_ && !items_.empty()) {
         Rect dropRect;
-        if (dropDown_) {
+        if (opensDownward_) {
             dropRect = Rect(r.x, r.bottom() + 1, r.width, dropHeight_);
         } else {
             int dropY = r.y - dropHeight_ - 1;
@@ -147,12 +147,12 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
 }
 
 void ComboBox::openDropdown() {
-    dropped_ = true;
+    dropdownOpen_ = true;
     dropHeight_ = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
-    dropDown_ = true;
+    opensDownward_ = true;
     if (auto* win = window()) {
         if (absoluteRect().bottom() + dropHeight_ > win->getSize().height - 4) {
-            dropDown_ = false;
+            opensDownward_ = false;
         }
     }
     // Track as the active open combo box
@@ -160,20 +160,52 @@ void ComboBox::openDropdown() {
         s_openCombo_->closeDropdown();
     }
     s_openCombo_ = this;
-    update();
+
+    // Raise to top of parent's z-order so the dropdown gets mouse events
+    // before any overlapping sibling widgets (e.g. Slider, Button).
+    raiseToTop();
+
+    // Invalidate the full extended area so both the button and the
+    // dropdown area get repainted on the next frame.
+    invalidateExtended();
 }
 
 void ComboBox::closeDropdown() {
-    if (!dropped_) return;
-    dropped_ = false;
+    if (!dropdownOpen_) return;
+
+    // Invalidate the full extended area BEFORE clearing the flag,
+    // so the next paint pass clears the dropdown pixels that were
+    // drawn outside the button's geometry.
+    invalidateExtended();
+
+    dropdownOpen_ = false;
     if (s_openCombo_ == this) s_openCombo_ = nullptr;
-    update();
+}
+
+void ComboBox::invalidateExtended() {
+    auto* win = window();
+    if (!win) return;
+    Rect absExt = absoluteRect();
+    int ext = dropHeight_ + 1; // matches paintSelf's dropRect offset
+    if (opensDownward_) {
+        absExt.height += ext;
+    } else {
+        absExt.y -= ext;
+        absExt.height += ext;
+    }
+    win->invalidate(absExt);
 }
 
 bool ComboBox::closeIfClickOutside(const Point& absPos) {
     if (!s_openCombo_) return false;
+    // effectiveGeometry() is in parent-relative coords; convert to window-absolute
+    Rect base = s_openCombo_->absoluteRect();
     Rect eff = s_openCombo_->effectiveGeometry();
-    if (!eff.contains(absPos)) {
+    // Extend the absolute rect by the same amount effectiveGeometry extends geometry()
+    Rect absEff(base.x + (eff.x - s_openCombo_->geometry().x),
+                base.y + (eff.y - s_openCombo_->geometry().y),
+                eff.width, eff.height);
+    if (!absEff.contains(absPos)) {
         s_openCombo_->closeDropdown();
         return true;
     }
@@ -184,28 +216,44 @@ bool ComboBox::handleEvent(Event& event) {
     if (!isEnabled()) return false;
 
     if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
-        if (!dropped_) {
+        if (!dropdownOpen_) {
             openDropdown();
             event.accepted = true;
             return true;
+        }
+
+        // Dropdown is open — figure out where the click landed.
+        int localY = event.pos.y - y();
+        int relY;
+        if (opensDownward_) {
+            relY = localY - height() - 1;
         } else {
-            int localY = event.pos.y - y();
-            int relY;
-            if (dropDown_) {
-                relY = localY - height() - 1;
-            } else {
-                relY = localY + dropHeight_;
-            }
-            if (relY >= 0 && relY < dropHeight_) {
-                int index = relY / 26;
-                if (index >= 0 && index < static_cast<int>(items_.size())) {
-                    setCurrentIndex(index);
-                }
+            relY = localY + dropHeight_ + 1;
+        }
+
+        // Case 1: click on a dropdown item → select, close, consume.
+        if (relY >= 0 && relY < dropHeight_) {
+            int index = relY / 26;
+            if (index >= 0 && index < static_cast<int>(items_.size())) {
+                setCurrentIndex(index);
             }
             closeDropdown();
             event.accepted = true;
             return true;
         }
+
+        // Case 2: click on the ComboBox button itself → toggle close, consume.
+        if (localY >= 0 && localY <= height()) {
+            closeDropdown();
+            event.accepted = true;
+            return true;
+        }
+
+        // Case 3: click is within effectiveGeometry but on a sibling widget
+        // (e.g. a Slider sitting below the dropdown). Close the dropdown but
+        // return false so the sibling gets its MouseDown.
+        closeDropdown();
+        return false;
     }
 
     return false;

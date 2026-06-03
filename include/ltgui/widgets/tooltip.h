@@ -15,6 +15,7 @@ public:
 
     static void show(Widget* target, const std::string& text);
 
+    WidgetType widgetType() const override { return WidgetType::Tooltip; }
     Size sizeHint() const override;
 
 protected:
@@ -22,7 +23,6 @@ protected:
 
 private:
     std::string text_;
-    bool visible_ = false;
     Point position_;
 };
 

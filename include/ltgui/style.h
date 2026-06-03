@@ -1,6 +1,7 @@
 #pragma once
 #include "color.h"
 #include "font.h"
+#include <algorithm>
 
 namespace ltgui {
 
@@ -23,16 +24,22 @@ struct Style {
     static Style defaultStyle();
 
     void setPadding(int all) {
+        all = std::max(0, all);
         paddingLeft = paddingTop = paddingRight = paddingBottom = all;
     }
     void setPadding(int h, int v) {
+        h = std::max(0, h);
+        v = std::max(0, v);
         paddingLeft = paddingRight = h;
         paddingTop = paddingBottom = v;
     }
     void setMargin(int all) {
+        all = std::max(0, all);
         marginLeft = marginTop = marginRight = marginBottom = all;
     }
     void setMargin(int h, int v) {
+        h = std::max(0, h);
+        v = std::max(0, v);
         marginLeft = marginRight = h;
         marginTop = marginBottom = v;
     }

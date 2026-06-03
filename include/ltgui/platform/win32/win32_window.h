@@ -25,6 +25,8 @@ public:
     void* nativeHandle() const override;
 
     NativeCanvas* getCanvas() override;
+    float dpiScale() const override { return dpiScale_; }
+    void setCursor(CursorShape shape) override;
 
 private:
     friend LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -35,6 +37,7 @@ private:
     HWND hwnd_ = nullptr;
     NativeCanvas* canvas_ = nullptr;
     Size size_;
+    float dpiScale_ = 1.0f;
     bool trackingMouse_ = false;
     static bool classRegistered_;
 };

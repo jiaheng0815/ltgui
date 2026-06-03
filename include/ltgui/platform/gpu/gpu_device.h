@@ -13,6 +13,7 @@ struct Vertex2D {
     float x, y;
     float u, v;
     uint32_t color; // ARGB
+    float p0, p1, p2, p3; // shader params (width, height, radius, strokeWidth)
 };
 
 enum class Primitive { Triangles, TriangleStrip, Lines };
@@ -52,6 +53,10 @@ public:
     virtual void setBlend(bool enable) = 0;
     virtual void setScissor(int x, int y, int w, int h) = 0;
     virtual void clearScissor() = 0;
+    virtual void bindTexture(int slot, GpuTexture* tex) = 0;
+
+    // Shader selection: 0=solid, 1=rounded, 2=ellipse, 3=texture
+    virtual void selectShader(int type) = 0;
 
     // Info
     virtual const char* name() const = 0;

@@ -17,6 +17,7 @@ public:
     using ValueChangedCallback = std::function<void(int)>;
     void onValueChanged(ValueChangedCallback cb) { valueChangedCallback_ = std::move(cb); }
 
+    WidgetType widgetType() const override { return WidgetType::Slider; }
     Size sizeHint() const override;
 
 protected:

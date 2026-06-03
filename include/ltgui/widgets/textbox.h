@@ -12,7 +12,14 @@ public:
     std::string text() const { return text_; }
     void setText(const std::string& text);
 
+    WidgetType widgetType() const override { return WidgetType::TextBox; }
     Size sizeHint() const override;
+
+    // Clipboard
+    void copy();
+    void cut();
+    void paste();
+    void selectAll();
 
     using TextChangedCallback = std::function<void(const std::string&)>;
     void onTextChanged(TextChangedCallback cb) { textChangedCallback_ = std::move(cb); }
@@ -24,6 +31,7 @@ protected:
 private:
     std::string text_;
     int cursorPos_ = 0;
+    int selectionStart_ = -1; // -1 = no selection
     int scrollOffset_ = 0;
     bool focused_ = false;
     TextChangedCallback textChangedCallback_;
@@ -32,7 +40,10 @@ private:
     void deleteCharBefore();
     void deleteCharAt();
     void moveCursorByChar(int delta);
-    int visibleCursorPos() const;
+    void deleteSelection();
+    std::string selectedText() const;
+    void setClipboardText(const std::string& text);
+    std::string getClipboardText();
 };
 
 } // namespace ltgui

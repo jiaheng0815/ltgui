@@ -32,16 +32,13 @@ void CocoaCanvas::resize(int width, int height) {
     canvasWidth_ = width;
     canvasHeight_ = height;
 
-    // Create bitmap context as backbuffer
+    // Create bitmap context as backbuffer — pass NULL so CG allocates its own buffer
     int bytesPerRow = width * 4;
-    void* data = calloc(1, bytesPerRow * height);
-
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    backbuffer_ = CGBitmapContextCreate(data, width, height, 8, bytesPerRow,
+    backbuffer_ = CGBitmapContextCreate(nullptr, width, height, 8, bytesPerRow,
                                          colorSpace,
                                          kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
     CGColorSpaceRelease(colorSpace);
-    free(data);
 }
 
 void CocoaCanvas::beginPaint() {

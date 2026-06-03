@@ -13,7 +13,7 @@ TabWidget::TabWidget(Widget* parent) : Widget(parent) {
 int TabWidget::addTab(const std::string& label) {
     Tab tab;
     tab.label = label;
-    tab.content = new Widget(this);
+    tab.content = addChild(std::make_unique<Widget>());
     tab.content->style().bgColor = currentTheme().bgSecondary;
     tab.content->style().borderRadius = 4;
     tab.content->setVisible(false);
@@ -32,8 +32,8 @@ void TabWidget::removeTab(int index) {
     if (index < 0 || index >= static_cast<int>(tabs_.size())) return;
 
     if (tabs_[index].content) {
-        removeChild(tabs_[index].content);
-        delete tabs_[index].content;
+        removeChild(tabs_[index].content); // destroys the content widget
+        tabs_[index].content = nullptr;
     }
     tabs_.erase(tabs_.begin() + index);
 
@@ -153,7 +153,7 @@ void TabWidget::paintSelf(NativeCanvas* canvas) {
         }
 
         canvas->setColor(i == current_ ? t.accent : t.textSecondary);
-        canvas->setFont(Font("Segoe UI", 12));
+        canvas->setFont(Font::systemDefault(12));
         canvas->drawText(tabs_[i].label, tr,
                          NativeCanvas::AlignCenter | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);
 

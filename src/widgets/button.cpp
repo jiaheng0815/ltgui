@@ -114,6 +114,7 @@ bool Button::handleEvent(Event& event) {
     case EventType::MouseDown:
         if (event.button == MouseButton::Left) {
             pressed_ = true;
+            claimFocus();
             update();
             event.accepted = true;
             return true;
@@ -124,6 +125,23 @@ bool Button::handleEvent(Event& event) {
             pressed_ = false;
             update();
             if (clickCallback_ && hovered_) clickCallback_();
+            event.accepted = true;
+            return true;
+        }
+        break;
+    case EventType::KeyDown:
+        if (event.key == Key::Enter || event.key == Key::Space) {
+            pressed_ = true;
+            update();
+            event.accepted = true;
+            return true;
+        }
+        break;
+    case EventType::KeyUp:
+        if (event.key == Key::Enter || event.key == Key::Space) {
+            pressed_ = false;
+            update();
+            if (clickCallback_) clickCallback_();
             event.accepted = true;
             return true;
         }

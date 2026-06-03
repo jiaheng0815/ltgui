@@ -153,13 +153,14 @@ Size X11Window::getSize() const {
     return size_;
 }
 
-void X11Window::invalidate(const Rect& /*rect*/) {
+void X11Window::invalidate(const Rect& rect) {
     if (window_ && s_display_) {
-        XEvent ev;
-        memset(&ev, 0, sizeof(ev));
-        ev.type = Expose;
-        ev.xexpose.window = window_;
-        XSendEvent(s_display_, window_, False, ExposureMask, &ev);
+        if (rect.width > 0 && rect.height > 0) {
+            XClearArea(s_display_, window_, rect.x, rect.y,
+                       rect.width, rect.height, True);
+        } else {
+            XClearArea(s_display_, window_, 0, 0, 0, 0, True);
+        }
         XFlush(s_display_);
     }
 }

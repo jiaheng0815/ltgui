@@ -10,102 +10,87 @@ int main() {
         return 1;
     }
 
-    auto* root = new Widget();
+    auto root = std::make_unique<Widget>();
     root->style().bgColor = Color::WindowBg;
 
-    auto* mainLayout = new BoxLayout(BoxLayout::TopToBottom, 4, 8);
+    auto mainLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 4, 8);
 
     // Title
-    auto* title = new Label("ltgui Widget Demo");
+    auto* title = root->makeChild<Label>("ltgui Widget Demo");
     title->style().font = Font("Segoe UI", 20, FontWeight::Bold);
     title->style().fgColor = Color::DarkBlue;
 
     // Button row
-    auto* buttonRow = new Widget();
+    auto* buttonRow = root->makeChild<Widget>();
     buttonRow->style().bgColor = Color::Transparent;
-    auto* btnLayout = new BoxLayout(BoxLayout::LeftToRight, 8, 4);
+    auto btnLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 4);
 
-    auto* btn1 = new Button("Normal");
-    auto* btn2 = new Button("Disabled");
+    auto* btn1 = buttonRow->makeChild<Button>("Normal");
+    auto* btn2 = buttonRow->makeChild<Button>("Disabled");
     btn2->setEnabled(false);
     int clicks = 0;
-    auto* btn3 = new Button("Counter: 0");
+    auto* btn3 = buttonRow->makeChild<Button>("Counter: 0");
     btn3->onClick([&]() {
         clicks++;
         btn3->setText("Counter: " + std::to_string(clicks));
     });
 
-    buttonRow->addChild(btn1);
-    buttonRow->addChild(btn2);
-    buttonRow->addChild(btn3);
-    buttonRow->setLayout(btnLayout);
+    buttonRow->setLayout(std::move(btnLayout));
 
     // Textbox row
-    auto* textRow = new Widget();
+    auto* textRow = root->makeChild<Widget>();
     textRow->style().bgColor = Color::Transparent;
-    auto* textLayout = new BoxLayout(BoxLayout::LeftToRight, 8, 4);
-    auto* tbLabel = new Label("Text:");
-    auto* textBox = new TextBox("Edit me!");
-    textRow->addChild(tbLabel);
-    textRow->addChild(textBox);
-    textRow->setLayout(textLayout);
+    auto textLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 4);
+    auto* tbLabel = textRow->makeChild<Label>("Text:");
+    auto* textBox = textRow->makeChild<TextBox>("Edit me!");
     textLayout->addStretch(0);
     textLayout->addStretch(1);
+    textRow->setLayout(std::move(textLayout));
 
     // Checkbox + Radio row
-    auto* checkRow = new Widget();
+    auto* checkRow = root->makeChild<Widget>();
     checkRow->style().bgColor = Color::Transparent;
-    auto* checkLayout = new BoxLayout(BoxLayout::LeftToRight, 12, 4);
+    auto checkLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 12, 4);
 
-    auto* cb1 = new CheckBox("Option A");
-    auto* cb2 = new CheckBox("Option B");
+    auto* cb1 = checkRow->makeChild<CheckBox>("Option A");
+    auto* cb2 = checkRow->makeChild<CheckBox>("Option B");
     cb2->setChecked(true);
-    auto* cb3 = new CheckBox("Option C");
+    auto* cb3 = checkRow->makeChild<CheckBox>("Option C");
 
-    auto* rbGroup = new Widget();
+    auto* rbGroup = checkRow->makeChild<Widget>();
     rbGroup->style().bgColor = Color::Transparent;
-    auto* rbLayout = new BoxLayout(BoxLayout::LeftToRight, 4, 0);
-    auto* rb1 = new RadioButton("Red");
-    auto* rb2 = new RadioButton("Green");
-    auto* rb3 = new RadioButton("Blue");
+    auto rbLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 4, 0);
+    auto* rb1 = rbGroup->makeChild<RadioButton>("Red");
+    auto* rb2 = rbGroup->makeChild<RadioButton>("Green");
+    auto* rb3 = rbGroup->makeChild<RadioButton>("Blue");
     rb1->setChecked(true);
-    rbGroup->addChild(rb1);
-    rbGroup->addChild(rb2);
-    rbGroup->addChild(rb3);
-    rbGroup->setLayout(rbLayout);
+    rbGroup->setLayout(std::move(rbLayout));
 
-    checkRow->addChild(cb1);
-    checkRow->addChild(cb2);
-    checkRow->addChild(cb3);
-    checkRow->addChild(rbGroup);
-    checkRow->setLayout(checkLayout);
+    checkRow->setLayout(std::move(checkLayout));
 
     // Slider row
-    auto* sliderRow = new Widget();
+    auto* sliderRow = root->makeChild<Widget>();
     sliderRow->style().bgColor = Color::Transparent;
-    auto* sliderLayout = new BoxLayout(BoxLayout::LeftToRight, 8, 4);
-    auto* slLabel = new Label("Volume:");
-    auto* slider = new Slider();
+    auto sliderLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 4);
+    auto* slLabel = sliderRow->makeChild<Label>("Volume:");
+    auto* slider = sliderRow->makeChild<Slider>();
     slider->setRange(0, 100);
     slider->setValue(50);
-    auto* slValue = new Label("50");
+    auto* slValue = sliderRow->makeChild<Label>("50");
     slider->onValueChanged([&](int v) {
         slValue->setText(std::to_string(v));
     });
-    sliderRow->addChild(slLabel);
-    sliderRow->addChild(slider);
-    sliderRow->addChild(slValue);
-    sliderRow->setLayout(sliderLayout);
     sliderLayout->addStretch(0);
     sliderLayout->addStretch(1);
     sliderLayout->addStretch(0);
+    sliderRow->setLayout(std::move(sliderLayout));
 
     // List + Combo row
-    auto* listRow = new Widget();
+    auto* listRow = root->makeChild<Widget>();
     listRow->style().bgColor = Color::Transparent;
-    auto* listRowLayout = new BoxLayout(BoxLayout::LeftToRight, 8, 4);
+    auto listRowLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 4);
 
-    auto* listBox = new ListBox();
+    auto* listBox = listRow->makeChild<ListBox>();
     listBox->addItem("Apple");
     listBox->addItem("Banana");
     listBox->addItem("Cherry");
@@ -115,27 +100,17 @@ int main() {
     listBox->addItem("Grape");
     listBox->setSelected(0);
 
-    auto* comboBox = new ComboBox();
+    auto* comboBox = listRow->makeChild<ComboBox>();
     comboBox->addItem("Small");
     comboBox->addItem("Medium");
     comboBox->addItem("Large");
     comboBox->setCurrentIndex(1);
 
-    listRow->addChild(listBox);
-    listRow->addChild(comboBox);
-    listRow->setLayout(listRowLayout);
     listRowLayout->addStretch(1);
     listRowLayout->addStretch(0);
+    listRow->setLayout(std::move(listRowLayout));
 
-    // Assemble
-    root->addChild(title);
-    root->addChild(buttonRow);
-    root->addChild(textRow);
-    root->addChild(checkRow);
-    root->addChild(sliderRow);
-    root->addChild(listRow);
-
-    // Stretch factors: title(0), button(0), text(0), checks(0), slider(0), list(1)
+    // Stretch factors
     mainLayout->addStretch(0);
     mainLayout->addStretch(0);
     mainLayout->addStretch(0);
@@ -143,8 +118,8 @@ int main() {
     mainLayout->addStretch(0);
     mainLayout->addStretch(1);
 
-    root->setLayout(mainLayout);
-    window.setCentralWidget(root);
+    root->setLayout(std::move(mainLayout));
+    window.setCentralWidget(std::move(root));
     window.show();
 
     return Application::instance().run();
