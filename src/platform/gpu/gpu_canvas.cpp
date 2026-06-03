@@ -86,12 +86,12 @@ bool GpuCanvas::initialize(void* windowHandle, int width, int height) {
     Font defaultFont = Font::systemDefault(12);
     const char* fontPaths[] = {
 #ifdef LTGUI_PLATFORM_WINDOWS
+        "C:/Windows/Fonts/simfang.ttf",
+        "C:/Windows/Fonts/simsun.ttf",
+        "C:/Windows/Fonts/msyh.ttf",
         "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/seguiemj.ttf",
         "C:/Windows/Fonts/arial.ttf",
         "C:/Windows/Fonts/calibri.ttf",
-        "C:/Windows/Fonts/tahoma.ttf",
-        "C:/Windows/Fonts/consola.ttf",
 #elif defined(LTGUI_PLATFORM_LINUX)
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
