@@ -6,22 +6,17 @@
 
 namespace ltgui {
 
-class ContextMenu;
-
 class MenuBar : public Widget {
 public:
     explicit MenuBar(Widget* parent = nullptr);
 
     using ItemCallback = std::function<void()>;
 
-    // Add a top-level menu (e.g. "File", "Edit"). Returns menu index.
     int addMenu(const std::string& label);
-
-    // Add an item to a submenu. Returns item index within that menu.
     int addItem(int menuIdx, const std::string& text, ItemCallback cb = nullptr);
     void addSeparator(int menuIdx);
 
-    WidgetType widgetType() const override { return WidgetType::Base; } // FIXME: add MenuBar to WidgetType enum
+    WidgetType widgetType() const override { return WidgetType::Base; }
     Size sizeHint() const override;
 
 protected:
@@ -40,14 +35,21 @@ private:
     };
 
     std::vector<Menu> menus_;
-    int hoveredMenu_ = -1;      // which top-level menu is hovered
-    int openMenu_ = -1;         // which top-level menu is open
-    int hoveredItem_ = -1;      // which item in the open menu is hovered
+    int hoveredMenu_ = -1;
+    int openMenu_ = -1;
+    int hoveredItem_ = -1;
     int itemHeight_ = 26;
     int menuBarHeight_ = 30;
 
     int menuX(int idx) const;
     int menuWidth(int idx) const;
+
+    // Hit-test helpers
+    int hitTestMenu(int localX, int localY) const;
+    int hitTestItem(int localY) const;
+
+    bool handleMouseDown(int menuIdx, int itemIdx);
+    void closeMenu();
 };
 
 } // namespace ltgui

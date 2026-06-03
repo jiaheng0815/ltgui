@@ -1,88 +1,87 @@
 #pragma once
 #include <functional>
 #include <vector>
-#include <cstdint>
+#include <algorithm>
 
 namespace ltgui {
-
-// Lightweight single-shot signal. Each connection gets an ID;
-// call disconnect(id) to remove it. Copying a Connection to the
-// heap or capturing it in a lambda gives safe auto-disconnect.
-//
-// Usage:
-//   Signal<int> onValueChanged;
-//   int id = onValueChanged.connect([](int v) { ... });
-//   onValueChanged.emit(42);
-//   onValueChanged.disconnect(id);
 
 template<typename... Args>
 class Signal {
 public:
     using Callback = std::function<void(Args...)>;
 
-    Signal() = default;
-
-    // Connect a callback. Returns a connection ID for later disconnect.
     int connect(Callback cb) {
         int id = nextId_++;
         slots_.push_back({id, std::move(cb)});
         return id;
     }
 
-    // Disconnect a previously connected callback by its ID.
     void disconnect(int id) {
-        for (auto it = slots_.begin(); it != slots_.end(); ++it) {
-            if (it->id == id) {
-                slots_.erase(it);
-                return;
-            }
+        auto it = std::find_if(slots_.begin(), slots_.end(),
+                               [id](const Slot& s) { return s.id == id; });
+        if (it == slots_.end()) return;
+        if (emitting_) {
+            it->cb = nullptr; // defer erase until emit completes
+        } else {
+            slots_.erase(it);
         }
     }
 
-    // Disconnect all callbacks.
     void disconnectAll() {
-        slots_.clear();
+        if (emitting_) {
+            for (auto& s : slots_) s.cb = nullptr;
+        } else {
+            slots_.clear();
+        }
     }
 
-    // Fire all connected callbacks with the given arguments.
     void emit(Args... args) {
-        // Copy slots so callbacks can safely connect/disconnect during emit
-        auto copy = slots_;
-        for (auto& slot : copy) {
+        emitting_ = true;
+        for (auto& slot : slots_) {
             if (slot.cb) slot.cb(args...);
         }
+        emitting_ = false;
+        // Clean up callbacks nulled during emission
+        slots_.erase(
+            std::remove_if(slots_.begin(), slots_.end(),
+                           [](const Slot& s) { return !s.cb; }),
+            slots_.end());
     }
 
     bool empty() const { return slots_.empty(); }
     size_t size() const { return slots_.size(); }
 
 private:
-    struct Slot {
-        int id;
-        Callback cb;
-    };
+    struct Slot { int id; Callback cb; };
     std::vector<Slot> slots_;
     int nextId_ = 1;
+    bool emitting_ = false;
 };
 
-// Scoped connection guard: disconnects automatically when destroyed.
-// Capture this in your class to auto-disconnect on destruction.
 template<typename... Args>
 class ScopedConnection {
 public:
     ScopedConnection() = default;
-    ScopedConnection(Signal<Args...>* signal, int id) : signal_(signal), id_(id) {}
+    ScopedConnection(Signal<Args...>* sig, int id) : signal_(sig), id_(id) {}
     ~ScopedConnection() { disconnect(); }
 
     ScopedConnection(const ScopedConnection&) = delete;
     ScopedConnection& operator=(const ScopedConnection&) = delete;
+
     ScopedConnection(ScopedConnection&& other) noexcept
         : signal_(other.signal_), id_(other.id_) {
         other.signal_ = nullptr;
         other.id_ = -1;
     }
+
     ScopedConnection& operator=(ScopedConnection&& other) noexcept {
-        if (this != &other) { disconnect(); signal_ = other.signal_; id_ = other.id_; other.signal_ = nullptr; other.id_ = -1; }
+        if (this != &other) {
+            disconnect();
+            signal_ = other.signal_;
+            id_ = other.id_;
+            other.signal_ = nullptr;
+            other.id_ = -1;
+        }
         return *this;
     }
 

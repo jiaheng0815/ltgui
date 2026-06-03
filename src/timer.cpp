@@ -1,6 +1,6 @@
 #include "timer.h"
 #include "app.h"
-#include <algorithm>
+#include <cstdint>
 
 namespace ltgui {
 
@@ -14,7 +14,7 @@ void Timer::start(int ms, bool repeating, Callback cb) {
     cb_ = std::move(cb);
     interval_ = ms;
     repeating_ = repeating;
-    nextFireMs_ = 0; // set on first tick
+    nextFireMs_ = UINT64_MAX; // unset until first tick
 
     Application::instance().registerTimer(this);
 }
@@ -30,8 +30,8 @@ void Timer::stop() {
 bool Timer::tick(uint64_t nowMs) {
     if (id_ < 0 || !cb_) return false;
 
-    // Lazy-init nextFireMs on first tick
-    if (nextFireMs_ == 0) {
+    // Lazy-init on first tick
+    if (nextFireMs_ == UINT64_MAX) {
         nextFireMs_ = nowMs + interval_;
         return false;
     }
