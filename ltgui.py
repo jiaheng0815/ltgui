@@ -314,7 +314,7 @@ def build_lib(platform, is_release, compiler, is_msvc):
 
     if is_msvc:
         result = subprocess.run(
-            ["lib", "/nologo", f"/OUT:{lib_path}"] + object_files,
+            ["link", "/LIB", "/nologo", f"/OUT:{lib_path}"] + object_files,
             capture_output=True, text=True)
     elif platform == "windows" and "clang" in compiler:
         result = subprocess.run(
