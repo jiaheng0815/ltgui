@@ -4,6 +4,10 @@
 #include <cmath>
 
 #ifdef LTGUI_PLATFORM_WINDOWS
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #include <gdiplus.h>
 #endif
 
