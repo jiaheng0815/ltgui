@@ -343,17 +343,18 @@ def build_example(name, platform, is_release, lib_path, compiler, is_msvc):
     exe_path = os.path.join(BUILD_DIR, name + (".exe" if platform == "windows" else ""))
 
     if is_msvc:
-        flags = [compiler, "/nologo", "/std:c++17", "/EHsc",
-                 f"/Fe:{exe_path}"]
+        flags = [compiler, "/nologo", "/std:c++17", "/EHsc"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
             flags += ["/Zi", "/Od", "/D_DEBUG"]
         flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
         flags += get_platform_flags(platform, is_msvc=True)
-        flags += [src, lib_path]
+        flags += [f"/Fe:{exe_path}"]
+        flags += [src]
+        flags += ["/link", lib_path]
         flags += get_platform_libs(platform, is_msvc=True)
-        flags += ["/link", "/SUBSYSTEM:CONSOLE"]
+        flags += ["/SUBSYSTEM:CONSOLE"]
     else:
         flags = [compiler, "-std=c++17", "-fexec-charset=UTF-8"]
         if is_release:
@@ -385,17 +386,18 @@ def build_app(name, platform, is_release, lib_path, compiler, is_msvc):
     exe_path = os.path.join(BUILD_DIR, name + (".exe" if platform == "windows" else ""))
 
     if is_msvc:
-        flags = [compiler, "/nologo", "/std:c++17", "/EHsc",
-                 f"/Fe:{exe_path}"]
+        flags = [compiler, "/nologo", "/std:c++17", "/EHsc"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
             flags += ["/Zi", "/Od", "/D_DEBUG"]
         flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
         flags += get_platform_flags(platform, is_msvc=True)
-        flags += [src, lib_path]
+        flags += [f"/Fe:{exe_path}"]
+        flags += [src]
+        flags += ["/link", lib_path]
         flags += get_platform_libs(platform, is_msvc=True)
-        flags += ["/link", "/SUBSYSTEM:CONSOLE"]
+        flags += ["/SUBSYSTEM:CONSOLE"]
     else:
         flags = [compiler, "-std=c++17", "-fexec-charset=UTF-8"]
         if is_release:
@@ -881,13 +883,14 @@ def cmd_test(positional, flags):
 
         if is_msvc:
             flags_list = [compiler, "/nologo", "/std:c++17", "/EHsc",
-                          "/Zi", "/Od", "/D_DEBUG",
-                          f"/Fe:{exe_path}"]
+                          "/Zi", "/Od", "/D_DEBUG"]
             flags_list += ["/I", INCLUDE_DIR, "/I", os.path.join(SCRIPT_DIR, "vendor")]
             flags_list += get_platform_flags(platform, is_msvc=True)
-            flags_list += [src, lib_path]
+            flags_list += [f"/Fe:{exe_path}"]
+            flags_list += [src]
+            flags_list += ["/link", lib_path]
             flags_list += get_platform_libs(platform, is_msvc=True)
-            flags_list += ["/link", "/SUBSYSTEM:CONSOLE"]
+            flags_list += ["/SUBSYSTEM:CONSOLE"]
         else:
             flags_list = [compiler, "-std=c++17", "-g", "-O0"]
             if platform == "windows":
