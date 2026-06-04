@@ -28,7 +28,7 @@ public:
     Rect effectiveGeometry() const override;
 
     // Called by Window before hit-testing; returns true if a click-away closed this
-    static bool closeIfClickOutside(const Point& absPos);
+    bool closeIfClickOutside(const Point& absPos);
 
 protected:
     void paintSelf(NativeCanvas* canvas) override;
@@ -45,9 +45,6 @@ private:
     bool opensDownward_ = true;
     int dropHeight_ = 0;
     SelectionChangedCallback selectionCallback_;
-
-    static ComboBox* s_openCombo_;
-    friend class Window;
 };
 
 } // namespace ltgui

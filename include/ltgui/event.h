@@ -37,8 +37,12 @@ enum class KeyModifier {
 inline KeyModifier operator|(KeyModifier a, KeyModifier b) {
     return static_cast<KeyModifier>(static_cast<int>(a) | static_cast<int>(b));
 }
-inline int operator&(KeyModifier a, KeyModifier b) {
-    return static_cast<int>(a) & static_cast<int>(b);
+inline KeyModifier operator&(KeyModifier a, KeyModifier b) {
+    return static_cast<KeyModifier>(static_cast<int>(a) & static_cast<int>(b));
+}
+
+inline bool hasModifier(int modifiers, KeyModifier mod) {
+    return (modifiers & static_cast<int>(mod)) != 0;
 }
 
 enum class Key {

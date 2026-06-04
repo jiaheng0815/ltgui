@@ -81,32 +81,9 @@ bool GpuCanvas::initialize(void* windowHandle, int width, int height) {
     renderer_->setFontAtlas(fontAtlas_.get());
 
     // Load a default system font so text rendering works out of the box.
-    // Try platform-specific system font paths; if none work, text will be
-    // invisible (caller should use loadFontFile to provide a font).
     Font defaultFont = Font("Deng", 12);
-    const char* fontPaths[] = {
-#ifdef LTGUI_PLATFORM_WINDOWS
-        "D:/code/ltgui/font/Deng.ttf",
-        "font/Deng.ttf",
-        "C:/Windows/Fonts/simfang.ttf",
-        "C:/Windows/Fonts/simsun.ttf",
-        "C:/Windows/Fonts/msyh.ttf",
-        "C:/Windows/Fonts/segoeui.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "C:/Windows/Fonts/calibri.ttf",
-#elif defined(LTGUI_PLATFORM_LINUX)
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-#elif defined(LTGUI_PLATFORM_MACOS)
-        "/System/Library/Fonts/Helvetica.ttc",
-        "/System/Library/Fonts/SFNSText.ttf",
-        "/Library/Fonts/Arial.ttf",
-#endif
-    };
     bool fontLoaded = false;
-    for (const char* path : fontPaths) {
+    for (const char* path : defaultFontSearchPaths()) {
         if (fontAtlas_->loadFontFile(defaultFont, path)) {
             LOG_INFO("GPU", "Loaded default font: %s", path);
             fontLoaded = true;

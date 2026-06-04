@@ -410,8 +410,8 @@ bool TextBox::handleEvent(Event& event) {
     case EventType::KeyDown:
         if (focused_) {
             // Check for Ctrl+key combinations
-            bool ctrl = (event.modifiers & 2) != 0;
-            bool shift = (event.modifiers & 1) != 0;
+            bool ctrl = hasModifier(event.modifiers, KeyModifier::Control);
+            bool shift = hasModifier(event.modifiers, KeyModifier::Shift);
 
             if (ctrl && event.key == Key::Z) {
                 if (shift) redo();

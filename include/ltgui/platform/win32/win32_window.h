@@ -7,6 +7,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <memory>
 #include "platform/native_window.h"
 
 namespace ltgui {
@@ -43,7 +44,7 @@ private:
     static void registerClass();
 
     HWND hwnd_ = nullptr;
-    NativeCanvas* canvas_ = nullptr;
+    std::unique_ptr<NativeCanvas> canvas_;
     Size size_;
     float dpiScale_ = 1.0f;
     bool trackingMouse_ = false;

@@ -12,6 +12,7 @@
 namespace ltgui {
 
 class Widget;
+class ComboBox;
 
 class Window {
 public:
@@ -62,6 +63,7 @@ private:
     void handleEvent(Event& event);
 
     friend class Widget;
+    friend class ComboBox;
     void setFocusWidget(Widget* w);
 
     // Guard against dangling focusWidget_: if the focus widget is no longer in
@@ -79,6 +81,7 @@ private:
     NativeCanvas* canvas_ = nullptr;
     std::unique_ptr<Widget> centralWidget_;
     Widget* focusWidget_ = nullptr;
+    ComboBox* openCombo_ = nullptr;
     Rect accumulatedDirty_;
     bool dirtyValid_ = false;
     bool useGpu_ = false;

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <functional>
+#include <vector>
 
 namespace ltgui {
 
@@ -48,6 +49,32 @@ struct Font {
     }
     bool operator!=(const Font& o) const { return !(*this == o); }
 };
+
+// Platform-specific system font search paths, ordered by preference.
+// Callers should iterate and pick the first one that loads successfully.
+inline const std::vector<const char*>& defaultFontSearchPaths() {
+    static const std::vector<const char*> paths = {
+#ifdef LTGUI_PLATFORM_WINDOWS
+        "font/Deng.ttf",
+        "C:/Windows/Fonts/simfang.ttf",
+        "C:/Windows/Fonts/simsun.ttf",
+        "C:/Windows/Fonts/msyh.ttf",
+        "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/calibri.ttf",
+#elif defined(LTGUI_PLATFORM_LINUX)
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+#elif defined(LTGUI_PLATFORM_MACOS)
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/System/Library/Fonts/SFNSText.ttf",
+        "/Library/Fonts/Arial.ttf",
+#endif
+    };
+    return paths;
+}
 
 } // namespace ltgui
 

@@ -68,24 +68,9 @@ bool Window::create(int width, int height, const std::string& title) {
         // canvas_ stays on nativeWindow_->getCanvas() — no dangling pointer
         LOG_INFO("Window", "Using software renderer (GDI+/X11)");
 
-        // Load default font for CPU fallback. GDI+ needs the font registered
-        // with the system to find it by family name.
+        // Load default font for CPU fallback
         Font defaultFont = Font::systemDefault(12);
-        const char* fontPaths[] = {
-#ifdef LTGUI_PLATFORM_WINDOWS
-            "D:/code/ltgui/font/Deng.ttf",
-            "font/Deng.ttf",
-            "C:/Windows/Fonts/simfang.ttf",
-            "C:/Windows/Fonts/msyh.ttf",
-            "C:/Windows/Fonts/segoeui.ttf",
-#elif defined(LTGUI_PLATFORM_LINUX)
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/TTF/DejaVuSans.ttf",
-#elif defined(LTGUI_PLATFORM_MACOS)
-            "/System/Library/Fonts/Helvetica.ttc",
-#endif
-        };
-        for (const char* path : fontPaths) {
+        for (const char* path : defaultFontSearchPaths()) {
             if (canvas_->loadFontFile(defaultFont, path)) {
                 LOG_INFO("Window", "CPU fallback font loaded: %s", path);
                 break;
@@ -210,8 +195,7 @@ void Window::handleEvent(Event& event) {
         }
         // Tab navigation: Tab = next, Shift+Tab = previous
         if (event.key == Key::Tab && centralWidget_) {
-            bool shift = (event.modifiers &
-                          static_cast<int>(KeyModifier::Shift)) != 0;
+            bool shift = hasModifier(event.modifiers, KeyModifier::Shift);
             Widget* next = nullptr;
             if (shift) {
                 if (focusWidget_)
@@ -241,8 +225,8 @@ void Window::handleEvent(Event& event) {
         }
         break;
     case EventType::MouseDown: {
-        // Close any open ComboBox dropdown if click is outside it
-        ComboBox::closeIfClickOutside(event.pos);
+        // Close open ComboBox dropdown if click is outside it
+        if (openCombo_) openCombo_->closeIfClickOutside(event.pos);
         if (centralWidget_) {
             Widget* prevFocus = focusWidget_;
             bool handled = centralWidget_->handleEvent(event);

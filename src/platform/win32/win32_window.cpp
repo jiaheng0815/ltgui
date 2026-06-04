@@ -29,8 +29,6 @@ Win32Window::Win32Window() {
 
 Win32Window::~Win32Window() {
     destroy();
-    delete canvas_;
-    canvas_ = nullptr;
 }
 
 void Win32Window::registerClass() {
@@ -94,7 +92,7 @@ bool Win32Window::create(int width, int height, const std::string& title) {
         ReleaseDC(hwnd_, hdc);
     }
 
-    canvas_ = new Win32Canvas(hwnd_);
+    canvas_ = std::make_unique<Win32Canvas>(hwnd_);
     canvas_->resize(width, height);
 
     return true;
@@ -214,7 +212,7 @@ void* Win32Window::nativeHandle() const {
 }
 
 NativeCanvas* Win32Window::getCanvas() {
-    return canvas_;
+    return canvas_.get();
 }
 
 LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -348,8 +346,8 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         Event ev;
         ev.type = EventType::KeyDown;
         // Track modifier state
-        if (GetKeyState(VK_CONTROL) & 0x8000) ev.modifiers |= 2;
-        if (GetKeyState(VK_SHIFT)   & 0x8000) ev.modifiers |= 1;
+        if (GetKeyState(VK_CONTROL) & 0x8000) ev.modifiers |= static_cast<int>(KeyModifier::Control);
+        if (GetKeyState(VK_SHIFT)   & 0x8000) ev.modifiers |= static_cast<int>(KeyModifier::Shift);
         // Map common virtual keys
         switch (wParam) {
         case VK_BACK:   ev.key = Key::Backspace; break;

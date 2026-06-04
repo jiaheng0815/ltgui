@@ -6,8 +6,6 @@
 
 namespace ltgui {
 
-ComboBox* ComboBox::s_openCombo_ = nullptr;
-
 ComboBox::ComboBox(Widget* parent) : Widget(parent) {
     style().bgColor = currentTheme().bgSecondary;
     style().fgColor = currentTheme().textPrimary;
@@ -18,7 +16,9 @@ ComboBox::ComboBox(Widget* parent) : Widget(parent) {
 }
 
 ComboBox::~ComboBox() {
-    if (s_openCombo_ == this) s_openCombo_ = nullptr;
+    if (auto* win = window()) {
+        if (win->openCombo_ == this) win->openCombo_ = nullptr;
+    }
 }
 
 void ComboBox::addItem(const std::string& item) {
@@ -156,11 +156,13 @@ void ComboBox::openDropdown() {
             opensDownward_ = false;
         }
     }
-    // Track as the active open combo box
-    if (s_openCombo_ && s_openCombo_ != this) {
-        s_openCombo_->closeDropdown();
+    // Track as the active open combo box for this window
+    if (auto* win = window()) {
+        if (win->openCombo_ && win->openCombo_ != this) {
+            win->openCombo_->closeDropdown();
+        }
+        win->openCombo_ = this;
     }
-    s_openCombo_ = this;
 
     // Raise to top of parent's z-order so the dropdown gets mouse events
     // before any overlapping sibling widgets (e.g. Slider, Button).
@@ -180,7 +182,9 @@ void ComboBox::closeDropdown() {
     invalidateExtended();
 
     dropdownOpen_ = false;
-    if (s_openCombo_ == this) s_openCombo_ = nullptr;
+    if (auto* win = window()) {
+        if (win->openCombo_ == this) win->openCombo_ = nullptr;
+    }
 }
 
 void ComboBox::invalidateExtended() {
@@ -198,16 +202,14 @@ void ComboBox::invalidateExtended() {
 }
 
 bool ComboBox::closeIfClickOutside(const Point& absPos) {
-    if (!s_openCombo_) return false;
-    // effectiveGeometry() is in parent-relative coords; convert to window-absolute
-    Rect base = s_openCombo_->absoluteRect();
-    Rect eff = s_openCombo_->effectiveGeometry();
-    // Extend the absolute rect by the same amount effectiveGeometry extends geometry()
-    Rect absEff(base.x + (eff.x - s_openCombo_->geometry().x),
-                base.y + (eff.y - s_openCombo_->geometry().y),
+    if (!dropdownOpen_) return false;
+    Rect base = absoluteRect();
+    Rect eff = effectiveGeometry();
+    Rect absEff(base.x + (eff.x - geometry().x),
+                base.y + (eff.y - geometry().y),
                 eff.width, eff.height);
     if (!absEff.contains(absPos)) {
-        s_openCombo_->closeDropdown();
+        closeDropdown();
         return true;
     }
     return false;
