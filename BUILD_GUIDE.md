@@ -525,8 +525,6 @@ Then `python ltgui.py build` — the build script auto-scans all `.cpp` files un
 
 # 中文
 
-# 中文
-
 ## 目录
 
 - [前置条件](#前置条件)
