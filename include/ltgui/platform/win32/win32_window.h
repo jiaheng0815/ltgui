@@ -30,6 +30,11 @@ public:
     NativeCanvas* getCanvas() override;
     float dpiScale() const override { return dpiScale_; }
     void setCursor(CursorShape shape) override;
+    bool setClipboardText(const std::string& text) override;
+    std::string getClipboardText() override;
+
+    // Set IME composition window position (client coordinates)
+    void setImeCursorPos(int x, int y) { imeCompX_ = x; imeCompY_ = y; }
 
 private:
     friend LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
@@ -42,6 +47,8 @@ private:
     Size size_;
     float dpiScale_ = 1.0f;
     bool trackingMouse_ = false;
+    int imeCompX_ = 10;
+    int imeCompY_ = 10;
     static bool classRegistered_;
 };
 

@@ -56,7 +56,8 @@ void ContextMenu::dismiss() {
 
 Size ContextMenu::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint({bestWidth(), 100});
+    float dpi = window() ? window()->dpiScale() : 1.0f;
+    setCachedSizeHint({bestWidth(), static_cast<int>(100 * dpi)});
     return cachedSizeHint();
 }
 

@@ -3,14 +3,9 @@
 #include "theme.h"
 #include "utf8.h"
 #include "platform/native_canvas.h"
+#include "platform/native_window.h"
 #include <algorithm>
-
-#ifdef LTGUI_PLATFORM_WINDOWS
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
+#include <sstream>
 
 namespace ltgui {
 
@@ -29,14 +24,67 @@ void TextBox::setText(const std::string& text) {
     cursorPos_ = static_cast<int>(text.size());
     selectionStart_ = -1;
     scrollOffset_ = 0;
+    undoStack_.clear();
+    redoStack_.clear();
     update();
     if (textChangedCallback_) textChangedCallback_(text_);
 }
 
+void TextBox::setMultiLine(bool multiLine) {
+    multiLine_ = multiLine;
+    invalidateSizeHint();
+    update();
+}
+
 Size TextBox::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint({150, 30});
+    // Apply DPI scale to the default size
+    float dpi = 1.0f;
+    if (window()) dpi = window()->dpiScale();
+    if (multiLine_) {
+        setCachedSizeHint({static_cast<int>(150 * dpi), static_cast<int>(80 * dpi)});
+    } else {
+        setCachedSizeHint({static_cast<int>(150 * dpi), static_cast<int>(30 * dpi)});
+    }
     return cachedSizeHint();
+}
+
+void TextBox::pushUndo() {
+    if (undoing_) return;
+    UndoEntry entry{text_, cursorPos_, selectionStart_};
+    if (!undoStack_.empty() && undoStack_.back() == entry) return;
+    undoStack_.push_back(entry);
+    redoStack_.clear();
+    // Limit undo stack to 100 entries
+    if (undoStack_.size() > 100) undoStack_.erase(undoStack_.begin());
+}
+
+void TextBox::undo() {
+    if (undoStack_.empty()) return;
+    undoing_ = true;
+    redoStack_.push_back({text_, cursorPos_, selectionStart_});
+    UndoEntry entry = undoStack_.back();
+    undoStack_.pop_back();
+    text_ = entry.text;
+    cursorPos_ = entry.cursorPos;
+    selectionStart_ = entry.selectionStart;
+    undoing_ = false;
+    update();
+    if (textChangedCallback_) textChangedCallback_(text_);
+}
+
+void TextBox::redo() {
+    if (redoStack_.empty()) return;
+    undoing_ = true;
+    undoStack_.push_back({text_, cursorPos_, selectionStart_});
+    UndoEntry entry = redoStack_.back();
+    redoStack_.pop_back();
+    text_ = entry.text;
+    cursorPos_ = entry.cursorPos;
+    selectionStart_ = entry.selectionStart;
+    undoing_ = false;
+    update();
+    if (textChangedCallback_) textChangedCallback_(text_);
 }
 
 void TextBox::deleteSelection() {
@@ -56,14 +104,17 @@ std::string TextBox::selectedText() const {
 }
 
 void TextBox::insertText(const std::string& str) {
+    pushUndo();
     deleteSelection();
     text_.insert(cursorPos_, str);
     cursorPos_ += static_cast<int>(str.size());
+    invalidateSizeHint();
     update();
     if (textChangedCallback_) textChangedCallback_(text_);
 }
 
 void TextBox::deleteCharBefore() {
+    pushUndo();
     if (selectionStart_ >= 0) {
         deleteSelection();
         update();
@@ -80,6 +131,7 @@ void TextBox::deleteCharBefore() {
 }
 
 void TextBox::deleteCharAt() {
+    pushUndo();
     if (selectionStart_ >= 0) {
         deleteSelection();
         update();
@@ -104,59 +156,89 @@ void TextBox::moveCursorByChar(int delta) {
     update();
 }
 
-// --- Clipboard helpers ---
-
-void TextBox::setClipboardText(const std::string& text) {
-#ifdef LTGUI_PLATFORM_WINDOWS
-    if (!OpenClipboard(nullptr)) return;
-    EmptyClipboard();
-    int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, wlen * sizeof(wchar_t));
-    if (hMem) {
-        wchar_t* p = static_cast<wchar_t*>(GlobalLock(hMem));
-        MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, p, wlen);
-        GlobalUnlock(hMem);
-        SetClipboardData(CF_UNICODETEXT, hMem);
+void TextBox::moveCursorByLine(int delta) {
+    if (!multiLine_) {
+        // In single-line mode, up/down = home/end
+        if (delta < 0) cursorPos_ = 0;
+        else cursorPos_ = static_cast<int>(text_.size());
+        selectionStart_ = -1;
+        update();
+        return;
     }
-    CloseClipboard();
-#else
-    (void)text;
-#endif
-}
-
-std::string TextBox::getClipboardText() {
-#ifdef LTGUI_PLATFORM_WINDOWS
-    if (!OpenClipboard(nullptr)) return {};
-    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
-    if (!hData) { CloseClipboard(); return {}; }
-    wchar_t* p = static_cast<wchar_t*>(GlobalLock(hData));
-    std::string result;
-    if (p) {
-        int len = WideCharToMultiByte(CP_UTF8, 0, p, -1, nullptr, 0, nullptr, nullptr);
-        if (len > 0) {
-            result.resize(len - 1);
-            WideCharToMultiByte(CP_UTF8, 0, p, -1, &result[0], len, nullptr, nullptr);
+    // Multi-line: find current line and move up/down
+    auto ls = lines();
+    int curLine = -1, offset = 0;
+    for (int i = 0; i < static_cast<int>(ls.size()); i++) {
+        int lineLen = static_cast<int>(ls[i].size());
+        if (cursorPos_ >= offset && cursorPos_ <= offset + lineLen) {
+            curLine = i;
+            break;
         }
-        GlobalUnlock(hData);
+        offset += lineLen + 1; // +1 for newline
     }
-    CloseClipboard();
-    return result;
-#else
-    return {};
-#endif
+    if (curLine < 0) return;
+
+    int targetLine = curLine + delta;
+    if (targetLine < 0 || targetLine >= static_cast<int>(ls.size())) return;
+
+    // Find byte offset of target line start
+    int targetOffset = 0;
+    for (int i = 0; i < targetLine; i++) {
+        targetOffset += static_cast<int>(ls[i].size()) + 1;
+    }
+    // Clamp to target line length
+    int colOffset = cursorPos_ - offset;
+    if (colOffset < 0) colOffset = 0;
+    int maxCol = static_cast<int>(ls[targetLine].size());
+    if (colOffset > maxCol) colOffset = maxCol;
+    cursorPos_ = targetOffset + colOffset;
+    selectionStart_ = -1;
+    update();
 }
+
+std::vector<std::string> TextBox::lines() const {
+    std::vector<std::string> result;
+    std::istringstream ss(text_);
+    std::string line;
+    while (std::getline(ss, line)) {
+        result.push_back(line);
+    }
+    // Handle trailing newline
+    if (!text_.empty() && text_.back() == '\n') {
+        result.push_back("");
+    }
+    if (result.empty()) result.push_back("");
+    return result;
+}
+
+int TextBox::totalLines() const {
+    return static_cast<int>(lines().size());
+}
+
+// --- Clipboard (uses NativeWindow abstraction) ---
 
 void TextBox::copy() {
     std::string sel = selectedText();
     if (sel.empty()) sel = text_; // copy all if no selection
-    if (!sel.empty()) setClipboardText(sel);
+    if (!sel.empty()) {
+        if (auto* w = window()) {
+            if (auto* nw = w->nativeWindow()) {
+                nw->setClipboardText(sel);
+            }
+        }
+    }
 }
 
 void TextBox::cut() {
     std::string sel = selectedText();
     if (sel.empty()) sel = text_; // cut all if no selection
     if (!sel.empty()) {
-        setClipboardText(sel);
+        if (auto* w = window()) {
+            if (auto* nw = w->nativeWindow()) {
+                nw->setClipboardText(sel);
+            }
+        }
+        pushUndo();
         if (selectionStart_ >= 0) {
             deleteSelection();
         } else {
@@ -170,9 +252,13 @@ void TextBox::cut() {
 }
 
 void TextBox::paste() {
-    std::string clip = getClipboardText();
-    if (!clip.empty()) {
-        insertText(clip);
+    if (auto* w = window()) {
+        if (auto* nw = w->nativeWindow()) {
+            std::string clip = nw->getClipboardText();
+            if (!clip.empty()) {
+                insertText(clip);
+            }
+        }
     }
 }
 
@@ -196,28 +282,52 @@ void TextBox::paintSelf(NativeCanvas* canvas) {
     int pad = style().paddingLeft;
     Rect textRect(r.x + pad, r.y, r.width - pad * 2, r.height);
 
+    // Build display text: combine IME preedit with actual text
+    std::string displayText = text_;
+    int displayCursor = cursorPos_;
+    int imeLen = static_cast<int>(imePreedit_.size());
+    if (focused_ && imeLen > 0) {
+        displayText.insert(cursorPos_, imePreedit_);
+        displayCursor = cursorPos_ + imeLen;
+    }
+
     // Paint selection highlight
     if (focused_ && selectionStart_ >= 0 && selectionStart_ != cursorPos_) {
         int selStart = std::min(cursorPos_, selectionStart_);
         int selEnd   = std::max(cursorPos_, selectionStart_);
-        std::string before = text_.substr(0, selStart);
-        std::string sel    = text_.substr(selStart, selEnd - selStart);
+        std::string before = displayText.substr(0, selStart);
+        std::string sel    = displayText.substr(selStart, selEnd - selStart);
         int selX = r.x + pad + canvas->measureText(before).width;
         int selW = canvas->measureText(sel).width;
         canvas->setColor(t.accent);
         canvas->fillRect(Rect(selX, r.y + 2, selW, r.height - 4));
     }
 
+    // Paint IME preedit underline
+    if (focused_ && imeLen > 0) {
+        std::string before = text_.substr(0, cursorPos_);
+        std::string preedit = imePreedit_;
+        int preeditX = r.x + pad + canvas->measureText(before).width;
+        int preeditW = canvas->measureText(preedit).width;
+        // Draw underline for preedit text
+        int underlineY = r.bottom() - 4;
+        canvas->setColor(t.accent);
+        canvas->drawLine({preeditX, underlineY}, {preeditX + preeditW, underlineY}, 1);
+    }
+
     canvas->setColor(isEnabled() ? style().fgColor : t.textDisabled);
     canvas->setFont(style().font);
 
-    if (!text_.empty()) {
-        canvas->drawText(text_, textRect,
-                         NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);
+    int flags = NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter;
+    if (!multiLine_) flags |= NativeCanvas::SingleLine;
+    else flags |= NativeCanvas::WordWrap;
+
+    if (!displayText.empty()) {
+        canvas->drawText(displayText, textRect, flags);
     }
 
     if (focused_) {
-        std::string before = text_.substr(0, cursorPos_);
+        std::string before = displayText.substr(0, displayCursor);
         Size textBefore = canvas->measureText(before);
         int cursorX = r.x + pad + textBefore.width;
 
@@ -285,14 +395,35 @@ bool TextBox::handleEvent(Event& event) {
     case EventType::FocusOut:
         focused_ = false;
         selectionStart_ = -1;
+        imePreedit_.clear();
         update();
         event.accepted = true;
         return true;
+    case EventType::ImeComposition: {
+        // Update IME preedit display
+        imePreedit_ = event.imeText;
+        imeCursor_ = event.imeCursor;
+        update();
+        event.accepted = true;
+        return true;
+    }
     case EventType::KeyDown:
         if (focused_) {
             // Check for Ctrl+key combinations
-            bool ctrl = (event.modifiers & 2) != 0; // Control modifier
+            bool ctrl = (event.modifiers & 2) != 0;
+            bool shift = (event.modifiers & 1) != 0;
 
+            if (ctrl && event.key == Key::Z) {
+                if (shift) redo();
+                else undo();
+                event.accepted = true;
+                return true;
+            }
+            if (ctrl && event.key == Key::Y) {
+                redo();
+                event.accepted = true;
+                return true;
+            }
             if (ctrl && event.key == Key::C) {
                 copy();
                 event.accepted = true;
@@ -314,15 +445,22 @@ bool TextBox::handleEvent(Event& event) {
                 return true;
             }
 
-            // Shift+arrow extends selection
-            bool shift = (event.modifiers & 1) != 0;
-
+            // Handle printable characters (including IME-committed multi-byte UTF-8)
             if (event.charCode >= 32 && event.charCode != 127) {
+                // Clear IME preedit when actual text arrives
+                imePreedit_.clear();
                 insertText(utf8::encode(event.charCode));
                 event.accepted = true;
                 return true;
             }
             switch (event.key) {
+            case Key::Enter:
+                if (multiLine_) {
+                    insertText("\n");
+                    event.accepted = true;
+                    return true;
+                }
+                break;
             case Key::Backspace:
                 deleteCharBefore();
                 event.accepted = true;
@@ -340,6 +478,18 @@ bool TextBox::handleEvent(Event& event) {
             case Key::Right:
                 if (shift && selectionStart_ < 0) selectionStart_ = cursorPos_;
                 moveCursorByChar(1);
+                if (!shift) selectionStart_ = -1;
+                event.accepted = true;
+                return true;
+            case Key::Up:
+                if (shift && selectionStart_ < 0) selectionStart_ = cursorPos_;
+                moveCursorByLine(-1);
+                if (!shift) selectionStart_ = -1;
+                event.accepted = true;
+                return true;
+            case Key::Down:
+                if (shift && selectionStart_ < 0) selectionStart_ = cursorPos_;
+                moveCursorByLine(1);
                 if (!shift) selectionStart_ = -1;
                 event.accepted = true;
                 return true;

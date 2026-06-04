@@ -27,6 +27,16 @@ Window::Window() {
 
 Window::~Window() {
     Application::instance().unregisterWindow(this);
+
+    // Clear focus BEFORE destroying the central widget.
+    // Otherwise Widget::~Widget() may access a partially-destroyed Window
+    // via its window_ pointer when trying to clear the focusWidget_.
+    focusWidget_ = nullptr;
+
+    // Destroy central widget while nativeWindow_ is still valid, since
+    // widget destructors may need to call update() which uses nativeWindow_.
+    centralWidget_.reset();
+
     if (nativeWindow_) {
         nativeWindow_->destroy();
     }
@@ -279,6 +289,32 @@ void Window::setFocusWidget(Widget* w) {
         ev.type = EventType::FocusIn;
         focusWidget_->handleEvent(ev);
     }
+}
+
+Point Window::imeCursorScreenPos() const {
+    // Default position if no focused widget: top-left corner
+    if (!focusWidget_) return {10, 10};
+
+    // Get the focused widget's absolute rect (relative to window client area)
+    Rect abs = focusWidget_->absoluteRect();
+    Point cursorPos = {abs.x + 8, abs.y + abs.height / 2};
+
+    // If it's a TextBox, compute the actual text cursor position
+    if (focusWidget_->widgetType() == WidgetType::TextBox) {
+        // TextBox cursor position is computed during paint — we approximate here
+        // A more precise approach would add a virtual cursorPos() to Widget
+        cursorPos.x = abs.x + focusWidget_->style().paddingLeft;
+    }
+
+    // Convert to screen coordinates via native window
+    if (nativeWindow_) {
+        Size sz = nativeWindow_->getSize();
+        // Add window position — the client area offset from screen
+        // For now return client-relative; the native window handler
+        // will add the window position offset
+        (void)sz;
+    }
+    return cursorPos;
 }
 
 void Window::onPaint(NativeCanvas* canvas, const Rect& dirtyRect) {

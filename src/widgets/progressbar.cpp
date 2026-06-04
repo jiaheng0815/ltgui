@@ -1,4 +1,5 @@
 #include "widgets/progressbar.h"
+#include "window.h"
 #include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
@@ -41,7 +42,8 @@ void ProgressBar::setIndeterminate(bool on) {
 
 Size ProgressBar::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint({200, 20});
+    float dpi = window() ? window()->dpiScale() : 1.0f;
+    setCachedSizeHint({static_cast<int>(200 * dpi), static_cast<int>(20 * dpi)});
     return cachedSizeHint();
 }
 

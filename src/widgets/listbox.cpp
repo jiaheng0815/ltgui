@@ -1,4 +1,5 @@
 #include "widgets/listbox.h"
+#include "window.h"
 #include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
@@ -54,7 +55,8 @@ void ListBox::setSelected(int index) {
 
 Size ListBox::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint({160, 140});
+    float dpi = window() ? window()->dpiScale() : 1.0f;
+    setCachedSizeHint({static_cast<int>(160 * dpi), static_cast<int>(140 * dpi)});
     return cachedSizeHint();
 }
 

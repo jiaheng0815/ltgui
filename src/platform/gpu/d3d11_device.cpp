@@ -16,10 +16,18 @@
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 
+// Try to include precompiled shaders if available
+#if __has_include("platform/gpu/d3d11_shaders.h")
+#include "platform/gpu/d3d11_shaders.h"
+#define LTGUI_HAS_PRECOMPILED_SHADERS 1
+#else
+#define LTGUI_HAS_PRECOMPILED_SHADERS 0
+#endif
+
 namespace ltgui {
 namespace gpu {
 
-// ---- Embedded shaders ----
+// ---- Embedded shaders (fallback for runtime compilation) ----
 
 static const char* kSolidShader = R"(
 struct VS_IN { float2 pos : POSITION; float4 col : COLOR; };
@@ -407,8 +415,33 @@ private:
     enum class ShaderType { Solid, Rounded, Ellipse, Texture };
 
     bool compileShaders() {
-        auto compile = [this](const char* src, const char* entry, const char* target,
-                              ID3DBlob** blob) -> bool {
+        // Helper: create shader from blob or return false
+        auto createFromBlob = [this](ID3DBlob* blob, bool isVS,
+                                     ID3D11VertexShader** vs, ID3D11PixelShader** ps) -> bool {
+            if (!blob) return false;
+            if (isVS) {
+                return SUCCEEDED(device_->CreateVertexShader(
+                    blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, vs));
+            } else {
+                return SUCCEEDED(device_->CreatePixelShader(
+                    blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, ps));
+            }
+        };
+
+        // Helper: create shader from precompiled bytecode array
+        auto createFromBytecode = [this](const uint8_t* data, size_t len, bool isVS,
+                                         ID3D11VertexShader** vs, ID3D11PixelShader** ps) -> bool {
+            if (!data || len == 0) return false;
+            if (isVS) {
+                return SUCCEEDED(device_->CreateVertexShader(data, len, nullptr, vs));
+            } else {
+                return SUCCEEDED(device_->CreatePixelShader(data, len, nullptr, ps));
+            }
+        };
+
+        // Helper: compile HLSL source at runtime (fallback)
+        auto compile = [](const char* src, const char* entry, const char* target,
+                          ID3DBlob** blob) -> bool {
             ID3DBlob* err = nullptr;
             HRESULT hr = D3DCompile(src, strlen(src), nullptr, nullptr, nullptr,
                                     entry, target, 0, 0, blob, &err);
@@ -422,52 +455,121 @@ private:
         };
 
         ID3DBlob *vsBlob = nullptr, *psBlob = nullptr;
+        bool precompiled = LTGUI_HAS_PRECOMPILED_SHADERS != 0;
 
-        // Solid shader
-        if (compile(kSolidShader, "VSMain", "vs_4_0", &vsBlob) &&
-            compile(kSolidShader, "PSMain", "ps_4_0", &psBlob)) {
-            device_->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &solidVS_);
-            device_->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &solidPS_);
+        if (precompiled) {
+            LOG_INFO("D3D11", "Using precompiled shader bytecode");
+        }
 
+        // Helper to create input layout from bytecode or blob
+        auto createSolidIL = [this](const void* bytecode, size_t len) {
             D3D11_INPUT_ELEMENT_DESC layout[] = {
                 { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
                 { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
             };
-            device_->CreateInputLayout(layout, 2, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &ilSolid_);
-            vsBlob->Release(); psBlob->Release();
-        } else { return false; }
-
-        // Rounded shader
-        if (compile(kRoundedShader, "VSMain", "vs_4_0", &vsBlob) &&
-            compile(kRoundedShader, "PSMain", "ps_4_0", &psBlob)) {
-            device_->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &roundedVS_);
-            device_->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &roundedPS_);
-
+            device_->CreateInputLayout(layout, 2, bytecode, len, &ilSolid_);
+        };
+        auto createRoundedIL = [this](const void* bytecode, size_t len) {
             D3D11_INPUT_ELEMENT_DESC layout[] = {
                 { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
                 { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
                 { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM,  0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
                 { "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 },
             };
-            device_->CreateInputLayout(layout, 4, vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), &ilRounded_);
-            vsBlob->Release(); psBlob->Release();
-        } else { return false; }
+            device_->CreateInputLayout(layout, 4, bytecode, len, &ilRounded_);
+        };
 
-        // Ellipse shader
-        if (compile(kEllipseShader, "VSMain", "vs_4_0", &vsBlob) &&
-            compile(kEllipseShader, "PSMain", "ps_4_0", &psBlob)) {
-            device_->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &ellipseVS_);
-            device_->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &ellipsePS_);
-            vsBlob->Release(); psBlob->Release();
-        } else { return false; }
+        // --- Solid shader ---
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+        if (precompiled) {
+            if (createFromBytecode(kSolid_vsBytecode, kSolid_vsBytecodeLen, true, &solidVS_, nullptr) &&
+                createFromBytecode(kSolid_psBytecode, kSolid_psBytecodeLen, false, nullptr, &solidPS_)) {
+                createSolidIL(kSolid_vsBytecode, kSolid_vsBytecodeLen);
+            } else {
+                precompiled = false; // fall through to runtime
+            }
+        }
+#endif
+        if (!precompiled) {
+            if (compile(kSolidShader, "VSMain", "vs_4_0", &vsBlob) &&
+                compile(kSolidShader, "PSMain", "ps_4_0", &psBlob)) {
+                createFromBlob(vsBlob, true, &solidVS_, nullptr);
+                createFromBlob(psBlob, false, nullptr, &solidPS_);
+                createSolidIL(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize());
+                vsBlob->Release(); psBlob->Release();
+            } else { return false; }
+        }
 
-        // Texture shader
-        if (compile(kTextureShader, "VSMain", "vs_4_0", &vsBlob) &&
-            compile(kTextureShader, "PSMain", "ps_4_0", &psBlob)) {
-            device_->CreateVertexShader(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize(), nullptr, &texVS_);
-            device_->CreatePixelShader(psBlob->GetBufferPointer(), psBlob->GetBufferSize(), nullptr, &texPS_);
-            vsBlob->Release(); psBlob->Release();
-        } else { return false; }
+        // --- Rounded shader ---
+        bool precompiledRounded = false;
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+        precompiledRounded = precompiled;
+        if (precompiledRounded) {
+            if (createFromBytecode(kRounded_vsBytecode, kRounded_vsBytecodeLen, true, &roundedVS_, nullptr) &&
+                createFromBytecode(kRounded_psBytecode, kRounded_psBytecodeLen, false, nullptr, &roundedPS_)) {
+                createRoundedIL(kRounded_vsBytecode, kRounded_vsBytecodeLen);
+            } else {
+                precompiledRounded = false;
+            }
+        }
+#endif
+        if (!precompiledRounded) {
+            if (compile(kRoundedShader, "VSMain", "vs_4_0", &vsBlob) &&
+                compile(kRoundedShader, "PSMain", "ps_4_0", &psBlob)) {
+                createFromBlob(vsBlob, true, &roundedVS_, nullptr);
+                createFromBlob(psBlob, false, nullptr, &roundedPS_);
+                if (ilRounded_ == nullptr) {
+                    createRoundedIL(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize());
+                }
+                vsBlob->Release(); psBlob->Release();
+            } else { return false; }
+        }
+
+        // --- Ellipse shader ---
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+        if (precompiled) {
+            if (createFromBytecode(kEllipse_vsBytecode, kEllipse_vsBytecodeLen, true, &ellipseVS_, nullptr) &&
+                createFromBytecode(kEllipse_psBytecode, kEllipse_psBytecodeLen, false, nullptr, &ellipsePS_)) {
+                // OK, precompiled
+            } else {
+                goto compile_ellipse_runtime;
+            }
+        } else
+#endif
+        {
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+        compile_ellipse_runtime:
+#endif
+            if (compile(kEllipseShader, "VSMain", "vs_4_0", &vsBlob) &&
+                compile(kEllipseShader, "PSMain", "ps_4_0", &psBlob)) {
+                createFromBlob(vsBlob, true, &ellipseVS_, nullptr);
+                createFromBlob(psBlob, false, nullptr, &ellipsePS_);
+                vsBlob->Release(); psBlob->Release();
+            } else { return false; }
+        }
+
+        // --- Texture shader ---
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+        if (precompiled) {
+            if (createFromBytecode(kTexture_vsBytecode, kTexture_vsBytecodeLen, true, &texVS_, nullptr) &&
+                createFromBytecode(kTexture_psBytecode, kTexture_psBytecodeLen, false, nullptr, &texPS_)) {
+                // OK, precompiled
+            } else {
+                goto compile_texture_runtime;
+            }
+        } else
+#endif
+        {
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+        compile_texture_runtime:
+#endif
+            if (compile(kTextureShader, "VSMain", "vs_4_0", &vsBlob) &&
+                compile(kTextureShader, "PSMain", "ps_4_0", &psBlob)) {
+                createFromBlob(vsBlob, true, &texVS_, nullptr);
+                createFromBlob(psBlob, false, nullptr, &texPS_);
+                vsBlob->Release(); psBlob->Release();
+            } else { return false; }
+        }
 
         return true;
     }

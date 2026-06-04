@@ -35,7 +35,14 @@ public:
     void* nativeHandle() const;
 
     NativeCanvas* canvas() { return canvas_; }
+    NativeWindow* nativeWindow() { return nativeWindow_.get(); }
     bool isGpuAccelerated() const { return useGpu_; }
+
+    // DPI scale factor for this window
+    float dpiScale() const {
+        if (nativeWindow_) return nativeWindow_->dpiScale();
+        return 1.0f;
+    }
 
     void setCursor(CursorShape shape) {
         if (nativeWindow_) nativeWindow_->setCursor(shape);
@@ -61,6 +68,11 @@ private:
     // this window's tree (e.g. it was destroyed or reparented), clear and
     // return false. Callers should bail out on false.
     bool validateFocusWidget();
+
+    // IME composition cursor position in screen coordinates.
+    // The focused widget reports its cursor position so the platform
+    // can position the IME composition window correctly.
+    Point imeCursorScreenPos() const;
 
     std::unique_ptr<NativeWindow> nativeWindow_;
     std::unique_ptr<gpu::GpuCanvas> gpuCanvas_;

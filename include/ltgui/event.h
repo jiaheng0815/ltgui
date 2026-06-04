@@ -1,5 +1,6 @@
 #pragma once
 #include "geometry.h"
+#include <string>
 
 namespace ltgui {
 
@@ -15,7 +16,8 @@ enum class EventType {
     Resize,
     Close,
     FocusIn,
-    FocusOut
+    FocusOut,
+    ImeComposition  // IME preedit/composition update (imeText, imeCursor)
 };
 
 enum class MouseButton {
@@ -61,6 +63,8 @@ struct Event {
     int modifiers = 0;
     int wheelDelta = 0;
     unsigned int charCode = 0;  // Unicode char from WM_CHAR
+    std::string imeText;        // Preedit/composition text from IME
+    int imeCursor = 0;          // Cursor position within imeText
     int width = 0;
     int height = 0;
     bool accepted = false;

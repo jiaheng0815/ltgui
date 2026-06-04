@@ -1,4 +1,5 @@
 #include "widgets/scrollarea.h"
+#include "window.h"
 #include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
@@ -51,7 +52,8 @@ void ScrollArea::updateScrollBars() {
 
 Size ScrollArea::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint({200, 200});
+    float dpi = window() ? window()->dpiScale() : 1.0f;
+    setCachedSizeHint({static_cast<int>(200 * dpi), static_cast<int>(200 * dpi)});
     return cachedSizeHint();
 }
 

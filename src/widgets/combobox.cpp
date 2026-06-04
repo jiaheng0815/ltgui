@@ -64,7 +64,8 @@ void ComboBox::setCurrentIndex(int index) {
 
 Size ComboBox::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint({150, 30});
+    float dpi = window() ? window()->dpiScale() : 1.0f;
+    setCachedSizeHint({static_cast<int>(150 * dpi), static_cast<int>(30 * dpi)});
     return cachedSizeHint();
 }
 

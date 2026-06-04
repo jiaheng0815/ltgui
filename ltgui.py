@@ -83,7 +83,20 @@ def resolve_compiler(compiler_arg):
     if c in ("gcc", "g++", "gcc++"):
         return ("g++", False)
     if c in ("msvc", "cl", "msbuild"):
+        if not shutil.which("cl"):
+            cprint("Error: MSVC compiler 'cl' not found in PATH.", Color.RED, bold=True)
+            cprint("", Color.WHITE)
+            cprint("You must run this command from a Visual Studio Developer Command Prompt,", Color.YELLOW)
+            cprint("or use the 'Developer PowerShell for VS' terminal.", Color.YELLOW)
+            cprint("", Color.WHITE)
+            cprint("Alternative: install clang and use --compiler clang", Color.WHITE)
+            cprint("  python ltgui.py build --compiler clang", Color.CYAN)
+            sys.exit(1)
         return ("cl", True)
+    if not shutil.which(compiler_arg):
+        cprint(f"Error: compiler '{compiler_arg}' not found in PATH.", Color.RED, bold=True)
+        cprint("Make sure the compiler is installed and available on your PATH.", Color.YELLOW)
+        sys.exit(1)
     return (compiler_arg, False)  # custom path
 
 # --- Flag parsing ---
@@ -438,7 +451,19 @@ def _find_matching_brace(text, start):
 
 def _strip_function_bodies(text):
     """Replace function bodies { ... } with ; for inline/in-class definitions.
+
     Preserves class/struct/enum/namespace bodies and control-flow blocks.
+
+    KNOWN LIMITATIONS:
+    - String literals containing '{' or '}' may still confuse the parser
+      in edge cases (multi-line strings, raw string literals with R\"(...)\").
+    - Template arguments with '>' are handled for simple cases but complex
+      nested templates may still cause false positives.
+    - Lambda expressions inside function signatures are not fully supported.
+    - #ifdef-wrapped function definitions may produce invalid syntax output
+      if the #ifdef splits a function signature across branches.
+    - For production use, consider replacing this with a libclang-based
+      approach or using a pre-built SDK header instead.
     """
     # Keywords whose opening brace is NOT a function body
     control = {'if', 'for', 'while', 'switch', 'catch', 'return',
@@ -451,6 +476,40 @@ def _strip_function_bodies(text):
     pos = 0
     n = len(text)
     while pos < n:
+        # Skip string and char literals to avoid false brace matches inside them
+        if pos < n and text[pos] in ('"', "'"):
+            quote = text[pos]
+            # Check for raw string literal prefix: R"delim(...)delim"
+            if pos > 0 and text[pos-1] == 'R':
+                # Raw string: R"delim( ... )delim"
+                delim_start = pos + 1
+                paren = text.find('(', delim_start)
+                if paren >= 0:
+                    delim = text[delim_start:paren]
+                    end_marker = ')' + delim + '"'
+                    end_pos = text.find(end_marker, paren + 1)
+                    if end_pos >= 0:
+                        out.append(text[pos:end_pos + len(end_marker)])
+                        pos = end_pos + len(end_marker)
+                        continue
+            # Regular string/char literal
+            out.append(quote)
+            i = pos + 1
+            while i < n:
+                if text[i] == '\\':
+                    out.append(text[i:i+2])
+                    i += 2
+                    continue
+                if text[i] == quote:
+                    out.append(quote)
+                    pos = i + 1
+                    break
+                out.append(text[i])
+                i += 1
+            else:
+                pos = i  # unterminated string, move past it
+            continue
+
         # Find next opening brace
         brace = text.find('{', pos)
         if brace < 0:

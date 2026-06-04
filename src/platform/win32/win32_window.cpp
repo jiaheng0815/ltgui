@@ -173,6 +173,42 @@ void Win32Window::setCursor(CursorShape shape) {
     SetCursor(LoadCursorW(nullptr, id));
 }
 
+bool Win32Window::setClipboardText(const std::string& text) {
+    if (!OpenClipboard(nullptr)) return false;
+    EmptyClipboard();
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
+    if (wlen <= 0) { CloseClipboard(); return false; }
+    HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, wlen * sizeof(wchar_t));
+    if (hMem) {
+        wchar_t* p = static_cast<wchar_t*>(GlobalLock(hMem));
+        if (p) {
+            MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, p, wlen);
+            GlobalUnlock(hMem);
+        }
+        SetClipboardData(CF_UNICODETEXT, hMem);
+    }
+    CloseClipboard();
+    return hMem != nullptr;
+}
+
+std::string Win32Window::getClipboardText() {
+    if (!OpenClipboard(nullptr)) return {};
+    HANDLE hData = GetClipboardData(CF_UNICODETEXT);
+    if (!hData) { CloseClipboard(); return {}; }
+    wchar_t* p = static_cast<wchar_t*>(GlobalLock(hData));
+    std::string result;
+    if (p) {
+        int len = WideCharToMultiByte(CP_UTF8, 0, p, -1, nullptr, 0, nullptr, nullptr);
+        if (len > 0) {
+            result.resize(len - 1);
+            WideCharToMultiByte(CP_UTF8, 0, p, -1, &result[0], len, nullptr, nullptr);
+        }
+        GlobalUnlock(hData);
+    }
+    CloseClipboard();
+    return result;
+}
+
 void* Win32Window::nativeHandle() const {
     return hwnd_;
 }
@@ -403,18 +439,52 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         if (hIMC) {
             COMPOSITIONFORM cf = {};
             cf.dwStyle = CFS_POINT;
-            cf.ptCurrentPos.x = 10;
-            cf.ptCurrentPos.y = 10;
+            // Position near bottom-left of client area — caller should
+            // call setImeCursorPos() to position at the actual text cursor
+            cf.ptCurrentPos.x = imeCompX_;
+            cf.ptCurrentPos.y = imeCompY_;
             ImmSetCompositionWindow(hIMC, &cf);
+
+            // Set candidate window position below the composition window
+            CANDIDATEFORM candForm = {};
+            candForm.dwIndex = 0;
+            candForm.dwStyle = CFS_CANDIDATEPOS;
+            candForm.ptCurrentPos.x = imeCompX_;
+            candForm.ptCurrentPos.y = imeCompY_ + 20;
+            ImmSetCandidateWindow(hIMC, &candForm);
+
             ImmReleaseContext(hwnd_, hIMC);
         }
         return 0;
     }
 
     case WM_IME_COMPOSITION: {
-        if (lParam & GCS_RESULTSTR) {
-            HIMC hIMC = ImmGetContext(hwnd_);
-            if (hIMC) {
+        HIMC hIMC = ImmGetContext(hwnd_);
+        if (hIMC) {
+            // Send preedit (composition) string as ImeComposition event
+            if (lParam & GCS_COMPSTR) {
+                LONG len = ImmGetCompositionStringW(hIMC, GCS_COMPSTR, nullptr, 0);
+                if (len > 0) {
+                    std::wstring wstr(len / sizeof(wchar_t), L'\0');
+                    ImmGetCompositionStringW(hIMC, GCS_COMPSTR, &wstr[0], len);
+
+                    // Convert to UTF-8 for the event
+                    int utf8Len = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()),
+                                                       nullptr, 0, nullptr, nullptr);
+                    std::string utf8(utf8Len, '\0');
+                    WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()),
+                                        &utf8[0], utf8Len, nullptr, nullptr);
+
+                    Event ev;
+                    ev.type = EventType::ImeComposition;
+                    ev.imeText = utf8;
+                    ev.imeCursor = static_cast<int>(utf8.size());
+                    eventCallback_(ev);
+                }
+            }
+
+            // Committed text → post as WM_CHAR messages
+            if (lParam & GCS_RESULTSTR) {
                 LONG len = ImmGetCompositionStringW(hIMC, GCS_RESULTSTR, nullptr, 0);
                 if (len > 0) {
                     std::wstring wstr(len / sizeof(wchar_t), L'\0');
@@ -423,8 +493,8 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                         PostMessageW(hwnd_, WM_CHAR, wc, 0);
                     }
                 }
-                ImmReleaseContext(hwnd_, hIMC);
             }
+            ImmReleaseContext(hwnd_, hIMC);
         }
         return 0;
     }

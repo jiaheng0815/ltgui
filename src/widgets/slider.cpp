@@ -1,4 +1,5 @@
 #include "widgets/slider.h"
+#include "window.h"
 #include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
@@ -28,7 +29,8 @@ void Slider::setRange(int min, int max) {
 
 Size Slider::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint({150, 28});
+    float dpi = window() ? window()->dpiScale() : 1.0f;
+    setCachedSizeHint({static_cast<int>(150 * dpi), static_cast<int>(28 * dpi)});
     return cachedSizeHint();
 }
 

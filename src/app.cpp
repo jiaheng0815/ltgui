@@ -46,13 +46,27 @@ int Application::run() {
         processEvents();
     }
 #elif defined(LTGUI_PLATFORM_LINUX)
+    int x11Fd = X11Window::displayFd();
     while (running_) {
         X11Window::processAllPending();
         processEvents();
-        if (!AnimationManager::instance().hasActive()) {
-            usleep(16000);
+
+        // Block on X11 connection fd until events arrive, or timeout for animations
+        if (x11Fd >= 0) {
+            fd_set fds;
+            FD_ZERO(&fds);
+            FD_SET(x11Fd, &fds);
+            struct timeval tv;
+            if (AnimationManager::instance().hasActive()) {
+                tv.tv_sec = 0;
+                tv.tv_usec = 16000;  // 60 FPS during animations
+            } else {
+                tv.tv_sec = 0;
+                tv.tv_usec = 500000; // 0.5s idle timeout — wake periodically for timers
+            }
+            select(x11Fd + 1, &fds, nullptr, nullptr, &tv);
         } else {
-            usleep(1000);
+            usleep(16000);
         }
     }
 #elif defined(LTGUI_PLATFORM_MACOS)

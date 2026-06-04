@@ -38,6 +38,13 @@ public:
 
     NativeCanvas* getCanvas() override;
 
+    bool setClipboardText(const std::string& text) override;
+    std::string getClipboardText() override;
+
+    // Access the shared X11 display for select()/poll() integration
+    static Display* display() { return s_display_; }
+    static int displayFd() { return s_display_ ? ConnectionNumber(s_display_) : -1; }
+
     // Called by the application event loop
     void processEvents();
 

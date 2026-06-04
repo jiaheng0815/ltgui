@@ -5,6 +5,8 @@
 #include "platform/x11/x11_canvas.h"
 #include <X11/keysym.h>
 #include <cstring>
+#include <sys/select.h>
+#include <sys/time.h>
 
 // X11 headers define macros that conflict with ltgui enums
 #undef None
@@ -22,8 +24,29 @@ namespace ltgui {
 Display* X11Window::s_display_ = nullptr;
 int X11Window::s_displayRefCount_ = 0;
 
+// Per-window clipboard storage for SelectionRequest handling
 namespace {
     std::unordered_map< ::Window, X11Window*> g_windowMap;
+
+    // Atoms we need for clipboard
+    Atom g_clipboardAtom = 0;
+    Atom g_targetsAtom = 0;
+    Atom g_utf8Atom = 0;
+    Atom g_selProperty = 0;
+
+    // Currently-set clipboard text (owned by the window that did setClipboardText)
+    std::string g_clipboardText;
+    ::Window g_clipboardOwner = 0;
+
+    void ensureClipboardAtoms() {
+        if (!g_clipboardAtom && X11Window::display()) {
+            Display* dpy = X11Window::display();
+            g_clipboardAtom = XInternAtom(dpy, "CLIPBOARD", False);
+            g_targetsAtom   = XInternAtom(dpy, "TARGETS", False);
+            g_utf8Atom      = XInternAtom(dpy, "UTF8_STRING", False);
+            g_selProperty   = XInternAtom(dpy, "LTGUI_SEL", False);
+        }
+    }
 }
 
 void X11Window::registerWindow(X11Window* w) {
@@ -85,14 +108,14 @@ bool X11Window::create(int width, int height, const std::string& title) {
     wmProtocols_     = XInternAtom(s_display_, "WM_PROTOCOLS", False);
     XSetWMProtocols(s_display_, window_, &wmDeleteMessage_, 1);
 
-    // Select events we want to receive
+    // Select events we want to receive (include PropertyChangeMask for clipboard)
     XSelectInput(s_display_, window_,
                  ExposureMask | StructureNotifyMask |
                  ButtonPressMask | ButtonReleaseMask |
                  PointerMotionMask | ButtonMotionMask |
                  KeyPressMask | KeyReleaseMask |
                  EnterWindowMask | LeaveWindowMask |
-                 FocusChangeMask);
+                 FocusChangeMask | PropertyChangeMask);
 
     size_.width = width;
     size_.height = height;
@@ -171,6 +194,53 @@ void* X11Window::nativeHandle() const {
 
 NativeCanvas* X11Window::getCanvas() {
     return canvas_;
+}
+
+bool X11Window::setClipboardText(const std::string& text) {
+    if (!s_display_ || !window_) return false;
+    ensureClipboardAtoms();
+
+    g_clipboardText = text;
+    g_clipboardOwner = window_;
+    XSetSelectionOwner(s_display_, g_clipboardAtom, window_, CurrentTime);
+    return true;
+}
+
+std::string X11Window::getClipboardText() {
+    if (!s_display_ || !window_) return {};
+    ensureClipboardAtoms();
+
+    // Request the selection content from the current owner
+    XConvertSelection(s_display_, g_clipboardAtom, g_utf8Atom,
+                      g_selProperty, window_, CurrentTime);
+    XFlush(s_display_);
+
+    // Wait for the SelectionNotify event (with a timeout)
+    for (int attempt = 0; attempt < 50; attempt++) {
+        XEvent ev;
+        if (XCheckTypedWindowEvent(s_display_, window_, SelectionNotify, &ev)) {
+            if (ev.xselection.property == None) return {};  // conversion failed
+
+            Atom type;
+            int format;
+            unsigned long nitems = 0, bytesAfter = 0;
+            unsigned char* data = nullptr;
+            XGetWindowProperty(s_display_, window_, g_selProperty,
+                               0, 65536 / 4, False, AnyPropertyType,
+                               &type, &format, &nitems, &bytesAfter, &data);
+            std::string result;
+            if (data && type == g_utf8Atom && format == 8) {
+                result.assign(reinterpret_cast<char*>(data), nitems);
+            }
+            if (data) XFree(data);
+            XDeleteProperty(s_display_, window_, g_selProperty);
+            return result;
+        }
+        // Wait a short time before retrying
+        struct timeval tv = {0, 20000};  // 20ms
+        select(0, nullptr, nullptr, nullptr, &tv);
+    }
+    return {};  // timeout
 }
 
 void X11Window::processEvents() {
@@ -277,6 +347,48 @@ void X11Window::handleEvent(XEvent& xev) {
         KeySym ks = XLookupKeysym(&xev.xkey, 0);
         ev.key = mapKeySym(ks);
         eventCallback_(ev);
+        break;
+    }
+
+    case SelectionClear:
+        // Another app claimed clipboard ownership
+        if (xev.xselectionclear.selection == g_clipboardAtom) {
+            g_clipboardText.clear();
+            g_clipboardOwner = 0;
+        }
+        break;
+
+    case SelectionRequest: {
+        // Serve clipboard content to requesters
+        const XSelectionRequestEvent& req = xev.xselectionrequest;
+        XEvent resp = {};
+        resp.xselection.type      = SelectionNotify;
+        resp.xselection.requestor  = req.requestor;
+        resp.xselection.selection  = req.selection;
+        resp.xselection.target     = req.target;
+        resp.xselection.time       = req.time;
+
+        if (req.selection == g_clipboardAtom && req.owner == window_) {
+            if (req.target == g_targetsAtom) {
+                // Report supported targets
+                Atom targets[] = { g_targetsAtom, g_utf8Atom };
+                XChangeProperty(s_display_, req.requestor, req.property,
+                                XA_ATOM, 32, PropModeReplace,
+                                (unsigned char*)targets, 2);
+                resp.xselection.property = req.property;
+            } else if (req.target == g_utf8Atom || req.target == XA_STRING) {
+                XChangeProperty(s_display_, req.requestor, req.property,
+                                req.target, 8, PropModeReplace,
+                                (const unsigned char*)g_clipboardText.c_str(),
+                                (int)g_clipboardText.size());
+                resp.xselection.property = req.property;
+            } else {
+                resp.xselection.property = None; // unsupported target
+            }
+        } else {
+            resp.xselection.property = None;
+        }
+        XSendEvent(s_display_, req.requestor, False, NoEventMask, &resp);
         break;
     }
 

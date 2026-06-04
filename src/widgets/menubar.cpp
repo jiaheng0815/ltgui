@@ -30,7 +30,8 @@ void MenuBar::addSeparator(int menuIdx) {
 
 Size MenuBar::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint({400, menuBarHeight_});
+    float dpi = window() ? window()->dpiScale() : 1.0f;
+    setCachedSizeHint({static_cast<int>(400 * dpi), static_cast<int>(menuBarHeight_ * dpi)});
     return cachedSizeHint();
 }
 

@@ -66,9 +66,16 @@ Rect Widget::absoluteRect() const {
 
 void Widget::setGeometry(const Rect& rect) {
     if (geometry_ != rect) {
+        bool sizeChanged = (geometry_.width != rect.width ||
+                            geometry_.height != rect.height);
         geometry_ = rect;
         if (layout_) {
             layout_->layout(this);
+        }
+        // If our size changed, the parent layout may need to reallocate space
+        if (sizeChanged && parent_ && parent_->layout()) {
+            invalidateSizeHint();
+            parent_->layout()->layout(parent_);
         }
     }
 }
@@ -78,7 +85,8 @@ Size Widget::sizeHint() const {
     if (layout_) {
         cachedSizeHint_ = layout_->preferredSize(this);
     } else {
-        cachedSizeHint_ = {100, 24};
+        float dpi = window_ ? window_->dpiScale() : 1.0f;
+        cachedSizeHint_ = {static_cast<int>(100 * dpi), static_cast<int>(24 * dpi)};
     }
     sizeHintDirty_ = false;
     return cachedSizeHint_;

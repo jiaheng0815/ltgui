@@ -81,7 +81,8 @@ Widget* TabWidget::currentContent() const {
 
 Size TabWidget::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint({300, 200});
+    float dpi = window() ? window()->dpiScale() : 1.0f;
+    setCachedSizeHint({static_cast<int>(300 * dpi), static_cast<int>(200 * dpi)});
     return cachedSizeHint();
 }
 

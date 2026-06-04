@@ -39,6 +39,11 @@ public:
     virtual float dpiScale() const { return 1.0f; }
     virtual void setCursor(CursorShape) {} // default: no-op
 
+    // Clipboard — platform-specific implementation.
+    // Returns true on success, false if unavailable or unsupported.
+    virtual bool setClipboardText(const std::string& /*text*/) { return false; }
+    virtual std::string getClipboardText() { return {}; }
+
     virtual NativeCanvas* getCanvas() = 0;
 
     void setEventCallback(EventCallback cb) { eventCallback_ = std::move(cb); }
