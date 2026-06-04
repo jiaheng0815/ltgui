@@ -12,3 +12,6 @@ __pycache__/
 .vscode/
 a.txt
 test_sdk/
+%temp%/
+.codegraph/
+generate_tutorial_28.py
