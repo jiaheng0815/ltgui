@@ -57,6 +57,30 @@ bool Window::create(int width, int height, const std::string& title) {
         gpuCanvas_.reset();
         // canvas_ stays on nativeWindow_->getCanvas() — no dangling pointer
         LOG_INFO("Window", "Using software renderer (GDI+/X11)");
+
+        // Load default font for CPU fallback. GDI+ needs the font registered
+        // with the system to find it by family name.
+        Font defaultFont = Font::systemDefault(12);
+        const char* fontPaths[] = {
+#ifdef LTGUI_PLATFORM_WINDOWS
+            "D:/code/ltgui/font/Deng.ttf",
+            "font/Deng.ttf",
+            "C:/Windows/Fonts/simfang.ttf",
+            "C:/Windows/Fonts/msyh.ttf",
+            "C:/Windows/Fonts/segoeui.ttf",
+#elif defined(LTGUI_PLATFORM_LINUX)
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans.ttf",
+#elif defined(LTGUI_PLATFORM_MACOS)
+            "/System/Library/Fonts/Helvetica.ttc",
+#endif
+        };
+        for (const char* path : fontPaths) {
+            if (canvas_->loadFontFile(defaultFont, path)) {
+                LOG_INFO("Window", "CPU fallback font loaded: %s", path);
+                break;
+            }
+        }
     }
 
     return true;

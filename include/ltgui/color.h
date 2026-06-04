@@ -20,6 +20,12 @@ struct Color {
 
     uint32_t toARGB() const { return (a << 24) | (r << 16) | (g << 8) | b; }
 
+    // GPU vertex color: little-endian RGBA byte order.
+    // DXGI_FORMAT_R8G8B8A8_UNORM and GL_RGBA+GL_UNSIGNED_BYTE both
+    // read bytes at increasing offsets as [R][G][B][A], which in LE
+    // corresponds to the uint32_t layout 0xAABBGGRR.
+    uint32_t toABGR() const { return (a << 24) | (b << 16) | (g << 8) | r; }
+
     static const Color Transparent;
     static const Color Black;
     static const Color White;

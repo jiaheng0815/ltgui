@@ -77,7 +77,7 @@ bool GpuCanvas::initialize(void* windowHandle, int width, int height) {
     renderer_ = std::make_unique<Renderer2D>(device_.get());
     renderer_->setSize(width, height);
 
-    fontAtlas_ = std::make_unique<FontAtlas>(device_.get());
+    fontAtlas_ = std::make_unique<FontAtlas>(device_.get(), &renderer_->textures());
     renderer_->setFontAtlas(fontAtlas_.get());
 
     // Load a default system font so text rendering works out of the box.
@@ -183,6 +183,17 @@ void GpuCanvas::drawText(const std::string& text, const Rect& rect, int flags) {
         y += rect.height - measured.height;
     }
 
+    // Y is the top of the layout box. Compute the baseline position:
+    // the ascent (baseline-to-top) is font-dependent. stb_truetype glyph
+    // offsetY values are relative to the baseline (negative for ascenders),
+    // so each glyph's top-left = (baselineX + offsetX, baselineY + offsetY).
+    float baselineY = y + fontAtlas_->getAscent(currentFont_);
+    // If no ascent info (font not loaded), fall back to using the ascent-
+    // proportion of the measured line height (ascent ≈ 80% of line height).
+    if (baselineY <= y) {
+        baselineY = y + measured.height * 0.8f;
+    }
+
     const uint8_t* p = reinterpret_cast<const uint8_t*>(text.data());
     const uint8_t* end = p + text.size();
 
@@ -196,7 +207,7 @@ void GpuCanvas::drawText(const std::string& text, const Rect& rect, int flags) {
 
         const GlyphEntry* g = fontAtlas_->getGlyph(cp, currentFont_);
         if (g && g->texId >= 0 && g->w > 0) {
-            Rect dst((int)x + g->offsetX, (int)y + g->offsetY, g->w, g->h);
+            Rect dst((int)x + g->offsetX, (int)(baselineY + g->offsetY), g->w, g->h);
             Rect src(g->atlasX, g->atlasY, g->w, g->h);
             renderer_->drawGlyph(g->texId, dst, src, currentColor_);
         }

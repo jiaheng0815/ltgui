@@ -36,6 +36,8 @@
 namespace ltgui {
 namespace gpu {
 
+class TextureManager;
+
 struct GlyphEntry {
     int atlasX = 0, atlasY = 0; // position in atlas texture
     int w = 0, h = 0;           // size in pixels
@@ -46,7 +48,7 @@ struct GlyphEntry {
 
 class FontAtlas {
 public:
-    FontAtlas(GpuDevice* device, int atlasW = 2048, int atlasH = 2048);
+    FontAtlas(GpuDevice* device, TextureManager* texMgr, int atlasW = 2048, int atlasH = 2048);
     ~FontAtlas();
 
     // Load a font from memory (TTF/OTF data)
@@ -71,6 +73,10 @@ public:
     int atlasW() const { return atlasW_; }
     int atlasH() const { return atlasH_; }
 
+    // Distance from baseline to top of the line (in pixels).
+    // Returns 0 if the font is not loaded.
+    float getAscent(const Font& fontDesc) const;
+
 private:
 #ifdef LTGUI_HAS_STB_TRUETYPE
     struct FontCache {
@@ -88,10 +94,9 @@ private:
 #endif
 
     struct AtlasPage {
-        GpuTexture* texture = nullptr;
+        int texId = -1;
         int cursorX = 1, cursorY = 1;
         int rowHeight = 0;
-        int currentTexId = -1;
     };
 
     int createAtlasPage();
@@ -99,6 +104,7 @@ private:
     uint64_t fontKey(const Font& f) const;
 
     GpuDevice* device_;
+    TextureManager* texMgr_;
     int atlasW_, atlasH_;
 
     std::unordered_map<Font, FontCache> loadedFonts_;

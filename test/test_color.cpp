@@ -48,6 +48,14 @@ TEST_CASE("Color") {
         CHECK(Color(0, 255, 0, 128).toARGB() == 0x8000FF00u);
         CHECK(Color(0, 0, 0, 0).toARGB() == 0x00000000u);
     }
+    SUBCASE("toABGR bit pattern (GPU vertex color)") {
+        // GPU reads LE bytes as [R][G][B][A], so uint32 should be 0xAABBGGRR
+        CHECK(Color(0, 0, 0, 255).toABGR() == 0xFF000000u);
+        CHECK(Color(255, 0, 0, 255).toABGR() == 0xFF0000FFu);
+        CHECK(Color(0, 255, 0, 255).toABGR() == 0xFF00FF00u);
+        CHECK(Color(0, 0, 255, 255).toABGR() == 0xFFFF0000u);
+        CHECK(Color(255, 255, 255, 255).toABGR() == 0xFFFFFFFFu);
+    }
     SUBCASE("equality") {
         CHECK(Color(1, 2, 3, 4) == Color(1, 2, 3, 4));
         CHECK_FALSE(Color(1, 2, 3) == Color(5, 6, 7));

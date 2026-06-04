@@ -12,6 +12,7 @@ public:
     void setText(const std::string& text);
 
     WidgetType widgetType() const override { return WidgetType::Label; }
+    bool canAcceptFocus() const override { return false; }
     Size sizeHint() const override;
 
 protected:

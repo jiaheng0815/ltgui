@@ -39,6 +39,11 @@ public:
 
     Size measureText(const std::string& text) override;
 
+    // Load a font file for use with non-system fonts (e.g. "Deng").
+    // Uses AddFontResourceExW with FR_PRIVATE so the font is visible
+    // to GDI+ for the lifetime of this process.
+    bool loadFontFile(const Font& font, const char* ttfPath) override;
+
 private:
     Gdiplus::Color toGdiColor(const Color& c);
     Gdiplus::Font* getOrCreateFont(const Font& f);

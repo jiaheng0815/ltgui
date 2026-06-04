@@ -149,9 +149,8 @@ public:
         desc.ArraySize = 1;
         desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_DYNAMIC;
+        desc.Usage = D3D11_USAGE_DEFAULT;
         desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-        desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
         D3D11_SUBRESOURCE_DATA init = {};
         init.pSysMem = rgba;
@@ -287,6 +286,13 @@ public:
         sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
         device_->CreateSamplerState(&sampDesc, &sampler_);
 
+        // Disable back-face culling — 2D rendering has no "back" faces.
+        D3D11_RASTERIZER_DESC rsDesc = {};
+        rsDesc.FillMode = D3D11_FILL_SOLID;
+        rsDesc.CullMode = D3D11_CULL_NONE;
+        rsDesc.ScissorEnable = FALSE;
+        device_->CreateRasterizerState(&rsDesc, &rasterizerState_);
+
         return true;
     }
 
@@ -294,6 +300,7 @@ public:
         if (rtView_) { rtView_->Release(); rtView_ = nullptr; }
         if (vertexBuffer_) { vertexBuffer_->Release(); vertexBuffer_ = nullptr; vertexBufferSize_ = 0; }
         if (blendState_) { blendState_->Release(); blendState_ = nullptr; }
+        if (rasterizerState_) { rasterizerState_->Release(); rasterizerState_ = nullptr; }
         if (sampler_) { sampler_->Release(); sampler_ = nullptr; }
         if (solidVS_) { solidVS_->Release(); solidVS_ = nullptr; }
         if (solidPS_) { solidPS_->Release(); solidPS_ = nullptr; }
@@ -329,7 +336,7 @@ public:
 
     void beginFrame() override {
         if (!rtView_) return;
-        float clearColor[4] = { 0.2f, 0.2f, 0.3f, 1.0f }; // dark blue-grey debug
+        float clearColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f }; // white — widget paint covers it
         context_->ClearRenderTargetView(rtView_, clearColor);
         context_->OMSetRenderTargets(1, &rtView_, nullptr);
 
@@ -339,6 +346,7 @@ public:
 
         float blendFactor[4] = { 1, 1, 1, 1 };
         context_->OMSetBlendState(blendState_, blendFactor, 0xFFFFFFFF);
+        context_->RSSetState(rasterizerState_);
     }
 
     void endFrame() override {
@@ -541,6 +549,7 @@ private:
     IDXGISwapChain* swapChain_ = nullptr;
     ID3D11RenderTargetView* rtView_ = nullptr;
     ID3D11BlendState* blendState_ = nullptr;
+    ID3D11RasterizerState* rasterizerState_ = nullptr;
     ID3D11SamplerState* sampler_ = nullptr;
 
     // Dynamic vertex buffer (reused across frames)

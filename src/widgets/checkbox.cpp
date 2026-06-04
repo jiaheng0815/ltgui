@@ -55,14 +55,14 @@ void CheckBox::paintSelf(NativeCanvas* canvas) {
     canvas->strokeRoundedRect(boxRect, 3);
 
     if (checked_) {
+        // Fill entire box with accent
         canvas->setColor(t.accent);
-        canvas->fillRoundedRect(boxRect.adjusted(2, 2, -2, -2), 2);
-        // Checkmark
+        canvas->fillRoundedRect(boxRect, 3);
+        // White checkmark ✓ — short stem up-right, long tail down-right
         canvas->setColor(Color::White);
-        canvas->drawLine({boxRect.x + 3, boxRect.y + boxSize / 2},
-                         {boxRect.x + boxSize / 2, boxRect.y + boxSize - 3}, 2);
-        canvas->drawLine({boxRect.x + boxSize / 2, boxRect.y + boxSize - 3},
-                         {boxRect.x + boxSize - 3, boxRect.y + 3}, 2);
+        int bx = boxRect.x, by = boxRect.y;
+        canvas->drawLine({bx + 3, by + 8},  {bx + 6, by + 11}, 2);
+        canvas->drawLine({bx + 6, by + 11}, {bx + 11, by + 3}, 2);
     }
 
     canvas->setColor(isEnabled() ? style().fgColor : t.textDisabled);

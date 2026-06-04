@@ -31,6 +31,11 @@ public:
 
     virtual Size measureText(const std::string& text) = 0;
 
+    // Load a TrueType/OpenType font file so it's available by family name.
+    // Default: no-op. GPU backend uses FontAtlas; Win32 backend uses
+    // AddFontResourceExW to register the font for this process.
+    virtual bool loadFontFile(const Font& /*font*/, const char* /*ttfPath*/) { return false; }
+
     enum TextFlag {
         AlignLeft    = 0,
         AlignCenter  = 1,

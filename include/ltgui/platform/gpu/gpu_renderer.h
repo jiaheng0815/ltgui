@@ -46,6 +46,13 @@ public:
     void bind(int texId, int slot);
     GpuDevice* device() const { return device_; }
 
+    // Direct access for partial texture updates (e.g. font atlas glyph uploads).
+    GpuTexture* getTexture(int texId) const {
+        if (texId >= 0 && texId < static_cast<int>(textures_.size()))
+            return textures_[texId];
+        return nullptr;
+    }
+
 private:
     GpuDevice* device_;
     std::vector<GpuTexture*> textures_;
@@ -99,6 +106,8 @@ private:
     void emitStrokeRect(std::vector<Vertex2D>& out, const Rect& r, uint32_t color);
     void emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, uint32_t color);
     void emitLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2, uint32_t color);
+    void emitThickLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2,
+                       float lineWidth, uint32_t color);
 
     GpuDevice* device_;
     TextureManager texMgr_;

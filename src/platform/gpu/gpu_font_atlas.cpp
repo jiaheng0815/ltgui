@@ -1,18 +1,17 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "platform/gpu/gpu_font_atlas.h"
+#include "platform/gpu/gpu_renderer.h"
 #include <cstring>
 #include <cstdio>
 
 namespace ltgui {
 namespace gpu {
 
-FontAtlas::FontAtlas(GpuDevice* device, int atlasW, int atlasH)
-    : device_(device), atlasW_(atlasW), atlasH_(atlasH) {}
+FontAtlas::FontAtlas(GpuDevice* device, TextureManager* texMgr, int atlasW, int atlasH)
+    : device_(device), texMgr_(texMgr), atlasW_(atlasW), atlasH_(atlasH) {}
 
 FontAtlas::~FontAtlas() {
-    for (auto& page : pages_) {
-        if (page.texture) device_->destroyTexture(page.texture);
-    }
+    // Atlas textures are owned by TextureManager; no manual cleanup needed.
 }
 
 bool FontAtlas::loadFont(const Font& fontDesc, const uint8_t* ttfData, int ttfSize) {
@@ -59,7 +58,16 @@ bool FontAtlas::loadFontFile(const Font& fontDesc, const char* ttfPath) {
 const GlyphEntry* FontAtlas::getGlyph(uint32_t codepoint, const Font& fontDesc) {
 #ifdef LTGUI_HAS_STB_TRUETYPE
     auto fit = loadedFonts_.find(fontDesc);
-    if (fit == loadedFonts_.end()) return nullptr;
+    if (fit == loadedFonts_.end()) {
+        // Fall back to system default at the requested size if the
+        // exact font wasn't loaded (e.g. user asked for "Segoe UI" but
+        // only "Deng" was loaded from disk).
+        Font fallback = Font::systemDefault(fontDesc.size);
+        if (!(fallback == fontDesc)) {
+            fit = loadedFonts_.find(fallback);
+        }
+        if (fit == loadedFonts_.end()) return nullptr;
+    }
 
     uint64_t key = (fontKey(fontDesc) << 32) | codepoint;
     auto git = glyphCache_.find(key);
@@ -87,13 +95,25 @@ const GlyphEntry* FontAtlas::getGlyph(uint32_t codepoint, const Font& fontDesc) 
         if (!allocGlyphRect(gw, gh, ax, ay, texId)) return nullptr;
     }
 
-    std::vector<uint8_t> bitmap(gw * gh);
-    stbtt_MakeGlyphBitmap(&cache.info, bitmap.data(), gw, gh, gw,
+    std::vector<uint8_t> gray(gw * gh);
+    stbtt_MakeGlyphBitmap(&cache.info, gray.data(), gw, gh, gw,
                           cache.scale, cache.scale, (float)glyphIdx);
 
-    // Upload to atlas texture
-    auto& page = pages_[texId];
-    page.texture->update(bitmap.data(), ax, ay, gw, gh);
+    // stb_truetype outputs 1-byte-per-pixel grayscale, but the GPU texture
+    // expects RGBA (4 bytes per pixel). Expand: R=G=B=255, A=gray value.
+    // The vertex color in the texture shader (tex.Sample * input.col)
+    // will tint the white glyph to the desired text color.
+    std::vector<uint8_t> rgba(gw * gh * 4);
+    for (int i = 0; i < gw * gh; i++) {
+        rgba[i * 4 + 0] = 255;
+        rgba[i * 4 + 1] = 255;
+        rgba[i * 4 + 2] = 255;
+        rgba[i * 4 + 3] = gray[i];
+    }
+
+    // Upload to atlas texture via TextureManager
+    GpuTexture* tex = texMgr_->getTexture(texId);
+    if (tex) tex->update(rgba.data(), ax, ay, gw, gh);
 
     GlyphEntry entry;
     entry.atlasX = ax;
@@ -116,7 +136,13 @@ const GlyphEntry* FontAtlas::getGlyph(uint32_t codepoint, const Font& fontDesc) 
 Size FontAtlas::measureText(const std::string& text, const Font& fontDesc) {
 #ifdef LTGUI_HAS_STB_TRUETYPE
     auto fit = loadedFonts_.find(fontDesc);
-    if (fit == loadedFonts_.end()) return {0, 0};
+    if (fit == loadedFonts_.end()) {
+        Font fallback = Font::systemDefault(fontDesc.size);
+        if (!(fallback == fontDesc)) {
+            fit = loadedFonts_.find(fallback);
+        }
+        if (fit == loadedFonts_.end()) return {0, 0};
+    }
 
     auto& cache = fit->second;
     float ascent = cache.ascent * cache.scale;
@@ -150,6 +176,25 @@ Size FontAtlas::measureText(const std::string& text, const Font& fontDesc) {
 #endif
 }
 
+float FontAtlas::getAscent(const Font& fontDesc) const {
+#ifdef LTGUI_HAS_STB_TRUETYPE
+    auto fit = loadedFonts_.find(fontDesc);
+    if (fit != loadedFonts_.end()) {
+        return fit->second.ascent * fit->second.scale;
+    }
+    // Fallback: try system default at requested size
+    Font fallback = Font::systemDefault(fontDesc.size);
+    if (!(fallback == fontDesc)) {
+        fit = loadedFonts_.find(fallback);
+        if (fit != loadedFonts_.end()) {
+            return fit->second.ascent * fit->second.scale;
+        }
+    }
+#endif
+    (void)fontDesc;
+    return 0.0f;
+}
+
 int FontAtlas::atlasTexId(const Font& fontDesc) const {
     (void)fontDesc;
     return pages_.empty() ? -1 : 0;
@@ -160,11 +205,11 @@ void FontAtlas::flush() {
 }
 
 int FontAtlas::createAtlasPage() {
-    // Create empty RGBA atlas texture
+    // Create empty RGBA atlas texture via TextureManager so its texId
+    // is valid for binding in flushBatch (unified ID space).
     std::vector<uint8_t> empty(atlasW_ * atlasH_ * 4, 0);
-    GpuTexture* tex = device_->createTexture(atlasW_, atlasH_, empty.data());
-    int texId = static_cast<int>(pages_.size());
-    pages_.push_back({tex, 1, 1, 0, texId});
+    int texId = texMgr_->upload(atlasW_, atlasH_, empty.data());
+    pages_.push_back({texId, 1, 1, 0});
     return texId;
 }
 
@@ -183,7 +228,7 @@ bool FontAtlas::allocGlyphRect(int w, int h, int& outX, int& outY, int& outTexId
 
         outX = page.cursorX;
         outY = page.cursorY;
-        outTexId = page.currentTexId;
+        outTexId = page.texId;
 
         page.cursorX += w + 1;
         page.rowHeight = std::max(page.rowHeight, h);

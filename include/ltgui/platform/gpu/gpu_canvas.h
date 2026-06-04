@@ -46,7 +46,7 @@ public:
 
     // Explicitly load a .ttf font file for GPU text rendering.
     // Returns false if the file can't be read or parsed.
-    bool loadFontFile(const Font& font, const char* ttfPath);
+    bool loadFontFile(const Font& font, const char* ttfPath) override;
 
     // GPU info
     const GpuInfo& gpuInfo() const { return gpuInfo_; }

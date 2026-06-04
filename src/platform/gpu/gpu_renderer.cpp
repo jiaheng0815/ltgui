@@ -137,6 +137,8 @@ void Renderer2D::clearScissor() {
 // ---- Internal ----
 
 void Renderer2D::flushBatch() {
+    if (cmds_.empty()) return;
+
     auto shaderFor = [](DrawOp op) -> int {
         switch (op) {
         case DrawOp::FillRect:          return 0; // Solid
@@ -153,47 +155,44 @@ void Renderer2D::flushBatch() {
     };
 
     auto isLineOp = [](DrawOp op) -> bool {
-        return op == DrawOp::DrawLine || op == DrawOp::StrokeRect ||
+        return op == DrawOp::StrokeRect ||
                op == DrawOp::StrokeRounded || op == DrawOp::StrokeEllipse;
     };
 
-    // Sort by (shaderType, isLine, texId, color) — isLine bit prevents
-    // mixing triangle and line primitives within the same batch group.
-    for (auto& cmd : cmds_) {
-        int st = shaderFor(cmd.op);
-        int il = isLineOp(cmd.op) ? 1 : 0;
-        uint32_t colorHash = cmd.color.toARGB();
-        cmd.sortKey = (st << 28) | (il << 27) | ((cmd.texId & 0x7FF) << 16) | (colorHash & 0xFFFF);
-    }
-    std::sort(cmds_.begin(), cmds_.end(),
-              [](const DrawCmd& a, const DrawCmd& b) { return a.sortKey < b.sortKey; });
-
-    // Group by (shaderType, isLine, texId), emit vertices and draw per-group
+    // Preserve original draw order (painter's algorithm) while batching
+    // ADJACENT commands that share the same (shader, isLine, texId).
     size_t idx = 0;
     while (idx < cmds_.size()) {
-        uint32_t groupKey = cmds_[idx].sortKey >> 16;
-        int groupShader = shaderFor(cmds_[idx].op);
-        int groupTexId  = (groupShader == 3) ? cmds_[idx].texId : -1;
-        bool isLines = isLineOp(cmds_[idx].op);
+        int batchShader = shaderFor(cmds_[idx].op);
+        bool batchIsLines = isLineOp(cmds_[idx].op);
+        int batchTexId = (batchShader == 3) ? cmds_[idx].texId : -1;
 
-        size_t groupEnd = idx;
-        while (groupEnd < cmds_.size() && (cmds_[groupEnd].sortKey >> 16) == groupKey) {
-            groupEnd++;
+        // Expand batch to include all following commands with the same config
+        size_t batchEnd = idx + 1;
+        while (batchEnd < cmds_.size()) {
+            auto& next = cmds_[batchEnd];
+            int ns = shaderFor(next.op);
+            bool nl = isLineOp(next.op);
+            int nt = (ns == 3) ? next.texId : -1;
+            if (ns == batchShader && nl == batchIsLines && nt == batchTexId) {
+                batchEnd++;
+            } else {
+                break;
+            }
         }
 
-        // Select shader and bind texture for this group
-        device_->selectShader(groupShader);
-        if (groupTexId >= 0) {
-            texMgr_.bind(groupTexId, 0);
+        // Emit vertices for this batch
+        device_->selectShader(batchShader);
+        if (batchTexId >= 0) {
+            texMgr_.bind(batchTexId, 0);
         }
 
-        // Build vertices for this group
         std::vector<Vertex2D> verts;
-        verts.reserve((groupEnd - idx) * 6);
+        verts.reserve((batchEnd - idx) * 6);
 
-        for (size_t i = idx; i < groupEnd; i++) {
+        for (size_t i = idx; i < batchEnd; i++) {
             auto& cmd = cmds_[i];
-            uint32_t color = cmd.color.toARGB();
+            uint32_t color = cmd.color.toABGR();
 
             switch (cmd.op) {
             case DrawOp::FillRect:
@@ -232,19 +231,19 @@ void Renderer2D::flushBatch() {
                 emitQuad(verts, cmd.rect, 0, 0, 1, 1, color, 0, 0, 0, 0);
                 break;
             case DrawOp::DrawLine:
-                emitLine(verts, cmd.p1, cmd.p2, color);
+                emitThickLine(verts, cmd.p1, cmd.p2, cmd.lineWidth, color);
                 break;
             }
         }
 
         if (!verts.empty()) {
-            if (isLines)
+            if (batchIsLines)
                 device_->drawLines(verts.data(), static_cast<int>(verts.size()));
             else
                 device_->drawTriangles(verts.data(), static_cast<int>(verts.size()));
         }
 
-        idx = groupEnd;
+        idx = batchEnd;
     }
 }
 
@@ -309,6 +308,40 @@ void Renderer2D::emitLine(std::vector<Vertex2D>& out, const Point& p1, const Poi
          toNdcY(static_cast<float>(p2.y), height_), 0,0,color, 0,0,0,0},
     };
     out.insert(out.end(), v, v + 2);
+}
+
+void Renderer2D::emitThickLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2,
+                                float lineWidth, uint32_t color) {
+    if (lineWidth <= 1.0f) {
+        emitLine(out, p1, p2, color);
+        return;
+    }
+    // Draw a rectangle (2 tris) oriented along the line segment.
+    float dx = static_cast<float>(p2.x - p1.x);
+    float dy = static_cast<float>(p2.y - p1.y);
+    float len = std::sqrt(dx * dx + dy * dy);
+    if (len < 0.5f) return;
+    float nx = -dy / len * lineWidth * 0.5f;
+    float ny =  dx / len * lineWidth * 0.5f;
+
+    float x0 = toNdcX(static_cast<float>(p1.x) + nx, width_);
+    float y0 = toNdcY(static_cast<float>(p1.y) + ny, height_);
+    float x1 = toNdcX(static_cast<float>(p1.x) - nx, width_);
+    float y1 = toNdcY(static_cast<float>(p1.y) - ny, height_);
+    float x2 = toNdcX(static_cast<float>(p2.x) - nx, width_);
+    float y2 = toNdcY(static_cast<float>(p2.y) - ny, height_);
+    float x3 = toNdcX(static_cast<float>(p2.x) + nx, width_);
+    float y3 = toNdcY(static_cast<float>(p2.y) + ny, height_);
+
+    Vertex2D verts[6] = {
+        {x0, y0, 0, 0, color, 0, 0, 0, 0},
+        {x3, y3, 0, 0, color, 0, 0, 0, 0},
+        {x1, y1, 0, 0, color, 0, 0, 0, 0},
+        {x1, y1, 0, 0, color, 0, 0, 0, 0},
+        {x3, y3, 0, 0, color, 0, 0, 0, 0},
+        {x2, y2, 0, 0, color, 0, 0, 0, 0},
+    };
+    out.insert(out.end(), verts, verts + 6);
 }
 
 } // namespace gpu

@@ -112,6 +112,10 @@ public:
     // Subclasses override this to return their WidgetType enum value.
     virtual WidgetType widgetType() const { return WidgetType::Base; }
 
+    // Whether this widget can receive keyboard focus via Tab navigation.
+    // Override to return false for decorative/non-interactive widgets (e.g. Label).
+    virtual bool canAcceptFocus() const { return true; }
+
     // Focus chain: returns the next/previous focusable widget in tree order.
     // Override to customize tab navigation. Window uses these for Tab/Shift+Tab.
     virtual Widget* nextFocusWidget();

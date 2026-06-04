@@ -29,6 +29,19 @@ Win32Canvas::Win32Canvas(HWND hwnd) : hwnd_(hwnd) {
     pen_ = new Gdiplus::Pen(currentColor_);
 }
 
+bool Win32Canvas::loadFontFile(const Font& font, const char* ttfPath) {
+    (void)font;
+    int len = MultiByteToWideChar(CP_UTF8, 0, ttfPath, -1, nullptr, 0);
+    std::wstring wpath(len, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, ttfPath, -1, &wpath[0], len);
+    if (len > 0) wpath.resize(len - 1);
+
+    // FR_PRIVATE: register for this process only, no admin rights needed.
+    // The font becomes visible to GDI+ via its family name for this session.
+    int result = AddFontResourceExW(wpath.c_str(), FR_PRIVATE, nullptr);
+    return result > 0;
+}
+
 Win32Canvas::~Win32Canvas() {
     delete backbuffer_;
     delete graphics_;

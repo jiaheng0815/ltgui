@@ -34,40 +34,20 @@ Size Button::sizeHint() const {
     return cachedSizeHint();
 }
 
-static Color lerpColor(const Color& a, const Color& b, float t) {
-    return {
-        static_cast<uint8_t>(a.r + (b.r - a.r) * t),
-        static_cast<uint8_t>(a.g + (b.g - a.g) * t),
-        static_cast<uint8_t>(a.b + (b.b - a.b) * t),
-        static_cast<uint8_t>(a.a + (b.a - a.a) * t)
-    };
-}
-
 void Button::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
     Theme t = currentTheme();
 
-    // Compute color based on state
-    Color baseColor = style().bgColor;
-    Color targetColor;
+    // Fill background: accent when interactive, base bg otherwise
+    Color fillColor;
     if (pressed_) {
-        targetColor = t.accentPressed;
+        fillColor = t.accentPressed;
     } else if (hovered_) {
-        targetColor = t.accentHover;
+        fillColor = t.accentHover;
     } else {
-        targetColor = t.accent;
+        fillColor = style().bgColor;
     }
-    // Use accent for interactive buttons, or keep custom bg
-    bool useAccent = !pressed_ && !hovered_;
-    if (useAccent && style().bgColor == t.bgSecondary) {
-        targetColor = baseColor; // default bg
-    }
-
-    if (pressed_ || hovered_) {
-        canvas->setColor(targetColor);
-    } else {
-        canvas->setColor(baseColor);
-    }
+    canvas->setColor(fillColor);
 
     if (style().borderRadius > 0) {
         canvas->fillRoundedRect(r, style().borderRadius);
@@ -77,7 +57,9 @@ void Button::paintSelf(NativeCanvas* canvas) {
 
     // Border
     if (style().borderWidth > 0) {
-        canvas->setColor(pressed_ ? t.accentPressed : (hovered_ ? t.accentHover : style().borderColor));
+        Color borderColor = pressed_ ? t.accentPressed
+                           : (hovered_ ? t.accentHover : style().borderColor);
+        canvas->setColor(borderColor);
         if (style().borderRadius > 0) {
             canvas->strokeRoundedRect(r, style().borderRadius, style().borderWidth);
         } else {

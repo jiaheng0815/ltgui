@@ -203,7 +203,7 @@ Widget* Widget::nextFocusWidget() {
         }
     }
     // If this widget can accept focus, return it
-    if (isEnabled() && isVisible() && widgetType() != WidgetType::Label) {
+    if (canAcceptFocus()) {
         return this;
     }
     return nullptr;
@@ -238,7 +238,7 @@ Widget* Widget::previousFocusWidget() {
 Widget* Widget::lastFocusableDescendant() {
     // Find the rightmost/deepest focusable widget in this subtree
     if (children_.empty()) {
-        if (isEnabled() && isVisible() && widgetType() != WidgetType::Label)
+        if (canAcceptFocus())
             return this;
         return nullptr;
     }
@@ -249,7 +249,7 @@ Widget* Widget::lastFocusableDescendant() {
             if (found) return found;
         }
     }
-    if (isEnabled() && isVisible() && widgetType() != WidgetType::Label)
+    if (canAcceptFocus())
         return this;
     return nullptr;
 }

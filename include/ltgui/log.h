@@ -35,6 +35,10 @@ public:
         // Add new category if there's room
         if (categoryCount_ < 16) {
             categories_[categoryCount_++] = {category, enabled};
+        } else {
+            // Don't silently drop — let the developer know the ceiling was hit.
+            fprintf(stderr, "[Logger] WARN: category limit (16) reached, "
+                            "\"%s\" not registered.\n", category);
         }
     }
 
