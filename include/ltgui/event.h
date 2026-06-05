@@ -17,7 +17,12 @@ enum class EventType {
     Close,
     FocusIn,
     FocusOut,
-    ImeComposition  // IME preedit/composition update (imeText, imeCursor)
+    ImeComposition,  // IME preedit/composition update (imeText, imeCursor)
+    ThemeChanged,    // Theme was changed — widgets should refresh colors
+    DragEnter,
+    DragMove,
+    DragLeave,
+    DragDrop
 };
 
 enum class MouseButton {

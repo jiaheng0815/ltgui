@@ -1,0 +1,262 @@
+#include "widgets/dialog.h"
+#include "widgets/button.h"
+#include "widgets/label.h"
+#include "widgets/textbox.h"
+#include "window.h"
+#include "layout.h"
+#include "theme.h"
+#include "app.h"
+#include "platform/native_canvas.h"
+#include "platform/platform.h"
+
+#ifdef LTGUI_PLATFORM_WINDOWS
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#undef MessageBox
+#endif
+
+namespace ltgui {
+
+// --- Dialog ---
+
+Dialog::Dialog(Widget* parent) : Widget(parent) {
+    style().bgColor = Color::Transparent;
+    style().borderWidth = 0;
+    setVisible(false);
+}
+
+Size Dialog::sizeHint() const {
+    return {panelW_, panelH_};
+}
+
+void Dialog::addButton(const std::string& text, DialogResult res, bool isDefault) {
+    if (!panel_) return;
+    auto* btn = panel_->makeChild<Button>(text);
+    btn->onClick([this, res]() { done(res); });
+    if (isDefault) {
+        btn->style().borderWidth = 2;
+        btn->style().borderColor = currentTheme().accent;
+    }
+}
+
+DialogResult Dialog::exec() {
+    if (running_) return DialogResult::None;
+    running_ = true;
+    result_ = DialogResult::None;
+    setVisible(true);
+    fadeAnim_.setImmediate(0.0f);
+    fadeAnim_.setTarget(1.0f, 150, Easing::EaseOut);
+    claimFocus();
+
+    auto* win = window();
+    if (!win) return DialogResult::None;
+
+    while (running_) {
+        Application::instance().processEvents();
+#ifdef LTGUI_PLATFORM_WINDOWS
+        MSG msg;
+        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) { running_ = false; Application::instance().quit(); break; }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+#endif
+        fadeAnim_.value();
+        if (!running_) break;
+    }
+
+    setVisible(false);
+    return result_;
+}
+
+void Dialog::done(DialogResult result) {
+    result_ = result;
+    running_ = false;
+    if (resultCallback_) resultCallback_(result);
+    update();
+}
+
+void Dialog::paintSelf(NativeCanvas* canvas) {
+    float alpha = fadeAnim_.value();
+    if (alpha <= 0.0f) return;
+
+    int ww = 640, wh = 480;
+    if (auto* win = window()) {
+        Size sz = win->getSize();
+        ww = sz.width; wh = sz.height;
+    }
+
+    Color overlay(0, 0, 0, static_cast<uint8_t>(alpha * 100));
+    canvas->setColor(overlay);
+    canvas->fillRect(Rect(0, 0, ww, wh));
+
+    int px = (ww - panelW_) / 2;
+    int py = (wh - panelH_) / 2;
+    Rect panelRect(px, py, panelW_, panelH_);
+
+    if (panel_) {
+        panel_->setGeometry(Rect(px + 12, py + (title_.empty() ? 12 : 36),
+                                 panelW_ - 24, panelH_ - (title_.empty() ? 24 : 48)));
+    }
+
+    Theme t = currentTheme();
+    canvas->setColor(t.dialogBg);
+    canvas->fillRoundedRect(panelRect, 8);
+    canvas->setColor(t.dialogBorder);
+    canvas->strokeRoundedRect(panelRect, 8, 1);
+
+    if (!title_.empty()) {
+        canvas->setColor(t.dialogTitleBg);
+        canvas->fillRoundedRect(Rect(px, py, panelW_, 32), 8);
+        canvas->setColor(t.dialogTitleBg);
+        canvas->fillRect(Rect(px, py + 24, panelW_, 8));
+        canvas->setColor(t.textPrimary);
+        canvas->setFont(Font::systemDefault(12));
+        canvas->drawText(title_, Rect(px + 12, py, panelW_ - 24, 32),
+                         NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter);
+    }
+}
+
+bool Dialog::handleEvent(Event& event) {
+    if (!running_) return false;
+    if (event.type == EventType::KeyDown && event.key == Key::Escape) {
+        done(DialogResult::Cancel);
+        return true;
+    }
+    return Widget::handleEvent(event);
+}
+
+// --- MessageBox ---
+
+MessageBox::MessageBox(Widget* parent) : Dialog(parent) {
+    rebuild();
+}
+
+void MessageBox::rebuild() {
+    while (!children().empty())
+        removeChild(children().back().get());
+    panel_ = nullptr;
+
+    panelW_ = 300;
+    panelH_ = 130;
+    panel_ = makeChild<Widget>();
+    panel_->style().bgColor = Color::Transparent;
+    panel_->style().borderWidth = 0;
+    panel_->setLayout(std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12));
+
+    auto* msg = panel_->makeChild<Label>(message_);
+    msg->style().fgColor = currentTheme().textSecondary;
+    msg->style().setPadding(8, 8);
+
+    auto* btnRow = panel_->makeChild<Widget>();
+    btnRow->style().bgColor = Color::Transparent;
+    auto* bl = new BoxLayout(BoxLayout::LeftToRight, 8, 0);
+    bl->addStretch(1);
+    btnRow->setLayout(std::unique_ptr<Layout>(bl));
+
+    if (buttonFlags_ & static_cast<int>(DialogButton::OK)) {
+        auto* b = btnRow->makeChild<Button>("OK");
+        b->onClick([this]() { done(DialogResult::OK); });
+    }
+    if (buttonFlags_ & static_cast<int>(DialogButton::Cancel)) {
+        auto* b = btnRow->makeChild<Button>("Cancel");
+        b->onClick([this]() { done(DialogResult::Cancel); });
+    }
+    if (buttonFlags_ & static_cast<int>(DialogButton::Yes)) {
+        auto* b = btnRow->makeChild<Button>("Yes");
+        b->onClick([this]() { done(DialogResult::Yes); });
+    }
+    if (buttonFlags_ & static_cast<int>(DialogButton::No)) {
+        auto* b = btnRow->makeChild<Button>("No");
+        b->onClick([this]() { done(DialogResult::No); });
+    }
+
+    if (!message_.empty())
+        panelW_ = std::max(300, std::min(500, (int)message_.size() * 8 + 80));
+    panelH_ = 130;
+}
+
+void MessageBox::setButtons(int buttonFlags) {
+    buttonFlags_ = buttonFlags;
+    rebuild();
+}
+
+DialogResult MessageBox::show(Widget* parent, const std::string& title,
+                               const std::string& message, int buttons, Icon icon) {
+    (void)icon;
+    MessageBox mb(parent);
+    mb.setTitle(title);
+    mb.setMessage(message);
+    mb.setButtons(buttons);
+    return mb.exec();
+}
+
+void MessageBox::paintSelf(NativeCanvas* canvas) {
+    Dialog::paintSelf(canvas);
+}
+
+// --- InputDialog ---
+
+InputDialog::InputDialog(Widget* parent) : Dialog(parent) {
+    rebuild();
+}
+
+void InputDialog::rebuild() {
+    while (!children().empty())
+        removeChild(children().back().get());
+    panel_ = nullptr;
+
+    panelW_ = 400;
+    panelH_ = 160;
+    panel_ = makeChild<Widget>();
+    panel_->style().bgColor = Color::Transparent;
+    panel_->style().borderWidth = 0;
+    panel_->setLayout(std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12));
+
+    auto* lbl = panel_->makeChild<Label>(label_);
+    lbl->style().fgColor = currentTheme().textPrimary;
+
+    input_ = panel_->makeChild<TextBox>("");
+    input_->setMultiLine(false);
+
+    auto* btnRow = panel_->makeChild<Widget>();
+    btnRow->style().bgColor = Color::Transparent;
+    auto* bl = new BoxLayout(BoxLayout::LeftToRight, 8, 0);
+    bl->addStretch(1);
+    btnRow->setLayout(std::unique_ptr<Layout>(bl));
+
+    auto* okBtn = btnRow->makeChild<Button>("OK");
+    okBtn->onClick([this]() { done(DialogResult::OK); });
+    auto* cancelBtn = btnRow->makeChild<Button>("Cancel");
+    cancelBtn->onClick([this]() { done(DialogResult::Cancel); });
+}
+
+void InputDialog::setText(const std::string& text) {
+    if (input_) input_->setText(text);
+}
+
+std::string InputDialog::text() const {
+    return input_ ? input_->text() : "";
+}
+
+std::string InputDialog::getText(Widget* parent, const std::string& title,
+                                  const std::string& label, const std::string& defaultText) {
+    InputDialog dlg(parent);
+    dlg.setTitle(title);
+    dlg.setLabel(label);
+    dlg.setText(defaultText);
+    if (dlg.exec() == DialogResult::OK) return dlg.text();
+    return "";
+}
+
+bool InputDialog::handleEvent(Event& event) {
+    if (event.type == EventType::KeyDown && event.key == Key::Enter) {
+        done(DialogResult::OK);
+        return true;
+    }
+    return Dialog::handleEvent(event);
+}
+
+} // namespace ltgui

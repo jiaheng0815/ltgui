@@ -31,6 +31,9 @@ enum class WidgetType {
     Image,
     TreeView,
     ContextMenu,
+    Dialog,
+    TableView,
+    FileDialog,
 };
 
 class Widget {
