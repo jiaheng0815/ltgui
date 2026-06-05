@@ -18,6 +18,12 @@
 #include <dirent.h>
 #endif
 
+#ifdef LTGUI_PLATFORM_MACOS
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
+#include <IOKit/graphics/IOGraphicsLib.h>
+#endif
+
 namespace ltgui {
 namespace gpu {
 
@@ -92,6 +98,87 @@ std::vector<GpuInfo> detectGpus() {
             }
         }
         closedir(dir);
+    }
+#endif
+
+#ifdef LTGUI_PLATFORM_MACOS
+    // Query GPUs via IOKit — iterate PCI devices matching IOPCIDevice
+    // and filter for display controller class (0x03).
+    {
+        CFMutableDictionaryRef match = IOServiceMatching("IOPCIDevice");
+        if (match) {
+            io_iterator_t iter = 0;
+            if (IOServiceGetMatchingServices(kIOMasterPortDefault, match, &iter) == KERN_SUCCESS) {
+                io_object_t entry;
+                while ((entry = IOIteratorNext(iter)) != 0) {
+                    // Check PCI class code — display controller = 0x03xxxx
+                    CFTypeRef classCodeRef = IORegistryEntryCreateCFProperty(
+                        entry, CFSTR("class-code"), kCFAllocatorDefault, 0);
+                    if (classCodeRef) {
+                        uint32_t classCode = 0;
+                        if (CFGetTypeID(classCodeRef) == CFDataGetTypeID()) {
+                            CFDataGetBytes((CFDataRef)classCodeRef,
+                                           CFRangeMake(0, sizeof(classCode)),
+                                           (UInt8*)&classCode);
+                        } else if (CFGetTypeID(classCodeRef) == CFNumberGetTypeID()) {
+                            CFNumberGetValue((CFNumberRef)classCodeRef,
+                                             kCFNumberSInt32Type, &classCode);
+                        }
+                        CFRelease(classCodeRef);
+
+                        // Display controller class = 0x03 (upper byte of 24-bit class code)
+                        if ((classCode >> 16) == 0x03) {
+                            GpuInfo info;
+                            info.backend = GpuBackend::OpenGL; // macOS supports GL via CGL
+
+                            // Try to get the model name
+                            CFTypeRef modelRef = IORegistryEntryCreateCFProperty(
+                                entry, CFSTR("model"), kCFAllocatorDefault, 0);
+                            if (modelRef) {
+                                if (CFGetTypeID(modelRef) == CFStringGetTypeID()) {
+                                    char buf[256] = {};
+                                    CFStringGetCString((CFStringRef)modelRef, buf,
+                                                       sizeof(buf), kCFStringEncodingUTF8);
+                                    info.name = buf;
+                                }
+                                CFRelease(modelRef);
+                            }
+                            if (info.name.empty()) info.name = "Apple GPU";
+
+                            // Try to get vendor ID
+                            CFTypeRef vendorRef = IORegistryEntryCreateCFProperty(
+                                entry, CFSTR("vendor-id"), kCFAllocatorDefault, 0);
+                            if (vendorRef) {
+                                uint32_t vendorId = 0;
+                                if (CFGetTypeID(vendorRef) == CFDataGetTypeID()) {
+                                    CFDataGetBytes((CFDataRef)vendorRef,
+                                                   CFRangeMake(0, sizeof(vendorId)),
+                                                   (UInt8*)&vendorId);
+                                } else if (CFGetTypeID(vendorRef) == CFNumberGetTypeID()) {
+                                    CFNumberGetValue((CFNumberRef)vendorRef,
+                                                     kCFNumberSInt32Type, &vendorId);
+                                }
+                                CFRelease(vendorRef);
+                                info.vendor = vendorFromId(vendorId);
+                                info.isIntegrated = (vendorId == 0x8086); // Intel = integrated
+                            }
+
+                            // For Apple Silicon (no PCI vendor), mark as integrated
+                            if (info.vendor == GpuVendor::Unknown) {
+                                info.isIntegrated = true;
+                                if (info.name.empty() || info.name == "Apple GPU") {
+                                    info.name = "Apple Silicon GPU";
+                                }
+                            }
+
+                            result.push_back(info);
+                        }
+                    }
+                    IOObjectRelease(entry);
+                }
+                IOObjectRelease(iter);
+            }
+        }
     }
 #endif
 

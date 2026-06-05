@@ -256,11 +256,22 @@ int FontAtlas::createAtlasPage() {
     // is valid for binding in flushBatch (unified ID space).
     std::vector<uint8_t> empty(atlasW_ * atlasH_ * 4, 0);
     int texId = texMgr_->upload(atlasW_, atlasH_, empty.data());
+    if (texId < 0) {
+        fprintf(stderr, "[FontAtlas] ERROR: failed to create atlas page (GPU texture upload failed)\n");
+        return -1;
+    }
     pages_.push_back({texId, 1, 1, 0});
     return texId;
 }
 
 bool FontAtlas::allocGlyphRect(int w, int h, int& outX, int& outY, int& outTexId) {
+    // Reject glyphs larger than the atlas itself — they can never fit.
+    if (w > atlasW_ || h > atlasH_) {
+        fprintf(stderr, "[FontAtlas] WARN: glyph (%dx%d) exceeds atlas (%dx%d), skipped\n",
+                w, h, atlasW_, atlasH_);
+        return false;
+    }
+
     if (pages_.empty()) {
         if (createAtlasPage() < 0) return false;
     }
@@ -281,7 +292,18 @@ bool FontAtlas::allocGlyphRect(int w, int h, int& outX, int& outY, int& outTexId
         page.rowHeight = std::max(page.rowHeight, h);
         return true;
     }
-    return false;
+
+    // No room on any existing page — create a new one.
+    // Guard against infinite page creation for oddly shaped glyphs.
+    if (static_cast<int>(pages_.size()) >= kMaxAtlasPages) {
+        fprintf(stderr, "[FontAtlas] ERROR: max atlas pages (%d) reached, glyph (%dx%d) skipped\n",
+                kMaxAtlasPages, w, h);
+        return false;
+    }
+    if (createAtlasPage() < 0) return false;
+    // The new page is at the end; recurse once (won't recurse further because
+    // the size guard above and the per-page loop guarantee at most one retry).
+    return allocGlyphRect(w, h, outX, outY, outTexId);
 }
 
 uint64_t FontAtlas::fontKey(const Font& f) const {

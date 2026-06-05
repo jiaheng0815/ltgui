@@ -78,8 +78,8 @@ void ScrollArea::paintSelf(NativeCanvas* canvas) {
     canvas->setColor(style().bgColor);
     canvas->fillRoundedRect(r, style().borderRadius);
 
-    // Scrollbar track
-    if (contentHeight_ > height()) {
+    // Scrollbar track — guard against zero contentHeight (avoids div-by-zero)
+    if (contentHeight_ > 0 && contentHeight_ > height()) {
         int sbWidth = 12;
         int scrollY = currentScrollY();
         int thumbH = std::max(24, height() * height() / contentHeight_);
@@ -116,12 +116,12 @@ bool ScrollArea::handleEvent(Event& event) {
     // Scrollbar hit test — check if mouse is on the scrollbar track
     int localX = event.pos.x - x();
     int localY = event.pos.y - y();
-    bool onScrollbar = (contentHeight_ > height()) && (localX >= width() - 12);
+    bool onScrollbar = (contentHeight_ > 0 && contentHeight_ > height()) && (localX >= width() - 12);
 
     if (event.type == EventType::MouseDown && onScrollbar) {
-        // Calculate scrollbar thumb position
+        // Calculate scrollbar thumb position (contentHeight_ > 0 guaranteed by onScrollbar)
         int curScrollY = currentScrollY();
-        int thumbH = std::max(24, height() * height() / contentHeight_);
+        int thumbH = std::max(24, (height() * height()) / contentHeight_);
         int maxScroll = contentHeight_ - height();
         int thumbY = 0;
         if (maxScroll > 0) {

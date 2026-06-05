@@ -30,10 +30,17 @@ bool ClipboardData::hasFormat(ClipboardFormat f) const {
     return false;
 }
 
+// Find the first window with a valid native window handle.
+// Previously this always returned wins[0], which is wrong in multi-window
+// apps or when the first window was closed but others remain open.
 static NativeWindow* getNativeWindow() {
     auto& wins = Application::instance().windows();
-    if (wins.empty()) return nullptr;
-    return wins[0]->nativeWindow();
+    for (auto* w : wins) {
+        if (w && w->nativeWindow() && w->nativeWindow()->nativeHandle()) {
+            return w->nativeWindow();
+        }
+    }
+    return nullptr;
 }
 
 std::string Clipboard::getText() {

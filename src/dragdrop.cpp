@@ -24,7 +24,6 @@ std::vector<uint8_t> DragData::data(const std::string& mime) const {
 }
 
 void DragData::setFiles(const std::vector<std::string>& paths) {
-    files(); // ensure vector exists
     std::string uriList;
     for (auto& p : paths) {
         if (!uriList.empty()) uriList += "\r\n";
@@ -41,11 +40,27 @@ std::vector<std::string> DragData::files() const {
     size_t pos = 0;
     while (pos < uriList.size()) {
         size_t end = uriList.find("\r\n", pos);
-        if (end == std::string::npos) end = uriList.size();
+        if (end == std::string::npos) {
+            // Last entry (no trailing \r\n) — also handle \n-only separators
+            end = uriList.find('\n', pos);
+            if (end == std::string::npos) end = uriList.size();
+        }
         std::string uri = uriList.substr(pos, end - pos);
-        if (uri.substr(0, 7) == "file://") uri = uri.substr(7);
-        result.push_back(uri);
-        pos = end + 2;
+        // Handle file://, file://localhost/, and file:/// URI schemes
+        if (uri.compare(0, 7, "file://") == 0) {
+            uri = uri.substr(7);
+            // Strip localhost prefix if present
+            if (uri.compare(0, 10, "localhost/") == 0 || uri.compare(0, 10, "localhost") == 0) {
+                uri = uri.substr(uri[9] == '/' ? 10 : 9);
+            }
+        }
+        if (!uri.empty()) {
+            result.push_back(uri);
+        }
+        pos = end;
+        // Skip the separator
+        if (pos < uriList.size() && uriList[pos] == '\r') pos++;
+        if (pos < uriList.size() && uriList[pos] == '\n') pos++;
         if (end == uriList.size()) break;
     }
     return result;

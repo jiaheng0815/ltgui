@@ -118,12 +118,22 @@ void ContextMenu::paintSelf(NativeCanvas* canvas) {
 bool ContextMenu::handleEvent(Event& event) {
     if (!isEnabled() || !isVisible()) return false;
 
+    // Compute visual Y offset accounting for separator rows (which are 8px, not itemHeight_)
     int localY = event.pos.y - y();
+    int yOff = style().paddingTop;
+    int itemIdx = -1;
+    for (int i = 0; i < static_cast<int>(items_.size()); i++) {
+        int rowH = items_[i].separator ? 8 : itemHeight_;
+        if (localY >= yOff && localY < yOff + rowH) {
+            itemIdx = i;
+            break;
+        }
+        yOff += rowH;
+    }
 
     if (event.type == EventType::MouseMove) {
-        int idx = (localY - style().paddingTop) / itemHeight_;
-        if (idx >= 0 && idx < static_cast<int>(items_.size()) && !items_[idx].separator) {
-            hovered_ = idx;
+        if (itemIdx >= 0 && !items_[itemIdx].separator) {
+            hovered_ = itemIdx;
         } else {
             hovered_ = -1;
         }
@@ -132,18 +142,17 @@ bool ContextMenu::handleEvent(Event& event) {
         return true;
     }
 
-    if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
-        int idx = (localY - style().paddingTop) / itemHeight_;
-        if (idx >= 0 && idx < static_cast<int>(items_.size()) && !items_[idx].separator) {
-            if (items_[idx].callback) items_[idx].callback();
+    if (event.type == EventType::MouseDown) {
+        if (event.button == MouseButton::Left && itemIdx >= 0 && !items_[itemIdx].separator) {
+            if (items_[itemIdx].callback) items_[itemIdx].callback();
         }
+        // Any click on the menu (item hit or not, any button) dismisses it.
         dismiss();
         event.accepted = true;
         return true;
     }
 
-    if (event.type == EventType::MouseDown ||
-        (event.type == EventType::KeyDown && event.key == Key::Escape)) {
+    if (event.type == EventType::KeyDown && event.key == Key::Escape) {
         dismiss();
         event.accepted = true;
         return true;

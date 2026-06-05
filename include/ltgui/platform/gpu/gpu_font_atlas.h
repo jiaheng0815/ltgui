@@ -108,6 +108,8 @@ private:
     bool allocGlyphRect(int w, int h, int& outX, int& outY, int& outTexId);
     uint64_t fontKey(const Font& f) const;
 
+    static constexpr int kMaxAtlasPages = 16; // prevent unbounded page growth
+
     GpuDevice* device_;
     TextureManager* texMgr_;
     int atlasW_, atlasH_;

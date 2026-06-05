@@ -5,10 +5,27 @@ namespace ltgui {
 namespace utf8 {
 
 inline int codePointLen(unsigned char c) {
+    // Valid UTF-8 lead byte patterns (RFC 3629):
+    // 0xxxxxxx           → 1 byte  (0x00–0x7F)
+    // 110xxxxx           → 2 bytes (0xC2–0xDF; reject overlong 0xC0/0xC1)
+    // 1110xxxx           → 3 bytes (0xE0–0xEF)
+    // 11110xxx           → 4 bytes (0xF0–0xF4; reject 0xF5–0xF7, RFC 3629 limit)
     if ((c & 0x80) == 0) return 1;
-    if ((c & 0xE0) == 0xC0) return 2;
+    if ((c & 0xE0) == 0xC0) {
+        // Reject overlong 2-byte sequences: 0xC0 and 0xC1 always encode
+        // codepoints ≤ 0x7F which must use 1-byte form.
+        if (c < 0xC2) return 1;
+        return 2;
+    }
     if ((c & 0xF0) == 0xE0) return 3;
-    if ((c & 0xF8) == 0xF0) return 4;
+    if ((c & 0xF8) == 0xF0) {
+        // RFC 3629 restricts max codepoint to U+10FFFF.
+        // Bytes 0xF5–0xF7 would decode beyond that; reject them.
+        if (c > 0xF4) return 1;
+        return 4;
+    }
+    // Invalid lead bytes (0xFE, 0xFF, etc.) or continuation bytes at start:
+    // treat as a single-byte raw byte so cursor navigation doesn't get stuck.
     return 1;
 }
 

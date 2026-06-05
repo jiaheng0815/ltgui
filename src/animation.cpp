@@ -236,6 +236,54 @@ void AnimatedFloat::complete() {
 
 // --- WidgetAnimation ---
 
+WidgetAnimation::~WidgetAnimation() {
+    // Auto-unregister on destruction so AnimationManager doesn't hold
+    // a dangling pointer after the animation is destroyed.
+    if (playing_) {
+        AnimationManager::instance().unregisterAnimation(this);
+    }
+}
+
+WidgetAnimation::WidgetAnimation(WidgetAnimation&& other) noexcept
+    : anim_(std::move(other.anim_)), durationMs_(other.durationMs_),
+      delayMs_(other.delayMs_), easing_(other.easing_),
+      loop_(other.loop_), yoyo_(other.yoyo_),
+      playing_(other.playing_), startTickMs_(other.startTickMs_),
+      startVal_(other.startVal_), endVal_(other.endVal_),
+      onValue_(std::move(other.onValue_)),
+      delayPhase_(other.delayPhase_) {
+    // Transfer registration to the moved-to object
+    if (playing_) {
+        AnimationManager::instance().unregisterAnimation(&other);
+        AnimationManager::instance().registerAnimation(this);
+        other.playing_ = false;
+    }
+}
+
+WidgetAnimation& WidgetAnimation::operator=(WidgetAnimation&& other) noexcept {
+    if (this != &other) {
+        if (playing_) AnimationManager::instance().unregisterAnimation(this);
+        anim_ = std::move(other.anim_);
+        durationMs_ = other.durationMs_;
+        delayMs_ = other.delayMs_;
+        easing_ = other.easing_;
+        loop_ = other.loop_;
+        yoyo_ = other.yoyo_;
+        playing_ = other.playing_;
+        startTickMs_ = other.startTickMs_;
+        startVal_ = other.startVal_;
+        endVal_ = other.endVal_;
+        onValue_ = std::move(other.onValue_);
+        delayPhase_ = other.delayPhase_;
+        if (playing_) {
+            AnimationManager::instance().unregisterAnimation(&other);
+            AnimationManager::instance().registerAnimation(this);
+            other.playing_ = false;
+        }
+    }
+    return *this;
+}
+
 void WidgetAnimation::play() {
     if (playing_) return;
     playing_ = true;
@@ -260,6 +308,43 @@ void WidgetAnimation::stop() {
 }
 
 // --- KeyframeAnimation ---
+
+KeyframeAnimation::~KeyframeAnimation() {
+    // Auto-unregister on destruction to prevent dangling pointer
+    if (playing_) {
+        AnimationManager::instance().unregisterKeyframe(this);
+    }
+}
+
+KeyframeAnimation::KeyframeAnimation(KeyframeAnimation&& other) noexcept
+    : keyframes_(std::move(other.keyframes_)),
+      durationMs_(other.durationMs_), loop_(other.loop_),
+      playing_(other.playing_), startTickMs_(other.startTickMs_),
+      onValue_(std::move(other.onValue_)) {
+    if (playing_) {
+        AnimationManager::instance().unregisterKeyframe(&other);
+        AnimationManager::instance().registerKeyframe(this);
+        other.playing_ = false;
+    }
+}
+
+KeyframeAnimation& KeyframeAnimation::operator=(KeyframeAnimation&& other) noexcept {
+    if (this != &other) {
+        if (playing_) AnimationManager::instance().unregisterKeyframe(this);
+        keyframes_ = std::move(other.keyframes_);
+        durationMs_ = other.durationMs_;
+        loop_ = other.loop_;
+        playing_ = other.playing_;
+        startTickMs_ = other.startTickMs_;
+        onValue_ = std::move(other.onValue_);
+        if (playing_) {
+            AnimationManager::instance().unregisterKeyframe(&other);
+            AnimationManager::instance().registerKeyframe(this);
+            other.playing_ = false;
+        }
+    }
+    return *this;
+}
 
 void KeyframeAnimation::addKeyframe(const Keyframe& kf) {
     keyframes_.push_back(kf);
@@ -322,8 +407,15 @@ AnimationManager& AnimationManager::instance() {
 void AnimationManager::tick() {
     nowMs_ = steadyNowMs();
 
-    for (auto* anim : widgetAnims_) {
-        if (!anim->isPlaying()) continue;
+    // Tick widget animations.  We iterate by index because a callback
+    // (onValue_ or onFinished) may modify widgetAnims_ (via stop() /
+    // play()), so a range-for with iterators is not safe.
+    for (size_t i = 0; i < widgetAnims_.size(); ) {
+        WidgetAnimation* anim = widgetAnims_[i];
+        if (!anim->isPlaying()) {
+            i++;
+            continue;
+        }
 
         uint64_t elapsed = nowMs_ - anim->startTickMs_;
         if (anim->delayPhase_) {
@@ -335,6 +427,7 @@ void AnimationManager::tick() {
                 anim->anim_.setYoyo(anim->yoyo_);
                 elapsed = 0;
             } else {
+                i++;
                 continue;
             }
         }
@@ -344,25 +437,42 @@ void AnimationManager::tick() {
 
         if (!anim->anim_.isAnimating() && !anim->delayPhase_) {
             anim->playing_ = false;
+            // Shell the completed animation out; if the callback adds/removes
+            // animations, our index is safe because we use the stale size
+            // and move the element to the end before erasing.
+            size_t oldSize = widgetAnims_.size();
             widgetAnims_.erase(
                 std::remove(widgetAnims_.begin(), widgetAnims_.end(), anim),
                 widgetAnims_.end());
+            // If the vector changed (element was removed), don't advance i
+            // because the current slot now holds the next element.
+            if (widgetAnims_.size() == oldSize) i++;
             anim->onFinished.emit();
+        } else {
+            i++;
         }
     }
 
-    for (auto* kf : keyframeAnims_) {
-        if (!kf->isPlaying()) continue;
+    for (size_t i = 0; i < keyframeAnims_.size(); ) {
+        KeyframeAnimation* kf = keyframeAnims_[i];
+        if (!kf->isPlaying()) {
+            i++;
+            continue;
+        }
         float v = kf->currentValue();
         if (kf->onValue_) kf->onValue_(v);
 
         uint64_t elapsed = nowMs_ - kf->startTickMs_;
         if (elapsed >= static_cast<uint64_t>(kf->durationMs_) && !kf->loop_) {
             kf->playing_ = false;
+            size_t oldSize = keyframeAnims_.size();
             keyframeAnims_.erase(
                 std::remove(keyframeAnims_.begin(), keyframeAnims_.end(), kf),
                 keyframeAnims_.end());
+            if (keyframeAnims_.size() == oldSize) i++;
             kf->onFinished.emit();
+        } else {
+            i++;
         }
     }
 }

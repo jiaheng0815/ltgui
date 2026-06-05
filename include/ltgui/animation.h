@@ -73,6 +73,13 @@ public:
     using ValueCallback = std::function<void(float)>;
 
     WidgetAnimation() = default;
+    ~WidgetAnimation();
+
+    // Non-copyable (AnimationManager tracks by raw pointer)
+    WidgetAnimation(const WidgetAnimation&) = delete;
+    WidgetAnimation& operator=(const WidgetAnimation&) = delete;
+    WidgetAnimation(WidgetAnimation&& other) noexcept;
+    WidgetAnimation& operator=(WidgetAnimation&& other) noexcept;
 
     void setDuration(int ms) { durationMs_ = ms; }
     void setEasing(Easing e) { easing_ = e; }
@@ -119,6 +126,13 @@ public:
     using ValueCallback = std::function<void(float)>;
 
     KeyframeAnimation() = default;
+    ~KeyframeAnimation();
+
+    // Non-copyable
+    KeyframeAnimation(const KeyframeAnimation&) = delete;
+    KeyframeAnimation& operator=(const KeyframeAnimation&) = delete;
+    KeyframeAnimation(KeyframeAnimation&& other) noexcept;
+    KeyframeAnimation& operator=(KeyframeAnimation&& other) noexcept;
 
     void addKeyframe(const Keyframe& kf);
     void setDuration(int ms) { durationMs_ = ms; }

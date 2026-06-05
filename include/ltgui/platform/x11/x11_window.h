@@ -66,8 +66,16 @@ private:
     NativeCanvas* canvas_ = nullptr;
     Size size_;
     bool mapped_ = false;
+    bool ownsDisplayRef_ = false;
     Atom wmDeleteMessage_;
     Atom wmProtocols_;
+
+    // Per-window clipboard state (replaces old file-scope globals)
+    std::string clipboardText_;        // text we own on the clipboard
+    bool clipboardOwned_ = false;      // true if we currently own the selection
+    // Pending async clipboard read
+    std::string* pendingReadResult_ = nullptr;
+    bool pendingReadDone_ = false;
 };
 
 } // namespace ltgui

@@ -3,6 +3,8 @@
 
 import os
 import sys
+import time
+import json
 import subprocess
 import shutil
 
@@ -26,8 +28,16 @@ class Color:
     RESET   = "\033[0m"
 
 def cprint(msg, color=Color.WHITE, bold=False, end="\n"):
+    if _JSON_MODE:
+        return
     prefix = Color.BOLD if bold else ""
     print(f"{prefix}{color}{msg}{Color.RESET}", end=end)
+
+def json_event(event_type, **data):
+    """Emit a structured event as a JSON line. Used for CI with --json flag."""
+    if _JSON_MODE:
+        import json as _json
+        print(_json.dumps({"event": event_type, **data}))
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(SCRIPT_DIR, "src")
@@ -39,6 +49,13 @@ BUILD_DIR = os.path.join(SCRIPT_DIR, "build")
 OBJ_DIR = os.path.join(BUILD_DIR, "obj")
 LIB_DIR = os.path.join(BUILD_DIR, "lib")
 TEST_DIR = os.path.join(SCRIPT_DIR, "test")
+
+# --- Module-level state ---
+_VERBOSE = False
+_JSON_MODE = False
+_JOBS = os.cpu_count() or 1
+_COMPILE_COMMANDS = []
+_PROFILE_BUILD = False
 
 # --- Platform helpers ---
 def detect_platform():
@@ -101,7 +118,7 @@ def resolve_compiler(compiler_arg):
 
 # --- Flag parsing ---
 def parse_flags(args):
-    """Parse --key value flags from args.
+    """Parse --key value and -k value flags from args.
     Returns (positional_args, flags_dict).
     Boolean flags (no value) get the value True.
     """
@@ -111,7 +128,16 @@ def parse_flags(args):
     while i < len(args):
         if args[i].startswith("--"):
             key = args[i][2:]
-            if i + 1 < len(args) and not args[i + 1].startswith("--"):
+            if i + 1 < len(args) and not args[i + 1].startswith("-"):
+                flags[key] = args[i + 1]
+                i += 2
+            else:
+                flags[key] = True
+                i += 1
+        elif args[i].startswith("-") and len(args[i]) == 2 and args[i][1].isalpha():
+            # Short flag: -j 4, -O2 (single letter)
+            key = args[i][1]
+            if i + 1 < len(args) and not args[i + 1].startswith("-"):
                 flags[key] = args[i + 1]
                 i += 2
             else:
@@ -207,21 +233,38 @@ def _object_is_fresh(obj_path, src_path):
             return False
     return True
 
-def compile_source(src_path, platform, is_release, compiler, is_msvc, pic=False):
+def _record_compile_command(src_path, flags):
+    """Accumulate a compile command for compile_commands.json generation."""
+    import json as _json
+    _COMPILE_COMMANDS.append({
+        "directory": SCRIPT_DIR,
+        "command": " ".join(flags),
+        "file": src_path,
+    })
+
+def _write_compile_commands():
+    """Write accumulated compile commands to build/compile_commands.json."""
+    if not _COMPILE_COMMANDS:
+        return
+    path = os.path.join(BUILD_DIR, "compile_commands.json")
+    with open(path, "w") as f:
+        json.dump(_COMPILE_COMMANDS, f, indent=2)
+    cprint(f"  Generated {path}", Color.GREEN)
+
+def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=False):
+    """Build the compiler flags list for a single source file.
+    Returns (flags_list, obj_path, rel_path).
+    """
     rel = os.path.relpath(src_path, SRC_DIR)
     ext = ".obj" if is_msvc else ".o"
     obj_path = os.path.join(OBJ_DIR, rel + ext)
-    os.makedirs(os.path.dirname(obj_path), exist_ok=True)
-
-    if _object_is_fresh(obj_path, src_path):
-        return obj_path
 
     if is_msvc:
         flags = [compiler, "/nologo", "/c", "/std:c++17", "/EHsc"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
-            flags += ["/Zi", "/Od"]
+            flags += ["/Z7", "/Od"]  # /Z7 embeds debug info in .obj (parallel-safe)
         flags += ["/W3"]
         flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
         flags += get_platform_flags(platform, is_msvc=True)
@@ -234,19 +277,68 @@ def compile_source(src_path, platform, is_release, compiler, is_msvc, pic=False)
             flags += ["-O2", "-DNDEBUG"]
         else:
             flags += ["-g", "-O0"]
+        # Profile build: add gprof instrumentation
+        if _PROFILE_BUILD and not is_release:
+            if platform != "macos":
+                flags += ["-pg", "-fno-omit-frame-pointer"]
         flags += ["-Wall", "-Wextra", "-Wpedantic"]
         flags += ["-Wno-unused-parameter", "-Wno-missing-field-initializers"]
         flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
         flags += get_platform_flags(platform)
         flags += [src_path, "-o", obj_path]
+    return flags, obj_path, rel
+
+def compile_source(src_path, platform, is_release, compiler, is_msvc, pic=False):
+    flags, obj_path, rel = _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic)
+    os.makedirs(os.path.dirname(obj_path), exist_ok=True)
+
+    if _object_is_fresh(obj_path, src_path):
+        _record_compile_command(src_path, flags)
+        return obj_path
 
     cprint(f"  Compiling {rel}...", Color.CYAN)
-    result = subprocess.run(flags, capture_output=True, text=True)
+    if _VERBOSE:
+        cprint(f"    {' '.join(flags)}", Color.YELLOW)
+        result = subprocess.run(flags)
+    else:
+        result = subprocess.run(flags, capture_output=True, text=True)
     if result.returncode != 0:
         cprint(f"  Error compiling {rel}:", Color.RED, bold=True)
-        cprint(result.stderr, Color.RED)
+        if not _VERBOSE:
+            cprint(result.stderr, Color.RED)
         return None
+
+    _record_compile_command(src_path, flags)
     return obj_path
+
+def _compile_sources_parallel(sources, platform, is_release, compiler, is_msvc, pic=False):
+    """Compile multiple sources in parallel using a thread pool."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    object_files = []
+    errors = []
+
+    with ThreadPoolExecutor(max_workers=_JOBS) as executor:
+        futures = {
+            executor.submit(compile_source, src, platform, is_release, compiler, is_msvc, pic): src
+            for src in sources
+        }
+        for future in as_completed(futures):
+            src = futures[future]
+            try:
+                obj = future.result()
+                if obj:
+                    object_files.append(obj)
+                else:
+                    errors.append(os.path.relpath(src, SRC_DIR))
+            except Exception as e:
+                rel = os.path.relpath(src, SRC_DIR)
+                cprint(f"  Compilation exception for {rel}: {e}", Color.RED)
+                errors.append(rel)
+
+    if errors:
+        cprint(f"  {len(errors)} file(s) failed to compile.", Color.RED)
+        return None
+    return object_files
 
 def build_shared_lib(platform, is_release, compiler):
     """Build a dynamic/shared library (.dll / .so / .dylib)."""
@@ -259,13 +351,9 @@ def build_shared_lib(platform, is_release, compiler):
     cprint(f"Building ltgui shared library ({build_type}) for {platform} with {compiler}...", Color.BLUE, bold=True)
     cprint(f"Found {len(sources)} source files.", Color.WHITE)
 
-    object_files = []
-    for src in sources:
-        obj = compile_source(src, platform, is_release, compiler, pic=True)
-        if obj:
-            object_files.append(obj)
-        else:
-            return None
+    object_files = _compile_sources_parallel(sources, platform, is_release, compiler, False, pic=True)
+    if not object_files:
+        return None
 
     os.makedirs(LIB_DIR, exist_ok=True)
 
@@ -311,13 +399,9 @@ def build_lib(platform, is_release, compiler, is_msvc):
     cprint(f"Building ltgui ({build_type}) for {platform} with {compiler}...", Color.BLUE, bold=True)
     cprint(f"Found {len(sources)} source files.", Color.WHITE)
 
-    object_files = []
-    for src in sources:
-        obj = compile_source(src, platform, is_release, compiler, is_msvc)
-        if obj:
-            object_files.append(obj)
-        else:
-            return None
+    object_files = _compile_sources_parallel(sources, platform, is_release, compiler, is_msvc)
+    if not object_files:
+        return None
 
     os.makedirs(LIB_DIR, exist_ok=True)
     lib_name = "ltgui.lib" if platform == "windows" else "libltgui.a"
@@ -815,6 +899,7 @@ def cmd_build(positional, flags):
         if not lib_path:
             return
         export_sdk(lib_path, dll_dir, platform)
+        _write_compile_commands()
         cprint("\nBuild complete.", Color.GREEN, bold=True)
         return
 
@@ -830,6 +915,7 @@ def cmd_build(positional, flags):
         build_apps(platform, is_release, lib_path, compiler, is_msvc)
         build_examples(platform, is_release, lib_path, compiler, is_msvc)
 
+    _write_compile_commands()
     cprint("\nBuild complete.", Color.GREEN, bold=True)
 
 def build_apps(platform, is_release, lib_path, compiler, is_msvc):
@@ -908,6 +994,8 @@ def cmd_run(positional, flags):
     else:
         if not build_example(name, platform, False, lib_path, compiler, is_msvc):
             return
+
+    _write_compile_commands()
 
     exe_name = name + (".exe" if platform == "windows" else "")
     exe_path = os.path.join(BUILD_DIR, exe_name)
@@ -991,47 +1079,779 @@ def cmd_test(positional, flags):
     else:
         cprint(f"  {passed}/{total} passed, {failed} FAILED", Color.RED, bold=True)
 
+# --- cmd_info ---
+def cmd_info(positional, flags):
+    """Display project structure statistics."""
+    platform = detect_platform()
+
+    src_files = get_source_files()
+    header_files = []
+    if os.path.exists(INCLUDE_DIR):
+        for root, dirs, files in os.walk(INCLUDE_DIR):
+            for f in files:
+                if f.endswith(".h"):
+                    header_files.append(os.path.join(root, f))
+
+    examples = sorted([f[:-4] for f in os.listdir(EXAMPLES_DIR) if f.endswith(".cpp")]) if os.path.exists(EXAMPLES_DIR) else []
+    apps = sorted([f[:-4] for f in os.listdir(APP_DIR) if f.endswith(".cpp")]) if os.path.exists(APP_DIR) else []
+    tests = sorted([f[:-4] for f in os.listdir(TEST_DIR) if f.endswith(".cpp")]) if os.path.exists(TEST_DIR) else []
+
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
+
+    cprint("ltgui Project Info", Color.BLUE, bold=True)
+    print(f"  Platform:      {platform} ({sys.platform})")
+    print(f"  Compiler:      {compiler}")
+    print(f"  Python:        {sys.version.split()[0]}")
+    print(f"  CPU cores:     {os.cpu_count() or 'unknown'}")
+    print()
+    cprint("File counts:", Color.CYAN)
+    print(f"  Sources:       {len(src_files)}")
+    print(f"  Headers:       {len(header_files)}")
+    print(f"  Examples:      {len(examples)}")
+    print(f"  Apps:          {len(apps)}")
+    print(f"  Tests:         {len(tests)}")
+
+    if src_files:
+        dirs = {}
+        for f in src_files:
+            d = os.path.relpath(os.path.dirname(f), SRC_DIR)
+            dirs[d] = dirs.get(d, 0) + 1
+        print()
+        cprint("Source structure:", Color.CYAN)
+        for d, count in sorted(dirs.items()):
+            label = d if d != "." else "(root)"
+            print(f"  {label}/: {count} files")
+
+    if examples:
+        print()
+        cprint("Examples:", Color.CYAN)
+        for e in examples:
+            print(f"  {e}")
+    if apps:
+        print()
+        cprint("Apps:", Color.CYAN)
+        for a in apps:
+            print(f"  {a}")
+
+# --- cmd_fmt ---
+def _find_clang_format():
+    """Locate clang-format or return None."""
+    exe = shutil.which("clang-format")
+    if exe:
+        return exe
+    for candidate in ["clang-format-18", "clang-format-17", "clang-format-16", "clang-format-15"]:
+        exe = shutil.which(candidate)
+        if exe:
+            return exe
+    return None
+
+def _get_project_source_files():
+    """Collect all .cpp, .h, .mm files for formatting/linting."""
+    patterns = [
+        (SRC_DIR, [".cpp", ".mm"]),
+        (INCLUDE_DIR, [".h"]),
+        (EXAMPLES_DIR, [".cpp"]),
+        (APP_DIR, [".cpp"]),
+        (TEST_DIR, [".cpp"]),
+    ]
+    files = []
+    for base_dir, extensions in patterns:
+        if not os.path.exists(base_dir):
+            continue
+        for root, dirs, filenames in os.walk(base_dir):
+            dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
+            for f in filenames:
+                if any(f.endswith(ext) for ext in extensions):
+                    files.append(os.path.join(root, f))
+    return sorted(files)
+
+def cmd_fmt(positional, flags):
+    """Run clang-format on all source files."""
+    cf = _find_clang_format()
+    if not cf:
+        cprint("Error: clang-format not found. Install clang-format and add it to PATH.", Color.RED)
+        return
+
+    config_path = os.path.join(SCRIPT_DIR, ".clang-format")
+    if not os.path.exists(config_path):
+        cprint("Warning: No .clang-format found in project root.", Color.YELLOW)
+        cprint("  Using LLVM style as default. Create a .clang-format to customize.", Color.YELLOW)
+
+    files = _get_project_source_files()
+    cprint(f"Formatting {len(files)} files...", Color.BLUE, bold=True)
+
+    cmd = [cf, "-i"]
+    if os.path.exists(config_path):
+        cmd += ["--style=file"]
+    else:
+        cmd += ["--style=LLVM"]
+
+    success = 0
+    failed = 0
+    for f in files:
+        rel = os.path.relpath(f, SCRIPT_DIR)
+        cprint(f"  {rel}...", Color.CYAN, end="")
+        result = subprocess.run(cmd + [f], capture_output=True, text=True)
+        if result.returncode == 0:
+            cprint(" OK", Color.GREEN)
+            success += 1
+        else:
+            cprint(" ERROR", Color.RED)
+            if not _VERBOSE:
+                cprint(f"    {result.stderr.strip()}", Color.RED)
+            failed += 1
+
+    if failed:
+        cprint(f"{success}/{success + failed} files formatted, {failed} failed", Color.RED)
+    else:
+        cprint(f"{success} files formatted.", Color.GREEN, bold=True)
+
+# --- cmd_lint ---
+def cmd_lint(positional, flags):
+    """Run clang-tidy on all source files."""
+    ct = shutil.which("clang-tidy")
+    if not ct:
+        cprint("Error: clang-tidy not found. Install clang-tidy and add it to PATH.", Color.RED)
+        return
+
+    config_path = os.path.join(SCRIPT_DIR, ".clang-tidy")
+    if not os.path.exists(config_path):
+        cprint("Warning: No .clang-tidy found in project root.", Color.YELLOW)
+        cprint("  Using built-in default checks. Create a .clang-tidy to customize.", Color.YELLOW)
+
+    files = sorted([
+        os.path.join(root, f)
+        for root, dirs, files in os.walk(SRC_DIR)
+        for f in files if f.endswith(".cpp")
+    ])
+    if not files:
+        cprint("No source files found in src/", Color.RED)
+        return
+
+    cprint(f"Running clang-tidy on {len(files)} files...", Color.BLUE, bold=True)
+
+    compile_db = os.path.join(BUILD_DIR, "compile_commands.json")
+    issues = 0
+    for f in files:
+        rel = os.path.relpath(f, SCRIPT_DIR)
+        cprint(f"  {rel}...", Color.CYAN, end="")
+
+        cmd = [ct, f]
+        if os.path.exists(compile_db):
+            cmd += [f"-p={BUILD_DIR}"]
+        else:
+            cmd += ["--", f"-std=c++17", f"-I{INCLUDE_DIR}", f"-I{VENDOR_DIR}"]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        output = (result.stdout + result.stderr).strip()
+
+        w_count = output.count("warning:")
+        e_count = output.count("error:")
+        if w_count or e_count:
+            issues += w_count + e_count
+            cprint(f" {w_count} warnings, {e_count} errors", Color.YELLOW)
+            if _VERBOSE:
+                print(output)
+        else:
+            cprint(" PASS", Color.GREEN)
+
+    if issues:
+        cprint(f"Found {issues} lint issue(s).", Color.YELLOW)
+    else:
+        cprint("No lint issues detected.", Color.GREEN, bold=True)
+
+# --- cmd_new ---
+def _to_snake_case(name):
+    """Convert PascalCase to snake_case.  'MyButton' -> 'my_button'"""
+    result = []
+    for i, c in enumerate(name):
+        if c.isupper() and i > 0:
+            result.append('_')
+            result.append(c.lower())
+        else:
+            result.append(c.lower())
+    return ''.join(result)
+
+def _to_pascal_case(name):
+    """Convert 'my_button' or 'MyButton' to 'MyButton'."""
+    return ''.join(w[0].upper() + w[1:] if w else '' for w in name.replace('-', '_').split('_'))
+
+def _scaffold_widget(name):
+    snake = _to_snake_case(name)
+    header_path = os.path.join(INCLUDE_DIR, "widgets", snake + ".h")
+    src_path = os.path.join(SRC_DIR, "widgets", snake + ".cpp")
+
+    if os.path.exists(header_path) or os.path.exists(src_path):
+        cprint(f"Widget '{name}' already exists.", Color.RED)
+        return
+
+    header_content = f"""#pragma once
+#include "ltgui/widget.h"
+
+namespace ltgui {{
+
+class {name} : public Widget {{
+public:
+    explicit {name}(Widget* parent = nullptr);
+
+    void paintSelf(NativeCanvas* canvas) override;
+    Size sizeHint() const override;
+    WidgetType widgetType() const override {{ return WidgetType::{name}; }}
+
+private:
+    // TODO: add private members
+}};
+
+}} // namespace ltgui
+"""
+    src_content = f"""#include "widgets/{snake}.h"
+
+namespace ltgui {{
+
+{name}::{name}(Widget* parent)
+    : Widget(parent)
+{{
+    // TODO: initialize default style and children
+}}
+
+void {name}::paintSelf(NativeCanvas* canvas)
+{{
+    // TODO: implement custom painting
+    Widget::paintSelf(canvas);
+}}
+
+Size {name}::sizeHint() const
+{{
+    // TODO: return preferred size
+    return Size{{100, 30}};
+}}
+
+}} // namespace ltgui
+"""
+    with open(header_path, "w") as f:
+        f.write(header_content)
+    with open(src_path, "w") as f:
+        f.write(src_content)
+
+    cprint(f"Created widget '{name}':", Color.GREEN, bold=True)
+    cprint(f"  {header_path}", Color.CYAN)
+    cprint(f"  {src_path}", Color.CYAN)
+    cprint("", Color.WHITE)
+    cprint("Don't forget to include in:", Color.YELLOW)
+    cprint("  1. The ltgui.h umbrella header", Color.YELLOW)
+    cprint(f"  2. Add '{snake}.h' to _HEADER_ORDER in ltgui.py", Color.YELLOW)
+
+def _scaffold_example(name):
+    snake = _to_snake_case(name)
+    ex_path = os.path.join(EXAMPLES_DIR, snake + ".cpp")
+    if os.path.exists(ex_path):
+        cprint(f"Example '{name}' already exists at {ex_path}", Color.RED)
+        return
+
+    content = f"""#include "ltgui.h"
+#include <iostream>
+
+using namespace ltgui;
+
+int main() {{
+    Window window;
+    if (!window.create(400, 300, "{name}")) {{
+        std::cerr << "Failed to create window." << std::endl;
+        return 1;
+    }}
+
+    auto root = std::make_unique<Widget>();
+    root->setStyle(Style::defaultStyle());
+
+    // TODO: add widgets and layout
+
+    window.setCentralWidget(std::move(root));
+    window.show();
+
+    return Application::instance().run();
+}}
+"""
+    with open(ex_path, "w") as f:
+        f.write(content)
+    cprint(f"Created example '{name}' at {ex_path}", Color.GREEN, bold=True)
+
+def _scaffold_app(name):
+    snake = _to_snake_case(name)
+    app_path = os.path.join(APP_DIR, snake + ".cpp")
+    if os.path.exists(app_path):
+        cprint(f"App '{name}' already exists at {app_path}", Color.RED)
+        return
+
+    content = f"""#include "ltgui.h"
+#include <iostream>
+
+using namespace ltgui;
+
+int main() {{
+    Window window;
+    if (!window.create(800, 600, "{name}")) {{
+        std::cerr << "Failed to create window." << std::endl;
+        return 1;
+    }}
+
+    auto root = std::make_unique<Widget>();
+    root->style().bgColor = currentTheme().bgPrimary;
+
+    // TODO: build app UI
+
+    window.setCentralWidget(std::move(root));
+    window.show();
+
+    return Application::instance().run();
+}}
+"""
+    with open(app_path, "w") as f:
+        f.write(content)
+    cprint(f"Created app '{name}' at {app_path}", Color.GREEN, bold=True)
+
+def cmd_new(positional, flags):
+    if len(positional) < 3:
+        cprint("Usage: python ltgui.py new widget|example|app <name>", Color.YELLOW)
+        cprint("  python ltgui.py new widget MyButton", Color.CYAN)
+        cprint("  python ltgui.py new example particles", Color.CYAN)
+        cprint("  python ltgui.py new app myapp", Color.CYAN)
+        return
+
+    kind = positional[1].lower()
+    raw_name = positional[2]
+    name = _to_pascal_case(raw_name)
+
+    if kind == "widget":
+        _scaffold_widget(name)
+    elif kind == "example":
+        _scaffold_example(name)
+    elif kind == "app":
+        _scaffold_app(name)
+    else:
+        cprint(f"Unknown type: '{kind}'. Use 'widget', 'example', or 'app'.", Color.RED)
+
+# --- cmd_install ---
+def cmd_install(positional, flags):
+    """Install library + headers to system directories."""
+    platform = detect_platform()
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
+
+    if platform == "windows":
+        prefix = flags.get("prefix", os.path.join(os.environ.get("ProgramFiles", "C:\\Program Files"), "ltgui"))
+        lib_dir = os.path.join(prefix, "lib")
+        include_dir = os.path.join(prefix, "include")
+    else:
+        prefix = flags.get("prefix", "/usr/local")
+        lib_dir = os.path.join(prefix, "lib")
+        include_dir = os.path.join(prefix, "include")
+
+    lib_name = "ltgui.lib" if platform == "windows" else "libltgui.a"
+    lib_path = os.path.join(LIB_DIR, lib_name)
+    if not os.path.exists(lib_path):
+        cprint(f"Library not found at {lib_path}. Build first.", Color.RED)
+        cprint("  Run: python ltgui.py build", Color.YELLOW)
+        return
+
+    cprint(f"Installing to {prefix}...", Color.BLUE, bold=True)
+
+    try:
+        os.makedirs(lib_dir, exist_ok=True)
+        os.makedirs(include_dir, exist_ok=True)
+
+        shutil.copy2(lib_path, os.path.join(lib_dir, lib_name))
+        cprint(f"  Library: {lib_name}", Color.GREEN)
+
+        header_count = 0
+        for root, dirs, files in os.walk(INCLUDE_DIR):
+            for f in files:
+                if f.endswith(".h"):
+                    rel = os.path.relpath(root, INCLUDE_DIR)
+                    target_dir = os.path.join(include_dir, "ltgui", rel) if rel != "." else os.path.join(include_dir, "ltgui")
+                    os.makedirs(target_dir, exist_ok=True)
+                    shutil.copy2(os.path.join(root, f), os.path.join(target_dir, f))
+                    header_count += 1
+
+        cprint(f"  Headers: {header_count} copied", Color.GREEN)
+        cprint("Install complete.", Color.GREEN, bold=True)
+    except PermissionError:
+        cprint(f"Permission denied writing to {prefix}. Try running with elevated privileges.", Color.RED)
+
+# --- cmd_package ---
+def cmd_package(positional, flags):
+    """Package the SDK into a distributable archive."""
+    fmt = flags.get("format")
+    platform = detect_platform()
+    if fmt is None:
+        fmt = "zip" if platform == "windows" else "tar.gz"
+
+    if fmt not in ("zip", "tar.gz"):
+        cprint(f"Unsupported format: '{fmt}'. Use 'zip' or 'tar.gz'.", Color.RED)
+        return
+
+    lib_name = "ltgui.lib" if platform == "windows" else "libltgui.a"
+    lib_path = os.path.join(LIB_DIR, lib_name)
+    if not os.path.exists(lib_path):
+        cprint(f"Library not found at {lib_path}. Build first.", Color.RED)
+        cprint("  Run: python ltgui.py build", Color.YELLOW)
+        return
+
+    # Auto-generate amalgamated header if not already done
+    amalgamated = os.path.join(BUILD_DIR, "ltgui.h")
+    if not os.path.exists(amalgamated):
+        generate_amalgamated_header(amalgamated)
+
+    # Create temp package directory
+    sdk_dir = os.path.join(BUILD_DIR, "sdk-pkg")
+    if os.path.exists(sdk_dir):
+        shutil.rmtree(sdk_dir)
+    os.makedirs(sdk_dir)
+
+    shutil.copy2(lib_path, sdk_dir)
+    cprint(f"  Packaged: {lib_name}", Color.CYAN)
+    if os.path.exists(amalgamated):
+        shutil.copy2(amalgamated, sdk_dir)
+        cprint(f"  Packaged: ltgui.h", Color.CYAN)
+
+    # Version from git
+    version = subprocess.run(
+        ["git", "describe", "--tags", "--always"],
+        capture_output=True, text=True, cwd=SCRIPT_DIR
+    ).stdout.strip()
+    if not version:
+        import datetime
+        version = datetime.date.today().strftime("%Y%m%d")
+
+    archive_basename = f"ltgui-{version}-sdk"
+
+    if fmt == "zip":
+        archive_path = shutil.make_archive(
+            os.path.join(BUILD_DIR, archive_basename), "zip", sdk_dir)
+    else:
+        archive_path = shutil.make_archive(
+            os.path.join(BUILD_DIR, archive_basename), "gztar", sdk_dir)
+
+    shutil.rmtree(sdk_dir)
+
+    cprint(f"Created {archive_path}", Color.GREEN, bold=True)
+
+# --- cmd_watch ---
+def _get_watched_files():
+    """Collect all .cpp, .mm, .h files for watching."""
+    files = []
+    for base in [SRC_DIR, INCLUDE_DIR, EXAMPLES_DIR, APP_DIR, TEST_DIR]:
+        if not os.path.exists(base):
+            continue
+        for root, dirs, filenames in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in (".git", "__pycache__")]
+            for f in filenames:
+                if f.endswith((".cpp", ".h", ".mm")):
+                    files.append(os.path.join(root, f))
+    return sorted(files)
+
+def cmd_watch(positional, flags):
+    """Watch files and auto-rebuild on changes."""
+    import time as _time
+
+    target = positional[1] if len(positional) > 1 else None
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
+    check_platform_clean(compiler)
+    platform = detect_platform()
+    is_release = len(positional) >= 2 and positional[1] == "release"
+
+    def do_build():
+        lib_path = build_lib(platform, is_release, compiler, is_msvc)
+        if not lib_path:
+            return False
+        if target and target != "release":
+            app_src = os.path.join(APP_DIR, target + ".cpp")
+            ex_src = os.path.join(EXAMPLES_DIR, target + ".cpp")
+            if os.path.exists(app_src):
+                return build_app(target, platform, is_release, lib_path, compiler, is_msvc)
+            elif os.path.exists(ex_src):
+                return build_example(target, platform, is_release, lib_path, compiler, is_msvc)
+            else:
+                cprint(f"Target '{target}' not found.", Color.RED)
+                return False
+        else:
+            ok = True
+            ok = build_apps(platform, is_release, lib_path, compiler, is_msvc) and ok
+            ok = build_examples(platform, is_release, lib_path, compiler, is_msvc) and ok
+            return ok
+
+    cprint("Watch mode: performing initial build...", Color.BLUE, bold=True)
+    do_build()
+    _write_compile_commands()
+
+    watched = _get_watched_files()
+    mtimes = {}
+    for f in watched:
+        try:
+            mtimes[f] = os.path.getmtime(f)
+        except OSError:
+            pass
+
+    cprint(f"\nWatching ({len(watched)} files)... Press Ctrl+C to stop.", Color.MAGENTA, bold=True)
+
+    try:
+        while True:
+            _time.sleep(1.0)
+            changed = []
+            for f in watched:
+                try:
+                    current = os.path.getmtime(f)
+                    if current != mtimes.get(f):
+                        changed.append(f)
+                        mtimes[f] = current
+                except OSError:
+                    pass
+
+            # Check for new files
+            current_watched = _get_watched_files()
+            new_files = [f for f in current_watched if f not in mtimes]
+            if new_files:
+                changed.extend(new_files)
+                for f in new_files:
+                    try:
+                        mtimes[f] = os.path.getmtime(f)
+                    except OSError:
+                        pass
+                watched = current_watched
+
+            if changed:
+                cprint(f"\nDetected {len(changed)} file change(s):", Color.YELLOW, bold=True)
+                for f in changed[:10]:
+                    cprint(f"  {os.path.relpath(f, SCRIPT_DIR)}", Color.CYAN)
+                if len(changed) > 10:
+                    cprint(f"  ... and {len(changed) - 10} more", Color.CYAN)
+
+                cprint("Rebuilding...", Color.BLUE, bold=True)
+                do_build()
+                _write_compile_commands()
+                cprint(f"\nWatching ({len(watched)} files)... Press Ctrl+C to stop.", Color.MAGENTA, bold=True)
+    except KeyboardInterrupt:
+        cprint("\n\nWatch mode stopped.", Color.YELLOW)
+
+# --- cmd_debug ---
+def _resolve_debugger(platform):
+    """Find the best available debugger for a platform."""
+    if platform == "windows":
+        for exe in ["cdb", "lldb", "gdb"]:
+            path = shutil.which(exe)
+            if path:
+                return (path, ["-c", "g"] if exe == "gdb" else [])
+        return (None, [])
+    elif platform == "macos":
+        path = shutil.which("lldb")
+        return (path, []) if path else (None, [])
+    else:
+        for exe in ["gdb", "lldb"]:
+            path = shutil.which(exe)
+            if path:
+                return (path, ["-ex", "run"] if exe == "gdb" else [])
+        return (None, [])
+
+def cmd_debug(positional, flags):
+    """Build in debug mode and launch with a debugger."""
+    if len(positional) < 2:
+        cprint("Usage: python ltgui.py debug <name> [--compiler ...]", Color.YELLOW)
+        return
+
+    name = positional[1]
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
+    check_platform_clean(compiler)
+    platform = detect_platform()
+
+    cprint(f"Debug mode: building '{name}'...", Color.BLUE, bold=True)
+    lib_path = build_lib(platform, False, compiler, is_msvc)
+    if not lib_path:
+        return
+
+    app_src = os.path.join(APP_DIR, name + ".cpp")
+    ex_src = os.path.join(EXAMPLES_DIR, name + ".cpp")
+
+    if os.path.exists(app_src):
+        if not build_app(name, platform, False, lib_path, compiler, is_msvc):
+            return
+    elif os.path.exists(ex_src):
+        if not build_example(name, platform, False, lib_path, compiler, is_msvc):
+            return
+    else:
+        cprint(f"Program '{name}' not found in app/ or examples/", Color.RED)
+        return
+
+    debugger, debug_args = _resolve_debugger(platform)
+    if not debugger:
+        cprint("No debugger found for this platform. Install gdb or lldb.", Color.RED)
+        return
+
+    exe_name = name + (".exe" if platform == "windows" else "")
+    exe_path = os.path.join(BUILD_DIR, exe_name)
+
+    cprint(f"Launching debugger: {debugger}", Color.MAGENTA, bold=True)
+    subprocess.run([debugger] + debug_args + [exe_path])
+
+# --- cmd_profile ---
+def cmd_profile(positional, flags):
+    """Build with profiling flags and run."""
+    if len(positional) < 2:
+        cprint("Usage: python ltgui.py profile <name> [--compiler ...]", Color.YELLOW)
+        return
+
+    name = positional[1]
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
+    check_platform_clean(compiler)
+    platform = detect_platform()
+
+    if is_msvc:
+        cprint("Profiling: MSVC only supports /PROFILE linker flag.", Color.YELLOW)
+        cprint("  Consider using 'clang' compiler for better profiling support.", Color.YELLOW)
+
+    cprint(f"Profile mode: building '{name}' with profiling flags...", Color.BLUE, bold=True)
+
+    global _PROFILE_BUILD
+    _PROFILE_BUILD = True
+    lib_path = build_lib(platform, False, compiler, is_msvc)
+    _PROFILE_BUILD = False
+
+    if not lib_path:
+        return
+
+    app_src = os.path.join(APP_DIR, name + ".cpp")
+    ex_src = os.path.join(EXAMPLES_DIR, name + ".cpp")
+
+    if os.path.exists(app_src):
+        ok = build_app(name, platform, False, lib_path, compiler, is_msvc)
+    elif os.path.exists(ex_src):
+        ok = build_example(name, platform, False, lib_path, compiler, is_msvc)
+    else:
+        cprint(f"Program '{name}' not found in app/ or examples/", Color.RED)
+        return
+
+    if not ok:
+        return
+
+    exe_name = name + (".exe" if platform == "windows" else "")
+    exe_path = os.path.join(BUILD_DIR, exe_name)
+
+    cprint(f"\nRunning {exe_name} (profiling)...\n", Color.MAGENTA, bold=True)
+    subprocess.run([exe_path])
+
+    if platform != "windows" and os.path.exists("gmon.out"):
+        cprint(f"\nGenerated gmon.out. View with:", Color.GREEN)
+        cprint(f"  gprof {exe_path} gmon.out", Color.CYAN)
+
 def print_usage():
     cprint("ltgui build system", Color.BLUE, bold=True)
     print("Usage: python ltgui.py <command> [options]")
     print()
-    print("Commands:")
+    cprint("Commands:", Color.WHITE, bold=True)
     print("  build [release]     Build static library, apps, and examples")
     print("  clean               Remove build/ directory")
     print("  run <name>          Build and run an app or example")
     print("  test                Build and run all tests")
+    print("  install             Install library + headers to system directories")
+    print("  package             Package the SDK into a distributable archive")
+    print("  fmt                 Run clang-format on all source files")
+    print("  lint                Run clang-tidy on all source files")
+    print("  new <type> <name>   Scaffold a widget, example, or app")
+    print("  info                Display project structure and statistics")
+    print("  watch [name]        Watch files and auto-rebuild on changes")
+    print("  debug <name>        Build (debug) and launch with a debugger")
+    print("  profile <name>      Build with profiling flags and run")
     print()
-    print("Options:")
+    cprint("Build Options:", Color.WHITE, bold=True)
     print("  --compiler <val>    clang (default), msvc, gcc, or custom path")
     print("  --example <name>    Build only this example (with 'build')")
     print("  --app <name>        Build only this app (with 'build')")
     print("  --dll <dir>         Build shared library (.dll/.so/.dylib) + headers to dir")
+    print("  --jobs <N> / -j N   Parallel compilation jobs (default: CPU count)")
+    print("  --verbose           Show full compiler output")
+    print("  --json              Machine-readable JSON output for CI")
     print()
-    print("Examples:")
+    cprint("Install/Package Options:", Color.WHITE, bold=True)
+    print("  --prefix <dir>      Install prefix (default: /usr/local or %ProgramFiles%\\ltgui)")
+    print("  --format <fmt>      Package format: zip or tar.gz (default: auto-detect)")
+    print()
+    cprint("Examples:", Color.WHITE, bold=True)
     print("  python ltgui.py build")
-    print("  python ltgui.py build --compiler msvc")
+    print("  python ltgui.py build --compiler msvc -j 8")
     print("  python ltgui.py build release --compiler gcc")
     print("  python ltgui.py build --compiler /usr/bin/g++-13 --example hello")
     print("  python ltgui.py build --dll ./sdk")
+    print("  python ltgui.py build --verbose")
     print("  python ltgui.py run demo --compiler gcc")
+    print("  python ltgui.py new widget MyButton")
+    print("  python ltgui.py watch")
+    print("  python ltgui.py watch demo")
+    print("  python ltgui.py debug main")
+    print("  python ltgui.py profile main")
+    print("  python ltgui.py info")
+    print("  python ltgui.py fmt")
+    print("  python ltgui.py lint")
+    print("  python ltgui.py install --prefix /opt/ltgui")
+    print("  python ltgui.py package --format tar.gz")
 
 def main():
+    global _VERBOSE, _JSON_MODE, _JOBS, _COMPILE_COMMANDS
+
     args = sys.argv[1:]
     positional, flags = parse_flags(args)
+
+    # Global flags (processed before command dispatch)
+    _VERBOSE = flags.pop("verbose", False) is not False
+    _JSON_MODE = flags.pop("json", False) is not False
+
+    jobs_str = flags.pop("jobs", None) or flags.pop("j", None)
+    if jobs_str:
+        try:
+            _JOBS = int(jobs_str)
+        except ValueError:
+            cprint(f"Invalid --jobs value: {jobs_str}", Color.RED)
+            sys.exit(1)
 
     if not positional:
         print_usage()
         return
 
     cmd = positional[0]
-    if cmd == "build":
-        cmd_build(positional, flags)
-    elif cmd == "clean":
-        cmd_clean(positional, flags)
-    elif cmd == "run":
-        cmd_run(positional, flags)
-    elif cmd == "test":
-        cmd_test(positional, flags)
+
+    # JSON mode and watch mode are incompatible — watch output is streaming
+    if cmd == "watch" and _JSON_MODE:
+        _JSON_MODE = False
+
+    start_time = time.time()
+
+    dispatch = {
+        "build":   cmd_build,
+        "clean":   cmd_clean,
+        "run":     cmd_run,
+        "test":    cmd_test,
+        "install": cmd_install,
+        "package": cmd_package,
+        "fmt":     cmd_fmt,
+        "lint":    cmd_lint,
+        "new":     cmd_new,
+        "info":    cmd_info,
+        "watch":   cmd_watch,
+        "debug":   cmd_debug,
+        "profile": cmd_profile,
+    }
+
+    handler = dispatch.get(cmd)
+    if handler:
+        try:
+            handler(positional, flags)
+            json_event("complete", command=cmd, status="success",
+                       duration=round(time.time() - start_time, 3))
+        except SystemExit:
+            json_event("complete", command=cmd, status="error",
+                       duration=round(time.time() - start_time, 3))
+            raise
+        except Exception as e:
+            json_event("complete", command=cmd, status="error",
+                       error=str(e),
+                       duration=round(time.time() - start_time, 3))
+            raise
     elif cmd in ("-h", "--help", "help"):
         print_usage()
     else:

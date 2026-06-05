@@ -5,12 +5,36 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build Commands
 
 ```bash
-# Python build script (original)
+# Python build script (primary)
 python ltgui.py build               # Debug build (clang++ -g -O0)
 python ltgui.py build release       # Release build (clang++ -O2 -DNDEBUG)
+python ltgui.py build -j 4          # Parallel build with 4 jobs
+python ltgui.py build --verbose     # Show full compiler output
+python ltgui.py build --json        # Machine-readable JSON output for CI
+python ltgui.py build --dll ./sdk   # Build shared library + headers into sdk/
 python ltgui.py run <name>          # Build + run from examples/ or app/
 python ltgui.py clean               # Remove build/ directory
 python ltgui.py test                # Build and run all tests
+
+# Development helpers
+python ltgui.py info                # Show project structure and statistics
+python ltgui.py watch               # Watch files and auto-rebuild on changes
+python ltgui.py watch <name>        # Watch + auto-run a specific target
+python ltgui.py debug <name>        # Build (debug) + launch with gdb/lldb
+python ltgui.py profile <name>      # Build with -pg profiling flags + run
+
+# Code quality
+python ltgui.py fmt                 # Run clang-format on all source files
+python ltgui.py lint                # Run clang-tidy on all source files
+
+# Scaffolding
+python ltgui.py new widget <name>   # Generate widget .h + .cpp boilerplate
+python ltgui.py new example <name>  # Generate example .cpp boilerplate
+python ltgui.py new app <name>      # Generate app .cpp boilerplate
+
+# Distribution
+python ltgui.py install --prefix /opt/ltgui  # Install lib + headers
+python ltgui.py package --format zip         # Package SDK as archive
 
 # CMake (alternative)
 cmake -B build -DCMAKE_BUILD_TYPE=Debug

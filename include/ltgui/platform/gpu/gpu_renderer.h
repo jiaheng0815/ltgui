@@ -31,7 +31,7 @@ struct DrawCmd {
     float radius = 0;   // for rounded rect / ellipse
     float lineWidth = 1; // for stroke / line
     int texId = -1;     // -1 = solid color, >=0 = texture
-    int sortKey = 0;    // computed: (texId << 16) | (colorHash & 0xFFFF)
+    unsigned int sortKey = 0; // (texId << 16) | (colorHash & 0xFFFF); unsigned avoids UB on shift
     Point p1, p2;       // for DrawLine
 };
 
