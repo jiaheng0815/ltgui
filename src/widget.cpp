@@ -103,6 +103,14 @@ void Widget::scheduleRelayout() {
         }
         ancestor = ancestor->parent();
     }
+    // Fallback: if no ancestor has a Layout, at minimum resize this widget
+    // based on its new size hint so content changes like setText() are visible.
+    // Without this, widgets in layout-less trees would stay at zero size.
+    Size hint = sizeHint();
+    if (!hint.isEmpty() && (geometry_.width != hint.width || geometry_.height != hint.height)) {
+        Rect newGeo(geometry_.x, geometry_.y, hint.width, hint.height);
+        setGeometry(newGeo);
+    }
     needsLayout_ = false;
 }
 

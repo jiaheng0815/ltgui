@@ -101,12 +101,14 @@ int Application::run() {
         // Use at least 1ms to avoid busy-wait, at most 500ms to stay responsive
         double interval = (wakeMs <= 0) ? 0.001 : (wakeMs / 1000.0);
 
-        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                            untilDate:[NSDate dateWithTimeIntervalSinceNow:interval]
-                               inMode:NSDefaultRunLoopMode
-                              dequeue:YES];
-        if (event) {
-            [NSApp sendEvent:event];
+        @autoreleasepool {
+            NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                untilDate:[NSDate dateWithTimeIntervalSinceNow:interval]
+                                   inMode:NSDefaultRunLoopMode
+                                  dequeue:YES];
+            if (event) {
+                [NSApp sendEvent:event];
+            }
         }
         processEvents();
     }
@@ -134,13 +136,18 @@ void Application::processEvents() {
     // We copy the timer list because a timer callback can:
     //   1. stop() / destroy itself (removes from timers_)
     //   2. start new timers (adds to timers_)
-    //   3. stop another timer (removes from timers_)
+    //   3. destroy another timer (removes from timers_, dangling snapshot ptr)
     // All of these would invalidate iterators or skip entries if we
     // iterated the live vector directly.
+    //
+    // The snapshot prevents double-tick from re-entrant vector mutations,
+    // but we must ALSO verify each pointer is still registered in the live
+    // timers_ vector before dereferencing — a callback may have destroyed
+    // a different Timer object, leaving a dangling pointer in the snapshot.
     auto timersSnapshot = timers_;
     for (auto* t : timersSnapshot) {
-        // Only tick if still active (not stopped by a previous timer's callback)
-        if (t->isActive()) {
+        // Guard: only tick if still registered and active
+        if (std::find(timers_.begin(), timers_.end(), t) != timers_.end() && t->isActive()) {
             t->tick(now);
         }
     }

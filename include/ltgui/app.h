@@ -35,6 +35,13 @@ public:
     void quit();
     void processEvents();
 
+    // Single-frame tick for embedding into external event loops.
+    // Pumps pending platform events, ticks timers, and drives animations.
+    // Pass timeoutMs=0 to poll without blocking; pass >0 to block up to
+    // that many milliseconds waiting for the next event.
+    // Returns false if the application should exit (WM_QUIT received, etc.).
+    bool tick(int timeoutMs = 0);
+
     // Returns milliseconds until the next timer fires, or INT64_MAX if idle.
     // Platform event loops use this to compute the correct blocking timeout.
     int64_t nextTimerWakeupMs() const;
