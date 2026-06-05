@@ -50,6 +50,58 @@ Tests use [doctest](https://github.com/doctest/doctest) (vendored at `vendor/doc
 - **Event delivery**: override `handleEvent(Event&)` and return `true` if consumed, `false` for default dispatch (bubble to parent). MouseDown is targeted (only the child under cursor). MouseUp/MouseMove are broadcast so widgets can clear hover states.
 - **Hit testing**: override `hitTest(Point)` to return the deepest child at a given coordinate, or `this` if no child matches.
 - **Focus**: call `claimFocus()` to request keyboard focus. `Window` tracks one `focusWidget_`. Before dereferencing the focus pointer, `validateFocusWidget()` checks it's still in this window's tree.
-- **Theme global**: `currentTheme()` returns the active `Theme` struct; `setTheme()` sets it and triggers repaint of all windows.
+- **Theme global**: `ThemeManager::instance().currentTheme()` returns the active `Theme` struct; `setTheme()` / `ThemeManager::instance().setTheme()` sets it, emits `onThemeChanged` signal, and repaints all windows. Six presets: Light, Dark, DarkBlue, HighContrast, Solarized, Nord. Theme struct has 28 color fields.
 - **Widget type check**: use `widget->widgetType() == WidgetType::RadioButton` (or any other type) instead of `dynamic_cast` or ad-hoc virtual methods like the old `isRadioButton()`.
 - **Logging**: use `LOG_INFO("category", "format", ...)`, `LOG_ERROR("category", "format", ...)`, etc. from `log.h`. Categories include `"Window"`, `"GPU"`, `"D3D11"`, `"GL"`. In release builds (`-DNDEBUG`), only `Warn` and `Error` levels print.
+- **Layout relayout**: after content changes (setText, etc.), call `scheduleRelayout()` to walk up to the nearest layout-bearing ancestor and re-lay it out. This ensures widgets resize when text changes.
+- **Effective geometry**: `effectiveGeometry()` returns the widget's hit-test area in **local** coordinates (origin 0,0). Callers must `translated()` by child position before comparing against parent-space coordinates.
+- **FontAtlas dynamic sizing**: TTF data is stored once per (family,weight,style) with size=0. Size-specific caches are created on demand via `ensureFontLoaded()`. Widgets MUST call `canvas->setFont(style().font)` before `canvas->measureText()`.
+
+## New Features (2026-06)
+
+### Animation (`animation.h`)
+- 30+ Robert Penner easing functions: Quad/Cubic/Quart/Quint/Sine/Expo/Circ/Back/Elastic/Bounce × In/Out/InOut, plus StepStart/StepEnd
+- `AnimatedFloat` extended with `onFinished` signal, `setLoop`, `setRepeatCount`, `setYoyo`
+- `WidgetAnimation` — animate any value with duration/easing/delay, play/pause/stop
+- `KeyframeAnimation` — keyframe timeline with per-segment easing
+- `AnimationManager` drives registered animations each tick
+
+### Internationalization (`i18n.h`)
+- `Locale` — language/country/variant, parse from "zh-CN" strings
+- `PluralRules::formIndex()` — CLDR plural rules for 20+ languages (en/zh/ru/ar/pl/cs/ro/lt/lv/mt/sl/ga/cy)
+- `TranslationTable` — key→value maps with plural form support; loads from flat JSON
+- `I18n` — singleton: `setLocale()`, `tr(key)`, `tr(key, n)` for plurals, `onLocaleChanged` signal
+- JSON format: `{"ok":"确定","files":["zero","one","two","few","many","other"]}`
+
+### Dialog (`widgets/dialog.h`)
+- `Dialog` — modal base class: `exec()` inner event loop, semi-transparent overlay, fade-in animation, Escape to cancel
+- `MessageBox` — `show()` static method, Icon (Info/Warning/Error/Question), button flags (OK/Cancel/Yes/No)
+- `InputDialog` — `getText()` static method, Enter to confirm
+- All dialogs position a content panel internally with BoxLayout — add child widgets to `panel_`
+
+### MenuBar (`widgets/menubar.h`)
+- `MenuItem` extended: `shortcut` display, `checkable` + `checked`, `radio` + `radioGroup`, `submenu` vector
+- Keyboard navigation: Left/Right switch menus, Up/Down move items, Enter activates, Escape closes
+- `setItemShortcut()`, `setItemCheckable()`, `setItemChecked()`, `setItemRadio()`
+- `addSubmenu()` / `addSubItem()` for nested submenus
+
+### TableView (`widgets/tableview.h`)
+- `TableModel` — virtual data source (rowCount/columnCount/cellText)
+- `SimpleTableModel` — in-memory rows×cols with `sort()` and `addRow()`/`removeRow()`
+- `TableView` — column headers, sort indicators (▲▼), resizable columns (drag edge), striped rows, row selection, scroll wheel
+
+### Clipboard (`clipboard.h`)
+- `ClipboardData` — multi-format container: text, HTML, RGBA image, file paths
+- `Clipboard` — static API: `getText()`, `setText()`, `getData()`, `setData()`, `availableFormats()`
+- Platform backends: Win32 `CF_UNICODETEXT` (existing), X11 `CLIPBOARD` atom (existing)
+
+### FileDialog (`widgets/filedialog.h`)
+- Inherits `Dialog`. Modes: OpenFile, OpenMultiple, SaveFile, SelectFolder
+- `FileFilter` with name+pattern. Win32 FindFirstFile/FindNextFile directory scanning.
+- Custom UI: path bar (TextBox), file list (ListBox), filter combo (ComboBox), Open/Cancel buttons
+
+### Drag & Drop (`dragdrop.h`)
+- `DragData` — MIME-typed byte blobs: `setText()`, `setFiles()`, `hasFormat()`, `data()`
+- `DragSource` — attach to widget: `setDragData()`, `addMimeType()`
+- `DropTarget` — attach to widget: `setAcceptedMimeTypes()`, `onDrop()`, `onDragOver()`
+- Event types: `DragEnter`, `DragMove`, `DragLeave`, `DragDrop`
