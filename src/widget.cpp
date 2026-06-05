@@ -29,6 +29,16 @@ Widget* Widget::addChild(std::unique_ptr<Widget> child) {
     raw->needsLayout_ = true;
     children_.push_back(std::move(child));
     invalidateSizeHint();
+
+    // If we have no layout, give this child a default size based on its
+    // sizeHint, so widgets like Label aren't stuck at {0,0,0,0} rendering
+    // nothing.  The caller can still override with setGeometry() later.
+    if (!layout_ && raw->geometry().isEmpty()) {
+        Size hint = raw->sizeHint();
+        if (!hint.isEmpty())
+            raw->setGeometry(Rect(0, 0, hint.width, hint.height));
+    }
+
     return raw;
 }
 
@@ -66,18 +76,28 @@ Rect Widget::absoluteRect() const {
 
 void Widget::setGeometry(const Rect& rect) {
     if (geometry_ != rect) {
-        bool sizeChanged = (geometry_.width != rect.width ||
-                            geometry_.height != rect.height);
         geometry_ = rect;
         if (layout_) {
             layout_->layout(this);
         }
-        // If our size changed, the parent layout may need to reallocate space
-        if (sizeChanged && parent_ && parent_->layout()) {
-            invalidateSizeHint();
-            parent_->layout()->layout(parent_);
-        }
     }
+}
+
+void Widget::scheduleRelayout() {
+    // Walk up to the nearest ancestor that has a layout, and re-lay it out
+    // so children get resized after content changes (e.g. setText).
+    // Guard against re-entrancy: if any ancestor is already inside a layout
+    // pass (detected by needsLayout_ being cleared mid-layout), bail out.
+    Widget* ancestor = parent_;
+    while (ancestor) {
+        if (ancestor->layout() && !ancestor->geometry().isEmpty()) {
+            ancestor->layout()->layout(ancestor);
+            ancestor->needsLayout_ = false;
+            return;
+        }
+        ancestor = ancestor->parent();
+    }
+    needsLayout_ = false;
 }
 
 Size Widget::sizeHint() const {
@@ -139,6 +159,7 @@ void Widget::raiseToTop() {
 
 void Widget::propagateWindow(Window* window) {
     window_ = window;
+    sizeHintDirty_ = true;  // canvas availability changed — recompute next time
     for (auto& child : children_) {
         child->propagateWindow(window);
     }
@@ -272,15 +293,18 @@ bool Widget::handleEvent(Event& event) {
         Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
         for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
             Widget* child = it->get();
-            if (child->visible_ && child->enabled_ &&
-                child->effectiveGeometry().contains(localPos)) {
-                Point savedPos = event.pos;
-                event.pos = localPos;
-                bool handled = child->handleEvent(event);
-                event.pos = savedPos;
-                if (handled) {
-                    event.accepted = true;
-                    return true;
+            if (child->visible_ && child->enabled_) {
+                Rect childEff = child->effectiveGeometry().translated(
+                    child->geometry_.x, child->geometry_.y);
+                if (childEff.contains(localPos)) {
+                    Point savedPos = event.pos;
+                    event.pos = localPos;
+                    bool handled = child->handleEvent(event);
+                    event.pos = savedPos;
+                    if (handled) {
+                        event.accepted = true;
+                        return true;
+                    }
                 }
             }
         }

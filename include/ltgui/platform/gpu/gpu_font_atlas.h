@@ -75,7 +75,12 @@ public:
 
     // Distance from baseline to top of the line (in pixels).
     // Returns 0 if the font is not loaded.
-    float getAscent(const Font& fontDesc) const;
+    float getAscent(const Font& fontDesc);
+
+    // Ensure the given font (or its system-default fallback) is loaded
+    // at the requested size.  Creates a size-specific cache from stored
+    // TTF data if necessary.
+    void ensureFontLoaded(const Font& fontDesc);
 
 private:
 #ifdef LTGUI_HAS_STB_TRUETYPE
@@ -107,6 +112,10 @@ private:
     TextureManager* texMgr_;
     int atlasW_, atlasH_;
 
+    // Raw TTF data keyed by (family, weight, style) — size is ignored
+    // so we can rasterise at any requested size from the same blob.
+    std::unordered_map<Font, std::vector<uint8_t>> ttfData_;
+    // Size-specific font caches created on demand from ttfData_
     std::unordered_map<Font, FontCache> loadedFonts_;
     std::unordered_map<uint64_t, GlyphEntry> glyphCache_;
     std::vector<AtlasPage> pages_;

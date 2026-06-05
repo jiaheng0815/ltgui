@@ -65,12 +65,17 @@ public:
     int width() const { return geometry_.width; }
     int height() const { return geometry_.height; }
 
-    // Hit test area — includes children's extended areas (e.g., ComboBox dropdown)
+    // Hit test area — returns rect in this widget's local coordinates
+    // (origin at 0,0). Callers must translate by the widget's position
+    // within its parent when comparing against parent-space coordinates.
     virtual Rect effectiveGeometry() const {
-        Rect r = geometry_;
+        Rect r = {0, 0, geometry_.width, geometry_.height};
         for (auto& child : children_) {
-            if (child->isVisible())
-                r = r.united(child->effectiveGeometry());
+            if (child->isVisible()) {
+                Rect childArea = child->effectiveGeometry();
+                childArea = childArea.translated(child->geometry_.x, child->geometry_.y);
+                r = r.united(childArea);
+            }
         }
         return r;
     }
@@ -93,6 +98,7 @@ public:
     void raiseToTop();
 
     void invalidateSizeHint() { sizeHintDirty_ = true; if (parent_) parent_->invalidateSizeHint(); }
+    void scheduleRelayout();
     Window* window() const { return window_; }
     void setWindow(Window* window);
     void claimFocus();

@@ -17,6 +17,7 @@ Button::Button(const std::string& text, Widget* parent)
 void Button::setText(const std::string& text) {
     text_ = text;
     invalidateSizeHint();
+    scheduleRelayout();
     update();
 }
 
@@ -24,6 +25,7 @@ Size Button::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
     if (auto* win = window()) {
         if (auto* c = win->canvas()) {
+            c->setFont(style().font);
             Size textSize = c->measureText(text_);
             setCachedSizeHint({textSize.width + style().paddingHorz() + 24,
                                textSize.height + style().paddingVert() + 10});

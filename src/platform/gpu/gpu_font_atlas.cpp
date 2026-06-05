@@ -16,15 +16,21 @@ FontAtlas::~FontAtlas() {
 
 bool FontAtlas::loadFont(const Font& fontDesc, const uint8_t* ttfData, int ttfSize) {
 #ifdef LTGUI_HAS_STB_TRUETYPE
+    // Store the raw TTF blob keyed by (family, weight, style) so we can
+    // rasterise at any requested size later.  Must store BEFORE using the
+    // data pointer, since stbtt_fontinfo references it and it must outlive
+    // the font cache.
+    Font ttfKey(fontDesc.family, 0, fontDesc.weight, fontDesc.style);
+    auto& stored = ttfData_[ttfKey];
+    stored.assign(ttfData, ttfData + ttfSize);
+
     if (loadedFonts_.count(fontDesc)) return true;
 
     FontCache cache;
-    cache.ttfData.assign(ttfData, ttfData + ttfSize);
-
-    int offset = stbtt_GetFontOffsetForIndex(cache.ttfData.data(), 0);
+    int offset = stbtt_GetFontOffsetForIndex(stored.data(), 0);
     if (offset < 0) return false;
 
-    if (!stbtt_InitFont(&cache.info, cache.ttfData.data(), offset)) return false;
+    if (!stbtt_InitFont(&cache.info, stored.data(), offset)) return false;
 
     cache.scale = stbtt_ScaleForPixelHeight(&cache.info, (float)fontDesc.size);
     stbtt_GetFontVMetrics(&cache.info, &cache.ascent, &cache.descent, &cache.lineGap);
@@ -57,19 +63,21 @@ bool FontAtlas::loadFontFile(const Font& fontDesc, const char* ttfPath) {
 
 const GlyphEntry* FontAtlas::getGlyph(uint32_t codepoint, const Font& fontDesc) {
 #ifdef LTGUI_HAS_STB_TRUETYPE
+    // Ensure the font (or its system-default fallback) is loaded at this size.
+    // TTF data is stored once per (family,weight,style) and size-specific
+    // caches are created on demand by ensureFontLoaded.
+    ensureFontLoaded(fontDesc);
     auto fit = loadedFonts_.find(fontDesc);
     if (fit == loadedFonts_.end()) {
-        // Fall back to system default at the requested size if the
-        // exact font wasn't loaded (e.g. user asked for "Segoe UI" but
-        // only "Deng" was loaded from disk).
         Font fallback = Font::systemDefault(fontDesc.size);
         if (!(fallback == fontDesc)) {
+            ensureFontLoaded(fallback);
             fit = loadedFonts_.find(fallback);
         }
         if (fit == loadedFonts_.end()) return nullptr;
     }
 
-    uint64_t key = (fontKey(fontDesc) << 32) | codepoint;
+    uint64_t key = (fontKey(fit->first) << 32) | codepoint;
     auto git = glyphCache_.find(key);
     if (git != glyphCache_.end()) return &git->second;
 
@@ -135,10 +143,12 @@ const GlyphEntry* FontAtlas::getGlyph(uint32_t codepoint, const Font& fontDesc) 
 
 Size FontAtlas::measureText(const std::string& text, const Font& fontDesc) {
 #ifdef LTGUI_HAS_STB_TRUETYPE
+    ensureFontLoaded(fontDesc);
     auto fit = loadedFonts_.find(fontDesc);
     if (fit == loadedFonts_.end()) {
         Font fallback = Font::systemDefault(fontDesc.size);
         if (!(fallback == fontDesc)) {
+            ensureFontLoaded(fallback);
             fit = loadedFonts_.find(fallback);
         }
         if (fit == loadedFonts_.end()) return {0, 0};
@@ -176,19 +186,56 @@ Size FontAtlas::measureText(const std::string& text, const Font& fontDesc) {
 #endif
 }
 
-float FontAtlas::getAscent(const Font& fontDesc) const {
+void FontAtlas::ensureFontLoaded(const Font& fontDesc) {
 #ifdef LTGUI_HAS_STB_TRUETYPE
+    if (loadedFonts_.count(fontDesc)) return;
+
+    // Look up raw TTF data by (family, weight, style) — ignore size in the key
+    Font ttfKey(fontDesc.family, 0, fontDesc.weight, fontDesc.style);
+    auto ttfIt = ttfData_.find(ttfKey);
+    if (ttfIt == ttfData_.end()) {
+        // Try system default family as a last resort
+        Font sysKey = Font::systemDefault(0);
+        sysKey.weight = fontDesc.weight;
+        sysKey.style  = fontDesc.style;
+        ttfIt = ttfData_.find(sysKey);
+        if (ttfIt == ttfData_.end()) {
+            // Try any loaded TTF data
+            if (!ttfData_.empty()) ttfIt = ttfData_.begin();
+            else return;
+        }
+    }
+
+    const uint8_t* data = ttfIt->second.data();
+    int dataSize = (int)ttfIt->second.size();
+
+    FontCache cache;
+    int offset = stbtt_GetFontOffsetForIndex(data, 0);
+    if (offset < 0) return;
+
+    if (!stbtt_InitFont(&cache.info, data, offset)) return;
+
+    cache.scale = stbtt_ScaleForPixelHeight(&cache.info, (float)fontDesc.size);
+    stbtt_GetFontVMetrics(&cache.info, &cache.ascent, &cache.descent, &cache.lineGap);
+    loadedFonts_[fontDesc] = std::move(cache);
+#else
+    (void)fontDesc;
+#endif
+}
+
+float FontAtlas::getAscent(const Font& fontDesc) {
+#ifdef LTGUI_HAS_STB_TRUETYPE
+    ensureFontLoaded(fontDesc);
     auto fit = loadedFonts_.find(fontDesc);
+    if (fit == loadedFonts_.end()) {
+        Font fallback = Font::systemDefault(fontDesc.size);
+        if (!(fallback == fontDesc)) {
+            ensureFontLoaded(fallback);
+            fit = loadedFonts_.find(fallback);
+        }
+    }
     if (fit != loadedFonts_.end()) {
         return fit->second.ascent * fit->second.scale;
-    }
-    // Fallback: try system default at requested size
-    Font fallback = Font::systemDefault(fontDesc.size);
-    if (!(fallback == fontDesc)) {
-        fit = loadedFonts_.find(fallback);
-        if (fit != loadedFonts_.end()) {
-            return fit->second.ascent * fit->second.scale;
-        }
     }
 #endif
     (void)fontDesc;

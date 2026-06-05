@@ -70,8 +70,7 @@ Size ComboBox::sizeHint() const {
 }
 
 Rect ComboBox::effectiveGeometry() const {
-    // Return local-coordinate rect (relative to parent) extended to cover dropdown
-    Rect r = geometry();
+    Rect r = {0, 0, geometry().width, geometry().height};
     if (dropdownOpen_ && !items_.empty()) {
         int dropH = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
         if (opensDownward_) {
@@ -203,11 +202,10 @@ void ComboBox::invalidateExtended() {
 
 bool ComboBox::closeIfClickOutside(const Point& absPos) {
     if (!dropdownOpen_) return false;
-    Rect base = absoluteRect();
     Rect eff = effectiveGeometry();
-    Rect absEff(base.x + (eff.x - geometry().x),
-                base.y + (eff.y - geometry().y),
-                eff.width, eff.height);
+    // effectiveGeometry is in local coords; translate to absolute
+    Rect base = absoluteRect();
+    Rect absEff = eff.translated(base.x, base.y);
     if (!absEff.contains(absPos)) {
         closeDropdown();
         return true;

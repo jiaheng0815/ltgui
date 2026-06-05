@@ -46,8 +46,8 @@ TEST_CASE("KeyModifier operators") {
     }
     SUBCASE("bitwise AND") {
         auto mod = KeyModifier::Shift | KeyModifier::Control;
-        CHECK((mod & KeyModifier::Shift) != 0);
-        CHECK((mod & KeyModifier::Alt) == 0);
+        CHECK(hasModifier(static_cast<int>(mod), KeyModifier::Shift));
+        CHECK(!hasModifier(static_cast<int>(mod), KeyModifier::Alt));
     }
 }
 

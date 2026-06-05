@@ -15,6 +15,7 @@ CheckBox::CheckBox(const std::string& text, Widget* parent)
 void CheckBox::setText(const std::string& text) {
     text_ = text;
     invalidateSizeHint();
+    scheduleRelayout();
     update();
 }
 
@@ -30,6 +31,7 @@ Size CheckBox::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
     if (auto* win = window()) {
         if (auto* c = win->canvas()) {
+            c->setFont(style().font);
             Size textSize = c->measureText(text_);
             setCachedSizeHint({textSize.width + 24 + style().paddingHorz(),
                                std::max(textSize.height, 16) + style().paddingVert()});
