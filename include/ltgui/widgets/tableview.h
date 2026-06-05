@@ -65,6 +65,7 @@ public:
     void onHeaderClicked(HeaderCallback cb) { headerCb_ = std::move(cb); }
 
     WidgetType widgetType() const override { return WidgetType::TableView; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
 protected:

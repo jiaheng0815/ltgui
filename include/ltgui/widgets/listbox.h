@@ -24,6 +24,7 @@ public:
     void onSelectionChanged(SelectionChangedCallback cb) { selectionCallback_ = std::move(cb); }
 
     WidgetType widgetType() const override { return WidgetType::ListBox; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
 protected:

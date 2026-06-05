@@ -19,6 +19,7 @@ public:
     Widget* currentContent() const;
 
     WidgetType widgetType() const override { return WidgetType::TabWidget; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
     void setGeometry(const Rect& rect) override;
 

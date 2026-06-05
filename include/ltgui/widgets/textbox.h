@@ -14,6 +14,7 @@ public:
     void setText(const std::string& text);
 
     WidgetType widgetType() const override { return WidgetType::TextBox; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
     // Multi-line mode

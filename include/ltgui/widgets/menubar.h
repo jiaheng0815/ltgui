@@ -28,6 +28,7 @@ public:
     void addSubSeparator(int menuIdx, int itemIdx, int subIdx);
 
     WidgetType widgetType() const override { return WidgetType::MenuBar; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
 protected:

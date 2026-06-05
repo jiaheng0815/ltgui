@@ -18,6 +18,7 @@ public:
     void onValueChanged(ValueChangedCallback cb) { valueChangedCallback_ = std::move(cb); }
 
     WidgetType widgetType() const override { return WidgetType::Slider; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
 protected:

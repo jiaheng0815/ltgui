@@ -17,6 +17,7 @@ public:
     void onClick(ClickCallback cb) { clickCallback_ = std::move(cb); }
 
     WidgetType widgetType() const override { return WidgetType::Button; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
 protected:

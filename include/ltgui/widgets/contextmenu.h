@@ -25,6 +25,7 @@ public:
     void dismiss();
 
     WidgetType widgetType() const override { return WidgetType::ContextMenu; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
 protected:

@@ -38,6 +38,7 @@ public:
     void onFinished(ResultCallback cb) { resultCallback_ = std::move(cb); }
 
     WidgetType widgetType() const override { return WidgetType::Dialog; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
     // Allow Window to detect and redirect events to the active dialog
@@ -77,6 +78,7 @@ public:
                              Icon icon = Icon::None);
 
     WidgetType widgetType() const override { return WidgetType::Dialog; }
+    bool canAcceptFocus() const override { return true; }
 
 protected:
     void paintSelf(NativeCanvas* canvas) override;
@@ -102,6 +104,7 @@ public:
                                const std::string& defaultText = "");
 
     WidgetType widgetType() const override { return WidgetType::Dialog; }
+    bool canAcceptFocus() const override { return true; }
 
 protected:
     bool handleEvent(Event& event) override;

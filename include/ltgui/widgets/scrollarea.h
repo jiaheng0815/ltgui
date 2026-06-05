@@ -13,6 +13,7 @@ public:
     Widget* contentWidget() const;
 
     WidgetType widgetType() const override { return WidgetType::ScrollArea; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
 protected:

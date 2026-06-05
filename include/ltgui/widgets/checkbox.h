@@ -19,6 +19,7 @@ public:
     void onToggled(ToggleCallback cb) { toggleCallback_ = std::move(cb); }
 
     WidgetType widgetType() const override { return WidgetType::CheckBox; }
+    bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
 protected:
