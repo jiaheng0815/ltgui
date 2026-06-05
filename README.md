@@ -12,18 +12,18 @@ Zero dependencies beyond platform APIs.
 
 ## Features
 
-- **Cross-platform** — Windows (GDI+), Linux (X11+Xft), macOS (Cocoa)
+- **Cross-platform** — Windows (GDI+/D3D11), Linux (X11+Xft/GLES3), macOS (Cocoa)
 - **GPU acceleration** — D3D11 (Windows) / OpenGL ES 3.0 (Linux), transparent fallback to CPU
-- **18 built-in widgets** — Button, Label, TextBox, CheckBox, RadioButton, Slider, ListBox, ScrollArea, ComboBox, Image, ProgressBar, TabWidget, Tooltip, TreeView, ContextMenu, **MenuBar**
+- **20 built-in widgets** — Button, Label, TextBox, CheckBox, RadioButton, Slider, ListBox, ScrollArea, ComboBox, Image, ProgressBar, TabWidget, Tooltip, TreeView, ContextMenu, MenuBar, **TableView**, **Dialog/MessageBox/InputDialog**, **FileDialog**
 - **Retained widget tree** — `sizeHint()` → `setGeometry()` → `paint()` pipeline with hint caching
-- **Layout system** — `BoxLayout` (H/V), `GridLayout` with stretch factors
-- **Theme system** — Light/Dark themes, global toggle with auto-repaint
-- **Animation** — `AnimatedFloat` with Linear/EaseIn/EaseOut/EaseInOut easing
+- **Layout system** — `BoxLayout` (H/V), `GridLayout` with stretch factors, auto-relayout via `scheduleRelayout()`
+- **Theme system** — 6 presets (Light/Dark/DarkBlue/HighContrast/Solarized/Nord), `ThemeManager` with change signal, 28 color fields, custom theme support
+- **Animation** — `AnimatedFloat` with 30+ Robert Penner easing functions, `WidgetAnimation`, `KeyframeAnimation`, loop/yoyo
 - **Dirty-rect painting** — only repaints changed areas
-- **Event system** — targeted MouseDown, broadcast MouseMove/MouseUp, focus management
+- **Event system** — targeted MouseDown, broadcast MouseMove/MouseUp, focus management, drag-drop events
 - **Widget type enum** — `widgetType()` replaces `dynamic_cast` for fast type checks
 - **Logging** — `LOG_INFO/ERROR/WARN/DEBUG` with category filtering, release-build level control
-- **GPU font atlas** — glyph caching with automatic system font detection
+- **GPU font atlas** — glyph caching with dynamic on-demand size rasterization from stored TTF data
 - **UTF-8** — encode/decode, codepoint navigation, surrogate rejection
 - **Timer** — `singleShot` and `interval` integrated with event loop
 - **Signal** — type-safe callback with `disconnect()` and `ScopedConnection` auto-cleanup
@@ -31,6 +31,9 @@ Zero dependencies beyond platform APIs.
 - **Cursor** — per-window cursor shape control (Arrow, IBeam, Wait, Hand, etc.)
 - **DPI scaling** — per-window DPI detection with global override
 - **Focus chain** — Tab/Shift+Tab navigation in tree order
+- **Internationalization** — `I18n` singleton, 20+ language plural rules, JSON translation files
+- **Clipboard** — multi-format (Text/HTML/Image/Files), platform abstraction
+- **Drag & Drop** — app-internal MIME-typed data transfer, `DragSource`/`DropTarget`
 - **CMake + Python** — dual build system
 
 ## Quick Start
@@ -55,7 +58,7 @@ python ltgui.py build --compiler clang
 # Release build
 python ltgui.py build release
 
-# Run tests (15 suites)
+# Run tests (17 suites)
 python ltgui.py test
 
 # CMake alternative
@@ -110,7 +113,12 @@ int main() {
 | `Tooltip` | Popup tooltip, static `show()` helper |
 | `TreeView` | Hierarchical tree with expand/collapse, selection |
 | `ContextMenu` | Right-click popup menu with separators |
-| `MenuBar` | Top-level menu bar with drop-down submenus |
+| `MenuBar` | Top-level menu bar with drop-down submenus, keyboard nav, shortcuts, checkable items |
+| `Dialog` | Modal dialog with overlay, fade-in animation, Escape to cancel |
+| `MessageBox` | Pre-built dialog: Info/Warning/Error/Question icons, OK/Cancel/Yes/No buttons |
+| `InputDialog` | Text input dialog with OK/Cancel, Enter to confirm |
+| `TableView` | Data table with sortable columns, resizable headers, row selection, virtual scrolling |
+| `FileDialog` | File open/save dialog with directory browsing and file filters |
 
 ---
 
@@ -197,36 +205,206 @@ if (widget->widgetType() == WidgetType::RadioButton) { ... }
 ## Theme & Style
 
 ```cpp
-// Switch theme — auto-repaints all windows
-setTheme(Theme::Dark());
+// Switch theme — auto-repaints all windows, emits onThemeChanged signal
+ThemeManager::instance().setTheme(Theme::Dark());
+// or: setTheme(Theme::Dark());
 
-// Custom theme
+// Available presets
+ThemeManager::instance().setThemeByName("Nord");
+ThemeManager::instance().setThemeByName("Solarized");
+// Built-in: Light, Dark, DarkBlue, HighContrast, Solarized, Nord
+
+// Custom theme (28 color fields)
 Theme t;
+t.name = "MyTheme";
 t.accent = Color(0, 140, 235);
 t.bgPrimary = Color(240, 240, 240);
-setTheme(t);
+t.dialogBg = Color(255, 255, 255);
+t.tableHeaderBg = Color(240, 240, 240);
+ThemeManager::instance().registerTheme("MyTheme", t);
+
+// Listen to theme changes
+ThemeManager::instance().onThemeChanged.connect([](const Theme& t) {
+    LOG_INFO("UI", "Theme changed to: %s", t.name.c_str());
+});
 
 // Per-widget style
 Style s;
 s.bgColor = Color::White;
 s.borderWidth = 1;
 s.borderRadius = 4;
-s.setPadding(8, 4);   // h, v (negative values clamped to 0)
+s.setPadding(8, 4);
 s.setMargin(4);
 widget->setStyle(s);
 ```
 
-Predefined theme colors: `bgPrimary`, `bgSecondary`, `bgTertiary`, `textPrimary`, `textSecondary`, `textDisabled`, `accent`, `accentHover`, `accentPressed`, `border`, `borderFocus`, `scrollbarTrack`, `scrollbarThumb`, `selectionBg`.
-
 ## Animation
 
 ```cpp
+// AnimatedFloat (30+ easing functions)
 AnimatedFloat opacity(0.0f);
-opacity.setTarget(1.0f, 300, Easing::EaseOut);  // 300ms
+opacity.setTarget(1.0f, 300, Easing::EaseOutBounce);
+opacity.setLoop(true);
+opacity.setYoyo(true);
+opacity.onFinished.connect([]{ LOG_INFO("UI", "Done!"); });
+float v = opacity.value();
 
-float v = opacity.value();  // interpolated each frame
+// WidgetAnimation — animate any value with callback
+WidgetAnimation anim;
+anim.setStartValue(0.0f);
+anim.setEndValue(100.0f);
+anim.setDuration(500);
+anim.setEasing(Easing::EaseOutCubic);
+anim.setValueCallback([&](float v) { widget->setX((int)v); });
+anim.onFinished.connect([]{ LOG_INFO("UI", "Animation complete"); });
+anim.play();
 
-// Easing: Linear, EaseIn, EaseOut, EaseInOut
+// KeyframeAnimation
+KeyframeAnimation kf;
+kf.addKeyframe({0.0f, 0.0f, Easing::EaseOut});
+kf.addKeyframe({0.5f, 1.0f, Easing::Linear});
+kf.addKeyframe({1.0f, 0.0f, Easing::EaseIn});
+kf.setDuration(1000);
+kf.setLoop(true);
+kf.setValueCallback([&](float v) { updateOpacity(v); });
+kf.play();
+
+// Easing: Linear, EaseIn/Out/InOut, Quad, Cubic, Quart, Quint,
+//         Sine, Expo, Circ, Back, Elastic, Bounce (each × In/Out/InOut),
+//         StepStart, StepEnd
+```
+
+## Dialog
+
+```cpp
+// MessageBox — modal, returns DialogResult
+DialogResult r = MessageBox::show(parent, "Save Changes?",
+    "Do you want to save before closing?",
+    (int)(DialogButton::Yes | DialogButton::No | DialogButton::Cancel),
+    MessageBox::Question);
+
+// InputDialog — modal, returns text
+std::string name = InputDialog::getText(parent,
+    "Enter Name", "Please enter your name:", "default");
+
+// Custom Dialog
+class MyDialog : public Dialog {
+    MyDialog(Widget* parent) : Dialog(parent) {
+        setTitle("Custom Dialog");
+        panelW_ = 400;
+        panelH_ = 200;
+        auto* btn = panel_->makeChild<Button>("OK");
+        btn->onClick([this]() { done(DialogResult::OK); });
+    }
+};
+MyDialog dlg(parent);
+if (dlg.exec() == DialogResult::OK) { /* handle */ }
+```
+
+## TableView
+
+```cpp
+// Create model and view
+auto model = std::make_shared<SimpleTableModel>(0, 3);
+model->addRow({"Alice", "Engineering", "2023"});
+model->addRow({"Bob", "Design", "2024"});
+model->addRow({"Carol", "Marketing", "2022"});
+
+auto* table = root->makeChild<TableView>();
+table->addColumn({"Name", 150});
+table->addColumn({"Department", 150});
+table->addColumn({"Year", 80, 50, true, false}); // minWidth=50, not sortable
+table->setModel(model);
+
+// Sort by clicking header, or programmatically
+table->setSortColumn(0, true);
+model->sort(0, true);
+
+// Selection
+table->onRowSelected([](int row) { LOG_INFO("UI", "Selected row %d", row); });
+int sel = table->selectedRow();
+
+// Column resize: drag edge between headers
+table->setColumnWidth(0, 200);
+```
+
+## Internationalization (i18n)
+
+```cpp
+// Setup
+I18n::instance().loadTableFromFile(Locale{"zh", "CN", ""}, "lang/zh-CN.json");
+I18n::instance().loadTableFromFile(Locale{"en", "US", ""}, "lang/en-US.json");
+I18n::instance().setLocale(Locale{"zh", "CN", ""});
+
+// Translate
+std::string t = I18n::instance().tr("dialog.ok");       // "确定"
+std::string p = I18n::instance().tr("files.count", 5);  // "%d 个文件"
+
+// Locale change notification
+I18n::instance().onLocaleChanged.connect([](const Locale& loc) {
+    LOG_INFO("UI", "Locale: %s", loc.toString().c_str());
+});
+
+// JSON translation file format:
+// {"ok":"确定","files":["zero","one","two","few","many","%d 个文件"]}
+```
+
+## Clipboard
+
+```cpp
+// Plain text
+Clipboard::setText("Hello World");
+std::string text = Clipboard::getText();
+
+// Rich data
+ClipboardData data;
+data.setText("Hello");
+data.setHtml("<b>Hello</b>");
+data.setImage(rgbaPixels, 64, 64);
+data.setFiles({"C:/path/file.txt"});
+Clipboard::setData(data);
+
+// Read
+ClipboardData read = Clipboard::getData();
+if (read.hasFormat(ClipboardFormat::Image)) {
+    int w = read.imageWidth(), h = read.imageHeight();
+    const uint8_t* pixels = read.imageData();
+}
+```
+
+## FileDialog
+
+```cpp
+FileDialog dlg(parent);
+dlg.setTitle("Open Image");
+dlg.setMode(FileDialogMode::OpenFile);
+dlg.addFilter({"Images", "*.png;*.jpg"});
+dlg.addFilter({"All Files", "*.*"});
+
+if (dlg.exec()) {
+    std::string path = dlg.selectedPath();
+    loadImage(path);
+}
+```
+
+## Drag & Drop
+
+```cpp
+// Make a widget draggable
+auto* source = root->makeChild<Label>("Drag me");
+DragSource dragSrc(source);
+dragSrc.addMimeType("text/plain");
+auto dragData = std::make_shared<DragData>();
+dragData->setText("Dragged text");
+dragSrc.setDragData(dragData);
+
+// Make a widget accept drops
+auto* target = root->makeChild<Label>("Drop here");
+DropTarget dropTgt(target);
+dropTgt.setAcceptedMimeTypes({"text/plain"});
+dropTgt.onDrop([](const DragData& data) {
+    LOG_INFO("UI", "Dropped: %s", data.text().c_str());
+});
 ```
 
 ## Layout
@@ -332,17 +510,21 @@ ltgui/
 │   ├── signal.h, log.h               # Utilities
 │   ├── geometry.h, color.h, font.h   # Primitives
 │   ├── utf8.h                        # UTF-8
+│   ├── i18n.h                        # Internationalization
+│   ├── clipboard.h                   # Clipboard
+│   ├── dragdrop.h                    # Drag & drop
 │   ├── canvas.h                      # Drawing
 │   ├── platform/{native_window,native_canvas,platform}.h
 │   ├── platform/win32/x11/cocoa/     # CPU backends
 │   ├── platform/gpu/                 # GPU renderer (D3D11, GLES3)
-│   └── widgets/                      # 18 widgets
+│   └── widgets/                      # 20 widgets
 ├── src/
+│   ├── i18n.cpp, clipboard.cpp, dragdrop.cpp
 │   ├── platform/{win32,x11,cocoa,gpu}/
 │   ├── widgets/                      # One .cpp per widget
 │   ├── widget.cpp, window.cpp, app.cpp, ... 
 │   └── timer.cpp
-├── test/                             # 15 doctest suites
+├── test/                             # 17 doctest suites
 ├── examples/                         # hello, demo
 └── app/                              # main
 ```
@@ -357,18 +539,18 @@ MIT
 
 ## 特性
 
-- **跨平台** — Windows (GDI+)，Linux (X11+Xft)，macOS (Cocoa)
+- **跨平台** — Windows (GDI+/D3D11)，Linux (X11+Xft/GLES3)，macOS (Cocoa)
 - **GPU 加速** — D3D11 (Windows) / OpenGL ES 3.0 (Linux)，失败透明回退 CPU 渲染
-- **18 个内置控件** — Button、Label、TextBox、CheckBox、RadioButton、Slider、ListBox、ScrollArea、ComboBox、Image、ProgressBar、TabWidget、Tooltip、TreeView、ContextMenu、**MenuBar**
+- **20 个内置控件** — Button、Label、TextBox、CheckBox、RadioButton、Slider、ListBox、ScrollArea、ComboBox、Image、ProgressBar、TabWidget、Tooltip、TreeView、ContextMenu、MenuBar、**TableView**、**Dialog/MessageBox/InputDialog**、**FileDialog**
 - **保留模式控件树** — `sizeHint()` → `setGeometry()` → `paint()` 管线，sizeHint 带缓存
-- **布局系统** — `BoxLayout`（水平/垂直）、`GridLayout`，支持拉伸因子
-- **主题系统** — 亮色/暗色主题，全局切换自动重绘
-- **动画** — `AnimatedFloat`，支持 Linear/EaseIn/EaseOut/EaseInOut 缓动
+- **布局系统** — `BoxLayout`（水平/垂直）、`GridLayout`，支持拉伸因子，`scheduleRelayout()` 自动重排
+- **主题系统** — 6 种预设 (Light/Dark/DarkBlue/HighContrast/Solarized/Nord)，`ThemeManager` 带变更信号，28 色字段，支持自定义主题
+- **动画** — `AnimatedFloat` 30+ 种 Robert Penner 缓动函数，`WidgetAnimation`、`KeyframeAnimation`，支持循环/往返
 - **脏矩形绘制** — 仅重绘变化区域
-- **事件系统** — MouseDown 定向投递，MouseMove/MouseUp 广播，焦点管理
+- **事件系统** — MouseDown 定向投递，MouseMove/MouseUp 广播，焦点管理，拖放事件
 - **控件类型枚举** — `widgetType()` 替代 `dynamic_cast`，O(1) 类型检查
 - **日志** — `LOG_INFO/ERROR/WARN/DEBUG`，支持分类过滤，Release 编译仅输出 WARN/ERROR
-- **GPU 字体图集** — 字形缓存，自动检测系统字体
+- **GPU 字体图集** — 字形缓存，动态按需字号光栅化（同一 TTF 数据多字号复用）
 - **UTF-8** — 编解码、码点导航、拒绝代理对
 - **定时器** — `singleShot` / `interval`，集成事件循环
 - **信号** — 类型安全回调，支持 `disconnect()` 和 `ScopedConnection` 自动清理
@@ -376,6 +558,9 @@ MIT
 - **光标** — 窗口级光标形状控制（Arrow、IBeam、Wait、Hand 等）
 - **DPI 缩放** — 窗口级 DPI 检测 + 全局覆盖
 - **焦点链** — Tab/Shift+Tab 按树序导航
+- **国际化** — `I18n` 单例，20+ 语言复数规则，JSON 翻译文件
+- **剪贴板** — 多格式 (Text/HTML/Image/Files)，平台抽象
+- **拖放** — 应用内 MIME 类型数据传输，`DragSource`/`DropTarget`
 - **CMake + Python** — 双构建系统
 
 ## 快速开始
@@ -400,7 +585,7 @@ python ltgui.py build --compiler clang
 # 发布编译
 python ltgui.py build release
 
-# 运行测试（15 个测试套件）
+# 运行测试（17 个测试套件）
 python ltgui.py test
 
 # CMake
@@ -455,7 +640,12 @@ int main() {
 | `Tooltip` | 弹出工具提示，`show()` 静态辅助方法 |
 | `TreeView` | 层级树形视图，展开/折叠、选择 |
 | `ContextMenu` | 右键弹出菜单，支持分隔线 |
-| `MenuBar` | 顶级菜单栏，带下拉子菜单 |
+| `MenuBar` | 顶级菜单栏，下拉子菜单、键盘导航、快捷键、可选中项目 |
+| `Dialog` | 模态对话框，半透明遮罩、淡入动画、Escape 关闭 |
+| `MessageBox` | 预置对话框：Info/Warning/Error/Question 图标，OK/Cancel/Yes/No 按钮 |
+| `InputDialog` | 文本输入对话框，OK/Cancel，Enter 确认 |
+| `TableView` | 数据表格，可排序列、可调整表头、行选择、虚拟滚动 |
+| `FileDialog` | 文件打开/保存对话框，目录浏览、文件过滤器 |
 
 ---
 
@@ -542,36 +732,167 @@ if (widget->widgetType() == WidgetType::RadioButton) { ... }
 ## 主题与样式
 
 ```cpp
-// 切换主题 — 所有窗口自动重绘
-setTheme(Theme::Dark());
+// 切换主题 — 所有窗口自动重绘，发出 onThemeChanged 信号
+ThemeManager::instance().setTheme(Theme::Dark());
+// 或: setTheme(Theme::Dark());
 
-// 自定义主题
+// 可用的预设主题
+ThemeManager::instance().setThemeByName("Nord");
+ThemeManager::instance().setThemeByName("Solarized");
+// 内置: Light, Dark, DarkBlue, HighContrast, Solarized, Nord
+
+// 自定义主题（28 个颜色字段）
 Theme t;
+t.name = "MyTheme";
 t.accent = Color(0, 140, 235);
 t.bgPrimary = Color(240, 240, 240);
-setTheme(t);
+t.dialogBg = Color(255, 255, 255);
+t.tableHeaderBg = Color(240, 240, 240);
+ThemeManager::instance().registerTheme("MyTheme", t);
+
+// 监听主题变更
+ThemeManager::instance().onThemeChanged.connect([](const Theme& t) {
+    LOG_INFO("UI", "主题变更为: %s", t.name.c_str());
+});
 
 // 单控件样式
 Style s;
 s.bgColor = Color::White;
 s.borderWidth = 1;
 s.borderRadius = 4;
-s.setPadding(8, 4);   // 水平, 垂直（负值被截断为 0）
+s.setPadding(8, 4);
 s.setMargin(4);
 widget->setStyle(s);
 ```
 
-预定义主题颜色: `bgPrimary`, `bgSecondary`, `bgTertiary`, `textPrimary`, `textSecondary`, `textDisabled`, `accent`, `accentHover`, `accentPressed`, `border`, `borderFocus`, `scrollbarTrack`, `scrollbarThumb`, `selectionBg`。
-
 ## 动画
 
 ```cpp
+// AnimatedFloat（30+ 种缓动函数）
 AnimatedFloat opacity(0.0f);
-opacity.setTarget(1.0f, 300, Easing::EaseOut);  // 300ms
+opacity.setTarget(1.0f, 300, Easing::EaseOutBounce);
+opacity.setLoop(true);
+opacity.setYoyo(true);
+opacity.onFinished.connect([]{ LOG_INFO("UI", "完成!"); });
+float v = opacity.value();
 
-float v = opacity.value();  // 每帧插值
+// WidgetAnimation — 带动画回调
+WidgetAnimation anim;
+anim.setStartValue(0.0f);
+anim.setEndValue(100.0f);
+anim.setDuration(500);
+anim.setEasing(Easing::EaseOutCubic);
+anim.setValueCallback([&](float v) { widget->setX((int)v); });
+anim.onFinished.connect([]{ LOG_INFO("UI", "动画完成"); });
+anim.play();
 
-// 缓动: Linear, EaseIn, EaseOut, EaseInOut
+// KeyframeAnimation — 关键帧动画
+KeyframeAnimation kf;
+kf.addKeyframe({0.0f, 0.0f, Easing::EaseOut});
+kf.addKeyframe({0.5f, 1.0f, Easing::Linear});
+kf.addKeyframe({1.0f, 0.0f, Easing::EaseIn});
+kf.setDuration(1000);
+kf.setLoop(true);
+kf.setValueCallback([&](float v) { updateOpacity(v); });
+kf.play();
+
+// 缓动函数: Linear, EaseIn/Out/InOut, Quad, Cubic, Quart, Quint,
+//         Sine, Expo, Circ, Back, Elastic, Bounce (每种×In/Out/InOut),
+//         StepStart, StepEnd
+```
+
+## 对话框
+
+```cpp
+// MessageBox — 模态，返回 DialogResult
+DialogResult r = MessageBox::show(parent, "保存更改?",
+    "关闭前是否保存?",
+    (int)(DialogButton::Yes | DialogButton::No | DialogButton::Cancel),
+    MessageBox::Question);
+
+// InputDialog — 模态，返回文本
+std::string name = InputDialog::getText(parent,
+    "输入名称", "请输入您的名字:", "默认值");
+
+// 自定义 Dialog
+class MyDialog : public Dialog {
+    MyDialog(Widget* parent) : Dialog(parent) {
+        setTitle("自定义对话框");
+        panelW_ = 400; panelH_ = 200;
+        auto* btn = panel_->makeChild<Button>("确定");
+        btn->onClick([this]() { done(DialogResult::OK); });
+    }
+};
+```
+
+## 表格 TableView
+
+```cpp
+auto model = std::make_shared<SimpleTableModel>(0, 3);
+model->addRow({"张三", "工程部", "2023"});
+model->addRow({"李四", "设计部", "2024"});
+
+auto* table = root->makeChild<TableView>();
+table->addColumn({"姓名", 120});
+table->addColumn({"部门", 120});
+table->addColumn({"年份", 60, 40, true, false}); // minWidth=40, 不可排序
+table->setModel(model);
+table->setSortColumn(0, true);
+model->sort(0, true);
+table->onRowSelected([](int row) { LOG_INFO("UI", "选中第 %d 行", row); });
+```
+
+## 国际化 (i18n)
+
+```cpp
+I18n::instance().loadTableFromFile(Locale{"zh", "CN", ""}, "lang/zh-CN.json");
+I18n::instance().setLocale(Locale{"zh", "CN", ""});
+
+std::string t = I18n::instance().tr("dialog.ok");        // "确定"
+std::string p = I18n::instance().tr("files.count", 5);   // "5 个文件"
+
+// JSON 翻译文件格式:
+// {"ok":"确定","files":["零个","一个","两个","几个","很多","%d 个文件"]}
+```
+
+## 剪贴板
+
+```cpp
+Clipboard::setText("Hello World");
+ClipboardData data;
+data.setText("Hello");
+data.setHtml("<b>Hello</b>");
+data.setImage(rgbaPixels, 64, 64);
+Clipboard::setData(data);
+auto read = Clipboard::getData();
+if (read.hasFormat(ClipboardFormat::Image)) { /* 处理图片 */ }
+```
+
+## 文件对话框
+
+```cpp
+FileDialog dlg(parent);
+dlg.setTitle("打开图片");
+dlg.addFilter({"图片文件", "*.png;*.jpg"});
+if (dlg.exec()) { loadImage(dlg.selectedPath()); }
+```
+
+## 拖放
+
+```cpp
+auto* source = root->makeChild<Label>("拖我");
+DragSource dragSrc(source);
+dragSrc.addMimeType("text/plain");
+auto data = std::make_shared<DragData>();
+data->setText("被拖动的文本");
+dragSrc.setDragData(data);
+
+auto* target = root->makeChild<Label>("放这里");
+DropTarget dropTgt(target);
+dropTgt.setAcceptedMimeTypes({"text/plain"});
+dropTgt.onDrop([](const DragData& d) {
+    LOG_INFO("UI", "收到: %s", d.text().c_str());
+});
 ```
 
 ## 布局
@@ -676,17 +997,21 @@ ltgui/
 │   ├── signal.h, log.h               # 工具
 │   ├── geometry.h, color.h, font.h   # 基础类型
 │   ├── utf8.h                        # UTF-8
+│   ├── i18n.h                        # 国际化
+│   ├── clipboard.h                   # 剪贴板
+│   ├── dragdrop.h                    # 拖放
 │   ├── canvas.h                      # 绘制
 │   ├── platform/{native_window,native_canvas,platform}.h
 │   ├── platform/win32/x11/cocoa/     # CPU 后端
 │   ├── platform/gpu/                 # GPU 渲染器
-│   └── widgets/                      # 18 个控件
+│   └── widgets/                      # 20 个控件
 ├── src/
+│   ├── i18n.cpp, clipboard.cpp, dragdrop.cpp
 │   ├── platform/{win32,x11,cocoa,gpu}/
 │   ├── widgets/                      # 每个控件一个 .cpp
 │   ├── widget.cpp, window.cpp, app.cpp, ... 
 │   └── timer.cpp
-├── test/                             # 15 个 doctest 测试套件
+├── test/                             # 17 个 doctest 测试套件
 ├── examples/                         # hello, demo
 └── app/                              # main
 ```
