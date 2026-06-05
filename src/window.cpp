@@ -28,10 +28,12 @@ Window::Window() {
 Window::~Window() {
     Application::instance().unregisterWindow(this);
 
-    // Clear focus BEFORE destroying the central widget.
+    // Clear focus and open combo BEFORE destroying the central widget.
     // Otherwise Widget::~Widget() may access a partially-destroyed Window
-    // via its window_ pointer when trying to clear the focusWidget_.
+    // via its window_ pointer when trying to clear the focusWidget_ or
+    // openCombo_ state.
     focusWidget_ = nullptr;
+    openCombo_ = nullptr;
 
     // Destroy central widget while nativeWindow_ is still valid, since
     // widget destructors may need to call update() which uses nativeWindow_.
@@ -180,7 +182,9 @@ void Window::handleEvent(Event& event) {
         event.accepted = true;
         break;
     case EventType::Close:
-        Application::instance().quit();
+        // Close this window. If it's the last window, quit the application.
+        // Multi-window apps can close individual windows without exiting.
+        Application::instance().closeWindow(this);
         event.accepted = true;
         break;
     case EventType::KeyDown:
@@ -225,8 +229,14 @@ void Window::handleEvent(Event& event) {
         }
         break;
     case EventType::MouseDown: {
-        // Close open ComboBox dropdown if click is outside it
-        if (openCombo_) openCombo_->closeIfClickOutside(event.pos);
+        // Close open ComboBox dropdown if click is outside it.
+        // Copy the pointer locally — closeIfClickOutside() may call
+        // closeDropdown() which sets openCombo_ = nullptr, but the
+        // ComboBox itself still exists; using a local copy lets us
+        // safely call the method without re-reading the member.
+        if (auto* combo = openCombo_) {
+            combo->closeIfClickOutside(event.pos);
+        }
         if (centralWidget_) {
             Widget* prevFocus = focusWidget_;
             bool handled = centralWidget_->handleEvent(event);
@@ -249,7 +259,15 @@ void Window::handleEvent(Event& event) {
 
 bool Window::validateFocusWidget() {
     if (focusWidget_ && focusWidget_->window() != this) {
-        setFocusWidget(nullptr);
+        // Directly clear the pointer to avoid infinite recursion:
+        // setFocusWidget() calls validateFocusWidget() again.
+        Widget* old = focusWidget_;
+        focusWidget_ = nullptr;
+
+        // Notify the old widget that it lost focus
+        Event ev;
+        ev.type = EventType::FocusOut;
+        old->handleEvent(ev);
         return false;
     }
     return focusWidget_ != nullptr;

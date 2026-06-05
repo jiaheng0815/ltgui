@@ -2,12 +2,30 @@
 #include "platform/platform.h"
 #include "geometry.h"
 #include "event.h"
+#include <cstdint>
 #include <vector>
+#include <thread>
 
 namespace ltgui {
 
 class Window;
 class Timer;
+
+// ltgui is a single-threaded framework. All widget operations, painting,
+// and event handling must happen on the thread that calls Application::run().
+// These helpers detect cross-thread misuse at runtime in debug builds.
+#ifdef NDEBUG
+inline bool isMainThread() { return true; }
+inline void setMainThread() {}
+#else
+inline bool isMainThread() {
+    static std::thread::id s_mainThreadId = std::this_thread::get_id();
+    return std::this_thread::get_id() == s_mainThreadId;
+}
+inline void setMainThread() {
+    isMainThread(); // force static init on the calling thread
+}
+#endif
 
 class Application {
 public:
@@ -17,8 +35,15 @@ public:
     void quit();
     void processEvents();
 
+    // Returns milliseconds until the next timer fires, or INT64_MAX if idle.
+    // Platform event loops use this to compute the correct blocking timeout.
+    int64_t nextTimerWakeupMs() const;
+
     void registerWindow(Window* window);
     void unregisterWindow(Window* window);
+
+    // Close a single window. If no windows remain, the application exits.
+    void closeWindow(Window* window);
 
     const std::vector<Window*>& windows() const { return windows_; }
 

@@ -15,6 +15,10 @@
 #endif
 #include <windows.h>
 #undef MessageBox
+#elif defined(LTGUI_PLATFORM_LINUX)
+#include "platform/x11/x11_window.h"
+#elif defined(LTGUI_PLATFORM_MACOS)
+#import <Cocoa/Cocoa.h>
 #endif
 
 namespace ltgui {
@@ -51,19 +55,50 @@ DialogResult Dialog::exec() {
     claimFocus();
 
     auto* win = window();
-    if (!win) return DialogResult::None;
+    if (!win) {
+        running_ = false;
+        return DialogResult::None;
+    }
 
+    // Cross-platform inner event loop. We pump platform events AND call
+    // processEvents() so animations, timers, and deferred work progress.
+    // This prevents the rest of the app from freezing during modal dialogs
+    // and works identically on Win32, X11, and Cocoa.
     while (running_) {
         Application::instance().processEvents();
+
 #ifdef LTGUI_PLATFORM_WINDOWS
+        // Win32: pump Windows messages so the dialog remains responsive.
+        // Use PeekMessage (not GetMessage) to avoid blocking: processEvents()
+        // already handles the animation/timer heartbeat.
         MSG msg;
         while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) { running_ = false; Application::instance().quit(); break; }
+            if (msg.message == WM_QUIT) {
+                running_ = false;
+                Application::instance().quit();
+                break;
+            }
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
+#elif defined(LTGUI_PLATFORM_LINUX)
+        // X11: flush pending events for all windows on the shared display.
+        X11Window::processAllPending();
+#elif defined(LTGUI_PLATFORM_MACOS)
+        // Cocoa: pump one event from the main run loop.
+        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                            untilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]
+                               inMode:NSDefaultRunLoopMode
+                              dequeue:YES];
+        if (event) {
+            [NSApp sendEvent:event];
+        }
 #endif
+        // Drive the fade-in animation so the overlay appears immediately.
+        // (The returned value updates the internal state; the next paint
+        //  pass reads it via fadeAnim_.value() in paintSelf.)
         fadeAnim_.value();
+
         if (!running_) break;
     }
 
@@ -152,9 +187,9 @@ void MessageBox::rebuild() {
 
     auto* btnRow = panel_->makeChild<Widget>();
     btnRow->style().bgColor = Color::Transparent;
-    auto* bl = new BoxLayout(BoxLayout::LeftToRight, 8, 0);
+    auto bl = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 0);
     bl->addStretch(1);
-    btnRow->setLayout(std::unique_ptr<Layout>(bl));
+    btnRow->setLayout(std::move(bl));
 
     if (buttonFlags_ & static_cast<int>(DialogButton::OK)) {
         auto* b = btnRow->makeChild<Button>("OK");
@@ -223,9 +258,9 @@ void InputDialog::rebuild() {
 
     auto* btnRow = panel_->makeChild<Widget>();
     btnRow->style().bgColor = Color::Transparent;
-    auto* bl = new BoxLayout(BoxLayout::LeftToRight, 8, 0);
+    auto bl = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 0);
     bl->addStretch(1);
-    btnRow->setLayout(std::unique_ptr<Layout>(bl));
+    btnRow->setLayout(std::move(bl));
 
     auto* okBtn = btnRow->makeChild<Button>("OK");
     okBtn->onClick([this]() { done(DialogResult::OK); });

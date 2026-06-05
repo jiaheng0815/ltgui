@@ -11,6 +11,11 @@
 #include <gdiplus.h>
 #endif
 
+#ifdef LTGUI_PLATFORM_MACOS
+#include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
+#endif
+
 namespace ltgui {
 namespace gpu {
 
@@ -220,6 +225,11 @@ void GpuCanvas::drawImage(const std::string& path, const Rect& rect) {
     }
     if (it != imageCache_.end() && it->second.texId >= 0) {
         renderer_->drawImage(it->second.texId, rect);
+    } else if (it != imageCache_.end() && it->second.texId == -1) {
+        // Load failed previously — draw a placeholder cross so the user
+        // can see an image is missing, but don't retry loading every frame.
+        renderer_->drawLine({rect.x, rect.y}, {rect.right(), rect.bottom()}, 1.0f, Color::Red);
+        renderer_->drawLine({rect.right(), rect.y}, {rect.x, rect.bottom()}, 1.0f, Color::Red);
     }
 }
 
@@ -253,6 +263,9 @@ bool GpuCanvas::loadFontFile(const Font& font, const char* ttfPath) {
 void GpuCanvas::loadImageTexture(const std::string& path) {
     if (!device_ || path.empty()) return;
 
+    int w = 0, h = 0;
+    std::vector<uint8_t> rgba;
+
 #ifdef LTGUI_PLATFORM_WINDOWS
     ensureGdiPlus();
 
@@ -262,23 +275,74 @@ void GpuCanvas::loadImageTexture(const std::string& path) {
     if (len > 0) wpath.resize(len - 1);
 
     Gdiplus::Bitmap bmp(wpath.c_str());
-    if (bmp.GetLastStatus() != Gdiplus::Ok) return;
+    if (bmp.GetLastStatus() != Gdiplus::Ok) {
+        imageCache_[path] = {-1, 0, 0}; // mark as failed
+        return;
+    }
 
-    int w = (int)bmp.GetWidth(), h = (int)bmp.GetHeight();
-    if (w <= 0 || h <= 0) return;
+    w = (int)bmp.GetWidth();
+    h = (int)bmp.GetHeight();
+    if (w <= 0 || h <= 0) {
+        imageCache_[path] = {-1, 0, 0};
+        return;
+    }
 
-    std::vector<uint8_t> rgba(w * h * 4);
+    rgba.resize(w * h * 4);
     Gdiplus::Rect rc(0, 0, w, h);
     Gdiplus::BitmapData bd;
     bmp.LockBits(&rc, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &bd);
     memcpy(rgba.data(), bd.Scan0, w * h * 4);
     bmp.UnlockBits(&bd);
+#elif defined(LTGUI_PLATFORM_MACOS)
+    // macOS: decode via ImageIO/CoreGraphics
+    {
+        CFStringRef cfPath = CFStringCreateWithCString(
+            kCFAllocatorDefault, path.c_str(), kCFStringEncodingUTF8);
+        if (!cfPath) { imageCache_[path] = {-1, 0, 0}; return; }
 
-    int texId = renderer_->textures().upload(w, h, rgba.data());
-    imageCache_[path] = {texId, w, h};
+        CFURLRef url = CFURLCreateWithFileSystemPath(
+            kCFAllocatorDefault, cfPath, kCFURLPOSIXPathStyle, false);
+        CFRelease(cfPath);
+        if (!url) { imageCache_[path] = {-1, 0, 0}; return; }
+
+        CGImageSourceRef src = CGImageSourceCreateWithURL(url, nullptr);
+        CFRelease(url);
+        if (!src) { imageCache_[path] = {-1, 0, 0}; return; }
+
+        CGImageRef img = CGImageSourceCreateImageAtIndex(src, 0, nullptr);
+        CFRelease(src);
+        if (!img) { imageCache_[path] = {-1, 0, 0}; return; }
+
+        w = (int)CGImageGetWidth(img);
+        h = (int)CGImageGetHeight(img);
+        if (w <= 0 || h <= 0) { CGImageRelease(img); imageCache_[path] = {-1, 0, 0}; return; }
+
+        // Draw into a bitmap context to get RGBA pixels
+        rgba.resize(w * h * 4, 0);
+        CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+        CGContextRef ctx = CGBitmapContextCreate(
+            rgba.data(), w, h, 8, w * 4, cs,
+            kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+        CGColorSpaceRelease(cs);
+        if (!ctx) { CGImageRelease(img); imageCache_[path] = {-1, 0, 0}; return; }
+
+        CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), img);
+        CGContextRelease(ctx);
+        CGImageRelease(img);
+    }
 #else
     (void)path;
+    // Mark as failed so we don't retry every frame on non-Windows/non-macOS platforms
+    imageCache_[path] = {-1, 0, 0};
+    return;
 #endif
+
+    if (w > 0 && h > 0 && !rgba.empty() && renderer_) {
+        int texId = renderer_->textures().upload(w, h, rgba.data());
+        imageCache_[path] = {texId, w, h};
+    } else {
+        imageCache_[path] = {-1, 0, 0};
+    }
 }
 
 } // namespace gpu

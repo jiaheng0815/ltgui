@@ -62,7 +62,13 @@ void Accessibility::setName(void* nativeHandle, const char* name) {
         provider->Release();
     }
 
-    // Fallback: set window prop for accessibility tools to query
+    // Free the previous name allocation if one exists
+    HANDLE prev = GetPropW(hwnd, L"ltgui_AccName");
+    if (prev) {
+        HeapFree(GetProcessHeap(), 0, prev);
+    }
+
+    // Set a window prop for accessibility tools to query
     int len = MultiByteToWideChar(CP_UTF8, 0, name, -1, nullptr, 0);
     if (len > 0) {
         std::wstring wname(static_cast<size_t>(len), L'\0');

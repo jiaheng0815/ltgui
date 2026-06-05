@@ -49,6 +49,9 @@ public:
         if (nativeWindow_) nativeWindow_->setCursor(shape);
     }
 
+    // Focus management
+    Widget* focusWidget() const { return focusWidget_; }
+
     // Keyboard shortcuts: registered shortcuts are checked before widget
     // event dispatch. If a shortcut matches, its callback fires and the
     // key event is consumed.

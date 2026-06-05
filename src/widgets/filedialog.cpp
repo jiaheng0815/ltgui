@@ -63,9 +63,9 @@ void FileDialog::buildCustomDialog() {
 
     auto* btnRow = panel_->makeChild<Widget>();
     btnRow->style().bgColor = Color::Transparent;
-    auto* bl = new BoxLayout(BoxLayout::LeftToRight, 8, 0);
+    auto bl = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 0);
     bl->addStretch(1);
-    btnRow->setLayout(std::unique_ptr<Layout>(bl));
+    btnRow->setLayout(std::move(bl));
 
     auto* ok = btnRow->makeChild<Button>("Open");
     ok->onClick([this]() { acceptSelection(); done(DialogResult::OK); });

@@ -34,6 +34,10 @@ public:
     void invalidate(const Rect& rect) override;
     void* nativeHandle() const override;
 
+    // Clipboard
+    bool setClipboardText(const std::string& text) override;
+    std::string getClipboardText() override;
+
     NativeCanvas* getCanvas() override;
 
     // Called from Objective-C delegate
@@ -41,6 +45,10 @@ public:
     void onResize(int width, int height);
     void onClose();
     void onMouseEvent(Event& ev);
+    void onKeyEvent(Event& ev);
+
+    // Map macOS keyCode to ltgui Key enum
+    Key mapCocoaKey(int keyCode) const;
 
 private:
     NSWindow* nsWindow_ = nullptr;

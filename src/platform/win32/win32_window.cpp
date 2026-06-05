@@ -3,6 +3,8 @@
 #ifdef LTGUI_PLATFORM_WINDOWS
 
 #include "platform/win32/win32_canvas.h"
+#include "app.h"
+#include <cassert>
 #include <windowsx.h>
 #include <imm.h>
 
@@ -216,6 +218,8 @@ NativeCanvas* Win32Window::getCanvas() {
 }
 
 LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
+    // Guard against cross-thread SendMessage into the widget/GPU pipeline
+    assert(isMainThread() && "Win32 window message on non-main thread");
     if (!eventCallback_) return DefWindowProcW(hwnd_, msg, wParam, lParam);
 
     switch (msg) {
@@ -336,13 +340,19 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         Event ev;
         ev.type = EventType::MouseWheel;
         ev.wheelDelta = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
-        ev.pos = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        // WM_MOUSEWHEEL lParam is screen coordinates; convert to client
+        POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        ScreenToClient(hwnd_, &pt);
+        ev.pos = {pt.x, pt.y};
         eventCallback_(ev);
         return 0;
     }
 
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
+        // Filter auto-repeat: bit 30 of lParam is 1 if this is a repeated key
+        if (lParam & 0x40000000) return 0;
+
         Event ev;
         ev.type = EventType::KeyDown;
         // Track modifier state
@@ -377,6 +387,9 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     }
 
     case WM_CHAR: {
+        // Filter auto-repeat for character input too
+        if (lParam & 0x40000000) return 0;
+
         Event ev;
         ev.type = EventType::KeyDown;
         ev.charCode = static_cast<unsigned int>(wParam);

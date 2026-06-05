@@ -295,11 +295,16 @@ public:
         device_->CreateSamplerState(&sampDesc, &sampler_);
 
         // Disable back-face culling — 2D rendering has no "back" faces.
+        // Rasterizer WITHOUT scissor (default for most draws)
         D3D11_RASTERIZER_DESC rsDesc = {};
         rsDesc.FillMode = D3D11_FILL_SOLID;
         rsDesc.CullMode = D3D11_CULL_NONE;
         rsDesc.ScissorEnable = FALSE;
         device_->CreateRasterizerState(&rsDesc, &rasterizerState_);
+
+        // Rasterizer WITH scissor enabled — used when setScissor() is called
+        rsDesc.ScissorEnable = TRUE;
+        device_->CreateRasterizerState(&rsDesc, &rasterizerScissorState_);
 
         return true;
     }
@@ -309,6 +314,7 @@ public:
         if (vertexBuffer_) { vertexBuffer_->Release(); vertexBuffer_ = nullptr; vertexBufferSize_ = 0; }
         if (blendState_) { blendState_->Release(); blendState_ = nullptr; }
         if (rasterizerState_) { rasterizerState_->Release(); rasterizerState_ = nullptr; }
+        if (rasterizerScissorState_) { rasterizerScissorState_->Release(); rasterizerScissorState_ = nullptr; }
         if (sampler_) { sampler_->Release(); sampler_ = nullptr; }
         if (solidVS_) { solidVS_->Release(); solidVS_ = nullptr; }
         if (solidPS_) { solidPS_->Release(); solidPS_ = nullptr; }
@@ -405,10 +411,14 @@ public:
     void setScissor(int x, int y, int w, int h) override {
         D3D11_RECT r = { (LONG)x, (LONG)y, (LONG)(x + w), (LONG)(y + h) };
         context_->RSSetScissorRects(1, &r);
+        // Switch to the scissor-enabled rasterizer state
+        context_->RSSetState(rasterizerScissorState_);
     }
 
     void clearScissor() override {
         context_->RSSetScissorRects(0, nullptr);
+        // Switch back to the default (no-scissor) rasterizer state
+        context_->RSSetState(rasterizerState_);
     }
 
 private:
@@ -652,6 +662,7 @@ private:
     ID3D11RenderTargetView* rtView_ = nullptr;
     ID3D11BlendState* blendState_ = nullptr;
     ID3D11RasterizerState* rasterizerState_ = nullptr;
+    ID3D11RasterizerState* rasterizerScissorState_ = nullptr;
     ID3D11SamplerState* sampler_ = nullptr;
 
     // Dynamic vertex buffer (reused across frames)

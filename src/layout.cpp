@@ -168,32 +168,74 @@ void GridLayout::layout(Widget* container) {
 
     int rows = (n + cols_ - 1) / cols_;
 
-    // Calculate column widths
+    // Compute per-column max width from content sizeHints (skip invisible)
+    std::vector<int> colWidths(cols_, 0);
+    std::vector<int> rowHeights(rows, 0);
+    for (int i = 0; i < n; i++) {
+        if (!children[i]->isVisible()) continue;
+        int col = i % cols_;
+        int row = i / cols_;
+        Size hint = children[i]->sizeHint();
+        colWidths[col] = std::max(colWidths[col], hint.width);
+        rowHeights[row] = std::max(rowHeights[row], hint.height);
+    }
+
+    // Distribute remaining horizontal space proportionally to stretch factors
     int totalColSpacing = colSpacing_ * (cols_ - 1);
-    int colWidth = (availW - totalColSpacing) / cols_;
+    int usedColW = 0;
+    for (int w : colWidths) usedColW += w;
+    int extraW = std::max(0, availW - totalColSpacing - usedColW);
+    int totalColStretch = 0;
+    for (int c = 0; c < cols_; c++) {
+        auto it = colStretch_.find(c);
+        if (it != colStretch_.end()) totalColStretch += it->second;
+    }
+    if (totalColStretch > 0 && extraW > 0) {
+        for (int c = 0; c < cols_; c++) {
+            auto it = colStretch_.find(c);
+            if (it != colStretch_.end() && it->second > 0) {
+                colWidths[c] += extraW * it->second / totalColStretch;
+            }
+        }
+    }
 
-    // Calculate row heights
+    // Distribute remaining vertical space
     int totalRowSpacing = rowSpacing_ * (rows - 1);
-    int rowHeight = (availH - totalRowSpacing) / rows;
+    int usedRowH = 0;
+    for (int h : rowHeights) usedRowH += h;
+    int extraH = std::max(0, availH - totalRowSpacing - usedRowH);
+    int totalRowStretch = 0;
+    for (int r = 0; r < rows; r++) {
+        auto it = rowStretch_.find(r);
+        if (it != rowStretch_.end()) totalRowStretch += it->second;
+    }
+    if (totalRowStretch > 0 && extraH > 0) {
+        for (int r = 0; r < rows; r++) {
+            auto it = rowStretch_.find(r);
+            if (it != rowStretch_.end() && it->second > 0) {
+                rowHeights[r] += extraH * it->second / totalRowStretch;
+            }
+        }
+    }
 
-    int x = margin_;
-    int y = margin_;
+    // Position children (skip invisible)
+    int startX = margin_;
+    int startY = margin_;
 
     for (int i = 0; i < n; i++) {
+        if (!children[i]->isVisible()) continue;
         int col = i % cols_;
         int row = i / cols_;
 
-        int cx = x + col * (colWidth + colSpacing_);
-        int cy = y + row * (rowHeight + rowSpacing_);
+        // Compute cumulative X offset
+        int cx = startX;
+        for (int c = 0; c < col; c++) cx += colWidths[c] + colSpacing_;
 
-        // Apply column/row stretches if set
-        int extraW = 0, extraH = 0;
-        auto cs = colStretch_.find(col);
-        if (cs != colStretch_.end() && cs->second > 0) {
-            extraW = cs->second * 10; // Simple stretch
-        }
+        // Compute cumulative Y offset
+        int cy = startY;
+        for (int r = 0; r < row; r++) cy += rowHeights[r] + rowSpacing_;
 
-        children[i]->setGeometry(Rect(cx, cy, colWidth + extraW, rowHeight + extraH));
+        children[i]->setGeometry(Rect(cx, cy, colWidths[col], rowHeights[row]));
     }
 }
 
@@ -204,17 +246,27 @@ Size GridLayout::preferredSize(const Widget* container) const {
     int n = static_cast<int>(children.size());
     if (n == 0) return {0, 0};
 
-    int maxColW = 0, maxRowH = 0;
     int rows = (n + cols_ - 1) / cols_;
 
+    // Per-column max width, per-row max height (skip invisible)
+    std::vector<int> colWidths(cols_, 0);
+    std::vector<int> rowHeights(rows, 0);
     for (int i = 0; i < n; i++) {
+        if (!children[i]->isVisible()) continue;
+        int col = i % cols_;
+        int row = i / cols_;
         Size hint = children[i]->sizeHint();
-        maxColW = std::max(maxColW, hint.width);
-        maxRowH = std::max(maxRowH, hint.height);
+        colWidths[col] = std::max(colWidths[col], hint.width);
+        rowHeights[row] = std::max(rowHeights[row], hint.height);
     }
 
-    int totalW = cols_ * maxColW + (cols_ - 1) * colSpacing_ + 2 * margin_;
-    int totalH = rows * maxRowH + (rows - 1) * rowSpacing_ + 2 * margin_;
+    int totalW = 0;
+    for (int w : colWidths) totalW += w;
+    totalW += (cols_ - 1) * colSpacing_ + 2 * margin_;
+
+    int totalH = 0;
+    for (int h : rowHeights) totalH += h;
+    totalH += (rows - 1) * rowSpacing_ + 2 * margin_;
 
     return {totalW, totalH};
 }

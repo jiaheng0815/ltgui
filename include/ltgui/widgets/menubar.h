@@ -27,7 +27,7 @@ public:
                    const std::string& text, ItemCallback cb = nullptr);
     void addSubSeparator(int menuIdx, int itemIdx, int subIdx);
 
-    WidgetType widgetType() const override { return WidgetType::Base; }
+    WidgetType widgetType() const override { return WidgetType::MenuBar; }
     Size sizeHint() const override;
 
 protected:

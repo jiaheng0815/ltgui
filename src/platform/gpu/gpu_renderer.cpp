@@ -18,16 +18,21 @@ TextureManager::~TextureManager() {
 }
 
 int TextureManager::upload(int w, int h, const uint8_t* rgba) {
+    if (!rgba || w <= 0 || h <= 0) return -1;
+
+    GpuTexture* tex = device_->createTexture(w, h, rgba);
+    if (!tex) return -1; // GPU texture creation failed — don't store nullptr
+
     // Reuse freed slots
     if (!freeSlots_.empty()) {
         int id = freeSlots_.back();
         freeSlots_.pop_back();
         if (textures_[id]) device_->destroyTexture(textures_[id]);
-        textures_[id] = device_->createTexture(w, h, rgba);
+        textures_[id] = tex;
         return id;
     }
     int id = static_cast<int>(textures_.size());
-    textures_.push_back(device_->createTexture(w, h, rgba));
+    textures_.push_back(tex);
     return id;
 }
 
@@ -124,12 +129,16 @@ Size Renderer2D::measureText(const std::string& text, const Font& font) {
 }
 
 void Renderer2D::setScissor(const Rect& r) {
+    // Flush any pending batch with the current scissor state before changing.
+    if (!cmds_.empty()) flushBatch();
     scissorActive_ = true;
     scissorRect_ = r;
     device_->setScissor(r.x, r.y, r.width, r.height);
 }
 
 void Renderer2D::clearScissor() {
+    // Flush any pending batch with the current scissor state before changing.
+    if (!cmds_.empty()) flushBatch();
     scissorActive_ = false;
     device_->clearScissor();
 }
@@ -156,7 +165,7 @@ void Renderer2D::flushBatch() {
 
     auto isLineOp = [](DrawOp op) -> bool {
         return op == DrawOp::StrokeRect ||
-               op == DrawOp::StrokeRounded || op == DrawOp::StrokeEllipse;
+               op == DrawOp::StrokeEllipse;
     };
 
     // Preserve original draw order (painter's algorithm) while batching
@@ -212,7 +221,9 @@ void Renderer2D::flushBatch() {
                 emitStrokeRect(verts, cmd.rect, color);
                 break;
             case DrawOp::StrokeRounded:
-                emitStrokeRect(verts, cmd.rect, color);
+                emitQuad(verts, cmd.rect, 0, 0, 1, 1, color,
+                         static_cast<float>(cmd.rect.width), static_cast<float>(cmd.rect.height),
+                         cmd.radius, cmd.lineWidth);
                 break;
             case DrawOp::StrokeEllipse:
                 emitStrokeEllipse(verts, cmd.rect, color);

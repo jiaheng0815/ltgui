@@ -1,10 +1,14 @@
 #include "widget.h"
 #include "window.h"
 #include "layout.h"
+#include "signal.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
 
 namespace ltgui {
+namespace detail {
+thread_local const void* tls_emitting_signal = nullptr;
+} // namespace detail
 
 Widget::Widget(Widget* parent) : parent_(parent) {
     style_ = Style::defaultStyle();
@@ -93,7 +97,9 @@ void Widget::scheduleRelayout() {
         if (ancestor->layout() && !ancestor->geometry().isEmpty()) {
             ancestor->layout()->layout(ancestor);
             ancestor->needsLayout_ = false;
-            return;
+            // Continue walking up in case outer containers also need relayout
+            ancestor = ancestor->parent();
+            continue;
         }
         ancestor = ancestor->parent();
     }
@@ -124,6 +130,10 @@ void Widget::setLayout(std::unique_ptr<Layout> layout) {
 void Widget::setEnabled(bool enabled) {
     if (enabled_ != enabled) {
         enabled_ = enabled;
+        // Clear focus if this widget is being disabled while focused
+        if (!enabled && window_ && window_->focusWidget() == this) {
+            window_->setFocusWidget(nullptr);
+        }
         update();
     }
 }
@@ -131,6 +141,10 @@ void Widget::setEnabled(bool enabled) {
 void Widget::setVisible(bool visible) {
     if (visible_ != visible) {
         visible_ = visible;
+        // Clear focus if this widget is being hidden while focused
+        if (!visible && window_ && window_->focusWidget() == this) {
+            window_->setFocusWidget(nullptr);
+        }
         update();
     }
 }

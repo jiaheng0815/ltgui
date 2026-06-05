@@ -141,9 +141,10 @@ TEST_CASE("GridLayout preferredSize") {
         w->setLayout(std::make_unique<GridLayout>(3, 4, 4, 6));
         w->makeChild<Widget>(); // hint {100, 24}
         Size sz = w->sizeHint();
-        // cols = 3, maxColW = 100. width = 3*100 + 2*4 + 2*6 = 320
-        // rows = 1, maxRowH = 24.  height = 1*24  + 0*4 + 2*6 = 36
-        CHECK(sz.width == 320);
+        // cols = 3, per-column widths = {100, 0, 0} (1 child in col 0)
+        // width = 100 + 0 + 0 + 2*4 + 2*6 = 120
+        // rows = 1, rowHeights = {24}. height = 24 + 0*4 + 2*6 = 36
+        CHECK(sz.width == 120);
         CHECK(sz.height == 36);
     }
 }

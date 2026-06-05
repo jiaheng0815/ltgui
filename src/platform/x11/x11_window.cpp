@@ -34,10 +34,6 @@ namespace {
     Atom g_utf8Atom = 0;
     Atom g_selProperty = 0;
 
-    // Currently-set clipboard text (owned by the window that did setClipboardText)
-    std::string g_clipboardText;
-    ::Window g_clipboardOwner = 0;
-
     void ensureClipboardAtoms() {
         if (!g_clipboardAtom && X11Window::display()) {
             Display* dpy = X11Window::display();
@@ -72,6 +68,7 @@ X11Window::X11Window() {
     }
     if (s_display_) {
         s_displayRefCount_++;
+        ownsDisplayRef_ = true; // only decrement if we actually have a display
     }
 }
 
@@ -80,11 +77,13 @@ X11Window::~X11Window() {
     delete canvas_;
     canvas_ = nullptr;
 
-    s_displayRefCount_--;
-    if (s_displayRefCount_ <= 0 && s_display_) {
-        XCloseDisplay(s_display_);
-        s_display_ = nullptr;
-        s_displayRefCount_ = 0;
+    if (ownsDisplayRef_ && s_display_) {
+        s_displayRefCount_--;
+        if (s_displayRefCount_ <= 0) {
+            XCloseDisplay(s_display_);
+            s_display_ = nullptr;
+            s_displayRefCount_ = 0;
+        }
     }
 }
 
@@ -200,8 +199,8 @@ bool X11Window::setClipboardText(const std::string& text) {
     if (!s_display_ || !window_) return false;
     ensureClipboardAtoms();
 
-    g_clipboardText = text;
-    g_clipboardOwner = window_;
+    clipboardText_ = text;
+    clipboardOwned_ = true;
     XSetSelectionOwner(s_display_, g_clipboardAtom, window_, CurrentTime);
     return true;
 }
@@ -210,37 +209,61 @@ std::string X11Window::getClipboardText() {
     if (!s_display_ || !window_) return {};
     ensureClipboardAtoms();
 
-    // Request the selection content from the current owner
+    // Request the selection content from the current owner.
+    // Use an event-driven approach: XConvertSelection triggers an async
+    // request; we then pump the event loop (processing other events too)
+    // until SelectionNotify arrives or we time out.
+    std::string result;
+    pendingReadResult_ = &result;
+    pendingReadDone_ = false;
+
     XConvertSelection(s_display_, g_clipboardAtom, g_utf8Atom,
                       g_selProperty, window_, CurrentTime);
     XFlush(s_display_);
 
-    // Wait for the SelectionNotify event (with a timeout)
-    for (int attempt = 0; attempt < 50; attempt++) {
-        XEvent ev;
-        if (XCheckTypedWindowEvent(s_display_, window_, SelectionNotify, &ev)) {
-            if (ev.xselection.property == None) return {};  // conversion failed
+    // Wait for SelectionNotify, processing all X11 events while we wait.
+    // This avoids the old busy-poll loop and allows other window events
+    // (expose, input) to be handled during the clipboard round-trip.
+    uint64_t deadline = AnimationManager::instance().nowMs() + 1000; // 1s timeout
+    while (!pendingReadDone_) {
+        // Check timeout
+        if (AnimationManager::instance().nowMs() > deadline) break;
 
-            Atom type;
-            int format;
-            unsigned long nitems = 0, bytesAfter = 0;
-            unsigned char* data = nullptr;
-            XGetWindowProperty(s_display_, window_, g_selProperty,
-                               0, 65536 / 4, False, AnyPropertyType,
-                               &type, &format, &nitems, &bytesAfter, &data);
-            std::string result;
-            if (data && type == g_utf8Atom && format == 8) {
-                result.assign(reinterpret_cast<char*>(data), nitems);
+        // Process any pending X11 events (including our SelectionNotify)
+        if (XPending(s_display_)) {
+            XEvent xev;
+            XNextEvent(s_display_, &xev);
+
+            if (xev.type == SelectionNotify && xev.xselection.requestor == window_) {
+                if (xev.xselection.property != None) {
+                    Atom type;
+                    int format;
+                    unsigned long nitems = 0, bytesAfter = 0;
+                    unsigned char* data = nullptr;
+                    XGetWindowProperty(s_display_, window_, g_selProperty,
+                                       0, 65536 / 4, False, AnyPropertyType,
+                                       &type, &format, &nitems, &bytesAfter, &data);
+                    if (data && type == g_utf8Atom && format == 8) {
+                        result.assign(reinterpret_cast<char*>(data), nitems);
+                    }
+                    if (data) XFree(data);
+                    XDeleteProperty(s_display_, window_, g_selProperty);
+                }
+                pendingReadDone_ = true;
+            } else {
+                // Forward other events to their windows
+                X11Window* w = findWindow(xev.xany.window);
+                if (w) w->handleEvent(xev);
             }
-            if (data) XFree(data);
-            XDeleteProperty(s_display_, window_, g_selProperty);
-            return result;
+        } else {
+            // No events pending — short sleep to avoid busy-wait
+            usleep(1000); // 1ms
         }
-        // Wait a short time before retrying
-        struct timeval tv = {0, 20000};  // 20ms
-        select(0, nullptr, nullptr, nullptr, &tv);
     }
-    return {};  // timeout
+
+    pendingReadResult_ = nullptr;
+    pendingReadDone_ = false;
+    return result;
 }
 
 void X11Window::processEvents() {
@@ -331,6 +354,11 @@ void X11Window::handleEvent(XEvent& xev) {
         ev.type = EventType::KeyDown;
         KeySym ks = XLookupKeysym(&xev.xkey, 0);
         ev.key = mapKeySym(ks);
+        // Read modifier state from the X11 key event
+        unsigned int state = xev.xkey.state;
+        if (state & ShiftMask)   ev.modifiers |= static_cast<int>(KeyModifier::Shift);
+        if (state & ControlMask) ev.modifiers |= static_cast<int>(KeyModifier::Control);
+        if (state & Mod1Mask)    ev.modifiers |= static_cast<int>(KeyModifier::Alt);
         // Also get the character if possible
         char buf[8] = {};
         KeySym ks2;
@@ -346,20 +374,24 @@ void X11Window::handleEvent(XEvent& xev) {
         ev.type = EventType::KeyUp;
         KeySym ks = XLookupKeysym(&xev.xkey, 0);
         ev.key = mapKeySym(ks);
+        unsigned int state = xev.xkey.state;
+        if (state & ShiftMask)   ev.modifiers |= static_cast<int>(KeyModifier::Shift);
+        if (state & ControlMask) ev.modifiers |= static_cast<int>(KeyModifier::Control);
+        if (state & Mod1Mask)    ev.modifiers |= static_cast<int>(KeyModifier::Alt);
         eventCallback_(ev);
         break;
     }
 
     case SelectionClear:
-        // Another app claimed clipboard ownership
+        // Another app claimed clipboard ownership — clear our local state
         if (xev.xselectionclear.selection == g_clipboardAtom) {
-            g_clipboardText.clear();
-            g_clipboardOwner = 0;
+            clipboardText_.clear();
+            clipboardOwned_ = false;
         }
         break;
 
     case SelectionRequest: {
-        // Serve clipboard content to requesters
+        // Serve clipboard content to requesters using per-instance data
         const XSelectionRequestEvent& req = xev.xselectionrequest;
         XEvent resp = {};
         resp.xselection.type      = SelectionNotify;
@@ -368,7 +400,7 @@ void X11Window::handleEvent(XEvent& xev) {
         resp.xselection.target     = req.target;
         resp.xselection.time       = req.time;
 
-        if (req.selection == g_clipboardAtom && req.owner == window_) {
+        if (req.selection == g_clipboardAtom && req.owner == window_ && clipboardOwned_) {
             if (req.target == g_targetsAtom) {
                 // Report supported targets
                 Atom targets[] = { g_targetsAtom, g_utf8Atom };
@@ -379,8 +411,8 @@ void X11Window::handleEvent(XEvent& xev) {
             } else if (req.target == g_utf8Atom || req.target == XA_STRING) {
                 XChangeProperty(s_display_, req.requestor, req.property,
                                 req.target, 8, PropModeReplace,
-                                (const unsigned char*)g_clipboardText.c_str(),
-                                (int)g_clipboardText.size());
+                                (const unsigned char*)clipboardText_.c_str(),
+                                (int)clipboardText_.size());
                 resp.xselection.property = req.property;
             } else {
                 resp.xselection.property = None; // unsupported target
