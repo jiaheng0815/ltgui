@@ -1,6 +1,7 @@
 #pragma once
 #include "color.h"
 #include "font.h"
+#include <cstdint>
 #include <algorithm>
 
 namespace ltgui {
@@ -12,14 +13,14 @@ struct Style {
     int borderWidth = 0;
     int borderRadius = 0;
     Font font;
-    int paddingLeft = 0;
-    int paddingTop = 0;
-    int paddingRight = 0;
-    int paddingBottom = 0;
-    int marginLeft = 0;
-    int marginTop = 0;
-    int marginRight = 0;
-    int marginBottom = 0;
+    int16_t paddingLeft = 0;
+    int16_t paddingTop = 0;
+    int16_t paddingRight = 0;
+    int16_t paddingBottom = 0;
+    int16_t marginLeft = 0;
+    int16_t marginTop = 0;
+    int16_t marginRight = 0;
+    int16_t marginBottom = 0;
 
     static Style defaultStyle();
 

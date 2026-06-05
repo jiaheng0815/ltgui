@@ -61,7 +61,6 @@ private:
 
     Color currentColor_;
     Font currentFont_;
-    uint8_t defaultFontData_[256]; // placeholder for default font
 
     struct CachedImage {
         int texId = -1;

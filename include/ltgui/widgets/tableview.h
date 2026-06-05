@@ -21,6 +21,10 @@ public:
     virtual int rowCount() const = 0;
     virtual int columnCount() const = 0;
     virtual std::string cellText(int row, int col) const = 0;
+
+    // Sort the model by a column. Default is no-op — override in subclasses
+    // that support sorting (e.g. SimpleTableModel).
+    virtual void sort(int column, bool ascending) { (void)column; (void)ascending; }
 };
 
 class SimpleTableModel : public TableModel {
@@ -35,7 +39,7 @@ public:
     void addRow(const std::vector<std::string>& cells);
     void removeRow(int row);
     void clear();
-    void sort(int column, bool ascending);
+    void sort(int column, bool ascending) override;
 
 private:
     int colCount_;

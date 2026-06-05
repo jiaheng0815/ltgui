@@ -13,6 +13,20 @@ void BoxLayout::addStretch(int factor) {
     stretchFactors_.push_back(factor);
 }
 
+void BoxLayout::setStretch(Widget* child, int factor) {
+    if (child && factor > 0) {
+        widgetStretch_[child] = factor;
+    } else if (child) {
+        widgetStretch_.erase(child);
+    }
+}
+
+int BoxLayout::stretch(Widget* child) const {
+    if (!child) return 0;
+    auto it = widgetStretch_.find(const_cast<Widget*>(child));
+    return (it != widgetStretch_.end()) ? it->second : 0;
+}
+
 void BoxLayout::setSpacing(int spacing) {
     spacing_ = spacing;
 }
@@ -55,7 +69,11 @@ void BoxLayout::layout(Widget* container) {
             totalHint += hint.height;
         }
 
-        if (i < static_cast<int>(stretchFactors_.size())) {
+        // Prefer widget-linked stretch; fall back to positional stretch
+        auto it = widgetStretch_.find(child);
+        if (it != widgetStretch_.end()) {
+            totalStretch += it->second;
+        } else if (i < static_cast<int>(stretchFactors_.size())) {
             totalStretch += stretchFactors_[i];
         }
     }
@@ -78,7 +96,11 @@ void BoxLayout::layout(Widget* container) {
 
         Size hint = child->sizeHint();
         int stretch = 0;
-        if (i < static_cast<int>(stretchFactors_.size())) {
+        // Prefer widget-linked stretch over positional
+        auto sit = widgetStretch_.find(child);
+        if (sit != widgetStretch_.end()) {
+            stretch = sit->second;
+        } else if (i < static_cast<int>(stretchFactors_.size())) {
             stretch = stretchFactors_[i];
         }
 
@@ -180,62 +202,89 @@ void GridLayout::layout(Widget* container) {
         rowHeights[row] = std::max(rowHeights[row], hint.height);
     }
 
-    // Distribute remaining horizontal space proportionally to stretch factors
+    // Distribute remaining horizontal space proportionally to stretch factors.
+    // Use int64_t for multiplication to avoid overflow with large stretch values.
     int totalColSpacing = colSpacing_ * (cols_ - 1);
-    int usedColW = 0;
+    int64_t usedColW = 0;
     for (int w : colWidths) usedColW += w;
-    int extraW = std::max(0, availW - totalColSpacing - usedColW);
+    int64_t extraW = std::max<int64_t>(0, static_cast<int64_t>(availW) - totalColSpacing - usedColW);
     int totalColStretch = 0;
     for (int c = 0; c < cols_; c++) {
         auto it = colStretch_.find(c);
         if (it != colStretch_.end()) totalColStretch += it->second;
     }
     if (totalColStretch > 0 && extraW > 0) {
+        int64_t distributed = 0;
         for (int c = 0; c < cols_; c++) {
             auto it = colStretch_.find(c);
             if (it != colStretch_.end() && it->second > 0) {
-                colWidths[c] += extraW * it->second / totalColStretch;
+                int64_t add = extraW * it->second / totalColStretch;
+                colWidths[c] += static_cast<int>(add);
+                distributed += add;
+            }
+        }
+        // Distribute remainder (lost to integer truncation) to columns
+        // with highest stretch, left-to-right, one pixel each.
+        int64_t remainder = extraW - distributed;
+        for (int c = 0; c < cols_ && remainder > 0; c++) {
+            auto it = colStretch_.find(c);
+            if (it != colStretch_.end() && it->second > 0) {
+                colWidths[c] += 1;
+                remainder--;
             }
         }
     }
 
-    // Distribute remaining vertical space
+    // Distribute remaining vertical space.
+    // Use int64_t for multiplication to avoid overflow with large stretch values.
     int totalRowSpacing = rowSpacing_ * (rows - 1);
-    int usedRowH = 0;
+    int64_t usedRowH = 0;
     for (int h : rowHeights) usedRowH += h;
-    int extraH = std::max(0, availH - totalRowSpacing - usedRowH);
+    int64_t extraH = std::max<int64_t>(0, static_cast<int64_t>(availH) - totalRowSpacing - usedRowH);
     int totalRowStretch = 0;
     for (int r = 0; r < rows; r++) {
         auto it = rowStretch_.find(r);
         if (it != rowStretch_.end()) totalRowStretch += it->second;
     }
     if (totalRowStretch > 0 && extraH > 0) {
+        int64_t distributed = 0;
         for (int r = 0; r < rows; r++) {
             auto it = rowStretch_.find(r);
             if (it != rowStretch_.end() && it->second > 0) {
-                rowHeights[r] += extraH * it->second / totalRowStretch;
+                int64_t add = extraH * it->second / totalRowStretch;
+                rowHeights[r] += static_cast<int>(add);
+                distributed += add;
+            }
+        }
+        int64_t remainder = extraH - distributed;
+        for (int r = 0; r < rows && remainder > 0; r++) {
+            auto it = rowStretch_.find(r);
+            if (it != rowStretch_.end() && it->second > 0) {
+                rowHeights[r] += 1;
+                remainder--;
             }
         }
     }
 
-    // Position children (skip invisible)
-    int startX = margin_;
-    int startY = margin_;
+    // Precompute prefix-sum X offsets for O(1) per-child positioning.
+    std::vector<int> colOffsets(cols_ + 1, margin_);
+    for (int c = 0; c < cols_; c++) {
+        colOffsets[c + 1] = colOffsets[c] + colWidths[c] + colSpacing_;
+    }
 
+    // Precompute prefix-sum Y offsets.
+    std::vector<int> rowOffsets(rows + 1, margin_);
+    for (int r = 0; r < rows; r++) {
+        rowOffsets[r + 1] = rowOffsets[r] + rowHeights[r] + rowSpacing_;
+    }
+
+    // Position children (skip invisible)
     for (int i = 0; i < n; i++) {
         if (!children[i]->isVisible()) continue;
         int col = i % cols_;
         int row = i / cols_;
-
-        // Compute cumulative X offset
-        int cx = startX;
-        for (int c = 0; c < col; c++) cx += colWidths[c] + colSpacing_;
-
-        // Compute cumulative Y offset
-        int cy = startY;
-        for (int r = 0; r < row; r++) cy += rowHeights[r] + rowSpacing_;
-
-        children[i]->setGeometry(Rect(cx, cy, colWidths[col], rowHeights[row]));
+        children[i]->setGeometry(Rect(colOffsets[col], rowOffsets[row],
+                                      colWidths[col], rowHeights[row]));
     }
 }
 

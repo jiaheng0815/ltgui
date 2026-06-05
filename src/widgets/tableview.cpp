@@ -239,8 +239,8 @@ bool TableView::handleEvent(Event& event) {
             if (col >= 0 && columns_[col].sortable) {
                 bool asc = (sortedCol_ == col) ? !sortAsc_ : true;
                 setSortColumn(col, asc);
-                if (auto* sm = dynamic_cast<SimpleTableModel*>(model_.get())) {
-                    sm->sort(col, asc);
+                if (model_) {
+                    model_->sort(col, asc);
                 }
                 if (headerCb_) headerCb_(col);
                 update();

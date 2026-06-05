@@ -61,7 +61,6 @@ public:
     Rect geometry() const { return geometry_; }
     virtual void setGeometry(const Rect& rect);
     virtual Size sizeHint() const;
-    virtual Size minimumSize() const;
     Rect absoluteRect() const;
 
     int x() const { return geometry_.x; }
@@ -94,14 +93,14 @@ public:
     Style& style() { return style_; }
 
     // State
-    bool isEnabled() const { return enabled_; }
+    bool isEnabled() const { return (flags_ & kFlagEnabled) != 0; }
     void setEnabled(bool enabled);
-    bool isVisible() const { return visible_; }
+    bool isVisible() const { return (flags_ & kFlagVisible) != 0; }
     void setVisible(bool visible);
-    bool hasFocus() const { return focused_; }
+    bool hasFocus() const { return (flags_ & kFlagFocused) != 0; }
     void raiseToTop();
 
-    void invalidateSizeHint() { sizeHintDirty_ = true; if (parent_) parent_->invalidateSizeHint(); }
+    void invalidateSizeHint() { flags_ |= kFlagSizeHintDirty; if (parent_) parent_->invalidateSizeHint(); }
     void scheduleRelayout();
     Window* window() const { return window_; }
     void setWindow(Window* window);
@@ -140,9 +139,9 @@ protected:
     void propagateWindow(Window* window);
 
     // sizeHint cache support for subclasses
-    bool sizeHintDirty() const { return sizeHintDirty_; }
+    bool sizeHintDirty() const { return (flags_ & kFlagSizeHintDirty) != 0; }
     Size cachedSizeHint() const { return cachedSizeHint_; }
-    void setCachedSizeHint(const Size& s) const { cachedSizeHint_ = s; sizeHintDirty_ = false; }
+    void setCachedSizeHint(const Size& s) const { cachedSizeHint_ = s; flags_ &= ~kFlagSizeHintDirty; }
 
 private:
     Widget* parent_ = nullptr;
@@ -150,14 +149,15 @@ private:
     Rect geometry_;
     std::unique_ptr<Layout> layout_;
     Style style_;
-    bool enabled_ = true;
-    bool visible_ = true;
-    bool focused_ = false;
-    bool needsLayout_ = true;
+    mutable uint8_t flags_ = kFlagEnabled | kFlagVisible | kFlagNeedsLayout | kFlagSizeHintDirty;
+    static constexpr uint8_t kFlagEnabled       = 1 << 0;
+    static constexpr uint8_t kFlagVisible       = 1 << 1;
+    static constexpr uint8_t kFlagFocused       = 1 << 2;
+    static constexpr uint8_t kFlagNeedsLayout   = 1 << 3;
+    static constexpr uint8_t kFlagSizeHintDirty = 1 << 4;
     Window* window_ = nullptr;
 
     mutable Size cachedSizeHint_;
-    mutable bool sizeHintDirty_ = true;
 };
 
 } // namespace ltgui

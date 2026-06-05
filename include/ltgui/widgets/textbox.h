@@ -76,12 +76,6 @@ private:
     void deleteSelection();
     std::string selectedText() const;
 
-    // Cursor positioning helpers
-    int cursorBytePos() const { return cursorPos_; }
-    int cursorVisualLine() const;
-    int cursorVisualCol() const;
-    int posFromVisualPos(int line, int col) const;
-
     // Line handling for multi-line
     std::vector<std::string> lines() const;
     int totalLines() const;

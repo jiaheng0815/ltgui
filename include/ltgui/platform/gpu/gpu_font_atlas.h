@@ -63,12 +63,6 @@ public:
     // Measure text (in pixels)
     Size measureText(const std::string& text, const Font& fontDesc);
 
-    // Get atlas texture id for binding
-    int atlasTexId(const Font& fontDesc) const;
-
-    // Flush any pending atlas updates
-    void flush();
-
     bool hasFont(const Font& f) const { return loadedFonts_.count(f) > 0; }
     int atlasW() const { return atlasW_; }
     int atlasH() const { return atlasH_; }

@@ -2,6 +2,8 @@
 #include <cstdio>
 #include <cstdarg>
 #include <cstring>
+#include <unordered_map>
+#include <string>
 
 namespace ltgui {
 
@@ -24,29 +26,16 @@ public:
         return logger;
     }
 
-    // Enable/disable a named category (e.g. "GPU", "Window", "D3D11", "GL")
+    // Enable/disable a named category (e.g. "GPU", "Window", "D3D11", "GL").
+    // Uses an unordered_map so there is no hard limit on the number of categories.
     void setEnabled(const char* category, bool enabled) {
-        for (int i = 0; i < categoryCount_; i++) {
-            if (std::strcmp(categories_[i].name, category) == 0) {
-                categories_[i].enabled = enabled;
-                return;
-            }
-        }
-        // Add new category if there's room
-        if (categoryCount_ < 16) {
-            categories_[categoryCount_++] = {category, enabled};
-        } else {
-            // Don't silently drop — let the developer know the ceiling was hit.
-            fprintf(stderr, "[Logger] WARN: category limit (16) reached, "
-                            "\"%s\" not registered.\n", category);
-        }
+        categories_[category] = enabled;
     }
 
     bool isEnabled(const char* category) const {
-        for (int i = 0; i < categoryCount_; i++) {
-            if (std::strcmp(categories_[i].name, category) == 0)
-                return categories_[i].enabled;
-        }
+        auto it = categories_.find(category);
+        if (it != categories_.end())
+            return it->second;
         // Unknown categories default to enabled in debug, off in release
 #ifdef NDEBUG
         return false;
@@ -83,13 +72,7 @@ public:
 
 private:
     Logger() = default;
-
-    struct Category {
-        const char* name;
-        bool enabled = true;
-    };
-    Category categories_[16];
-    int categoryCount_ = 0;
+    std::unordered_map<std::string, bool> categories_;
 };
 
 // Convenience macros — cross-compiler variadic support

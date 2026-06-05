@@ -195,6 +195,29 @@ NativeCanvas* X11Window::getCanvas() {
     return canvas_;
 }
 
+float X11Window::dpiScale() const {
+    if (!s_display_) return 1.0f;
+
+    // Query Xft.dpi from the X resource database.
+    // This is the standard way to get the user's configured DPI on X11.
+    const char* dpiStr = XGetDefault(s_display_, "Xft", "dpi");
+    if (dpiStr && dpiStr[0]) {
+        float dpi = std::atof(dpiStr);
+        if (dpi > 0.0f) return dpi / 96.0f; // 96 DPI = 1.0 scale factor
+    }
+
+    // Fallback: derive from screen dimensions
+    int screen = DefaultScreen(s_display_);
+    int widthMM = DisplayWidthMM(s_display_, screen);
+    int widthPx = DisplayWidth(s_display_, screen);
+    if (widthMM > 0 && widthPx > 0) {
+        float dpi = (float)widthPx / ((float)widthMM / 25.4f);
+        return dpi / 96.0f;
+    }
+
+    return 1.0f;
+}
+
 bool X11Window::setClipboardText(const std::string& text) {
     if (!s_display_ || !window_) return false;
     ensureClipboardAtoms();

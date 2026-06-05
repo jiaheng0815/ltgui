@@ -95,9 +95,6 @@ public:
     void setScissor(const Rect& r);
     void clearScissor();
 
-    // Debug
-    int queuedCommands() const { return static_cast<int>(cmds_.size()); }
-
 private:
     void flushBatch();
     void emitQuad(std::vector<Vertex2D>& out, const Rect& r,

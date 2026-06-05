@@ -293,32 +293,6 @@ void Window::setFocusWidget(Widget* w) {
     }
 }
 
-Point Window::imeCursorScreenPos() const {
-    // Default position if no focused widget: top-left corner
-    if (!focusWidget_) return {10, 10};
-
-    // Get the focused widget's absolute rect (relative to window client area)
-    Rect abs = focusWidget_->absoluteRect();
-    Point cursorPos = {abs.x + 8, abs.y + abs.height / 2};
-
-    // If it's a TextBox, compute the actual text cursor position
-    if (focusWidget_->widgetType() == WidgetType::TextBox) {
-        // TextBox cursor position is computed during paint — we approximate here
-        // A more precise approach would add a virtual cursorPos() to Widget
-        cursorPos.x = abs.x + focusWidget_->style().paddingLeft;
-    }
-
-    // Convert to screen coordinates via native window
-    if (nativeWindow_) {
-        Size sz = nativeWindow_->getSize();
-        // Add window position — the client area offset from screen
-        // For now return client-relative; the native window handler
-        // will add the window position offset
-        (void)sz;
-    }
-    return cursorPos;
-}
-
 void Window::onPaint(NativeCanvas* canvas, const Rect& dirtyRect) {
     if (centralWidget_ && canvas) {
         centralWidget_->paint(canvas, dirtyRect);

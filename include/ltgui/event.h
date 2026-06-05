@@ -36,7 +36,8 @@ enum class KeyModifier {
     None = 0,
     Shift = 1,
     Control = 2,
-    Alt = 4
+    Alt = 4,
+    Super = 8   // Windows key / macOS Command (Cmd) / X11 Super
 };
 
 inline KeyModifier operator|(KeyModifier a, KeyModifier b) {

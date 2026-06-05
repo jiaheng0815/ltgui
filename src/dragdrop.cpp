@@ -1,6 +1,55 @@
 #include "dragdrop.h"
+#include <string>
 
 namespace ltgui {
+namespace {
+
+// Percent-decode a URI component (RFC 3986 §2.1).
+// Skips invalid sequences rather than producing garbage characters.
+std::string percentDecode(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '%' && i + 2 < s.size()) {
+            char hi = s[i + 1], lo = s[i + 2];
+            int val = 0;
+            if (hi >= '0' && hi <= '9') val  = (hi - '0') << 4;
+            else if (hi >= 'A' && hi <= 'F') val = (hi - 'A' + 10) << 4;
+            else if (hi >= 'a' && hi <= 'f') val = (hi - 'a' + 10) << 4;
+            else { out += s[i]; continue; }
+
+            if (lo >= '0' && lo <= '9') val  |= (lo - '0');
+            else if (lo >= 'A' && lo <= 'F') val |= (lo - 'A' + 10);
+            else if (lo >= 'a' && lo <= 'f') val |= (lo - 'a' + 10);
+            else { out += s[i]; continue; }
+
+            out += static_cast<char>(val);
+            i += 2;
+        } else {
+            out += s[i];
+        }
+    }
+    return out;
+}
+
+// Reject paths that attempt traversal via ".." segments.
+// A proper fix would canonicalize via realpath()/GetFullPathName(),
+// but this catches the most common attack vector.
+bool hasPathTraversal(const std::string& path) {
+    // Check for ".." as a path component
+    size_t pos = 0;
+    while (pos < path.size()) {
+        // Find next slash (or end)
+        size_t slash = path.find_first_of("\\/", pos);
+        if (slash == std::string::npos) slash = path.size();
+        size_t len = slash - pos;
+        if (len == 2 && path[pos] == '.' && path[pos + 1] == '.') return true;
+        pos = slash + 1;
+    }
+    return false;
+}
+
+} // namespace
 
 bool DragData::hasFormat(const std::string& mime) const {
     return data_.count(mime) > 0;
@@ -55,7 +104,10 @@ std::vector<std::string> DragData::files() const {
             }
         }
         if (!uri.empty()) {
-            result.push_back(uri);
+            uri = percentDecode(uri);
+            if (!hasPathTraversal(uri)) {
+                result.push_back(uri);
+            }
         }
         pos = end;
         // Skip the separator

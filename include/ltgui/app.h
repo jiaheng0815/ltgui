@@ -18,12 +18,15 @@ class Timer;
 inline bool isMainThread() { return true; }
 inline void setMainThread() {}
 #else
+// Use an inline variable (C++17) so setMainThread() explicitly records the
+// correct thread, regardless of who calls isMainThread() first.  Before
+// setMainThread() is called, isMainThread() returns false (fail-closed).
+inline std::thread::id s_mainThreadId{};
 inline bool isMainThread() {
-    static std::thread::id s_mainThreadId = std::this_thread::get_id();
     return std::this_thread::get_id() == s_mainThreadId;
 }
 inline void setMainThread() {
-    isMainThread(); // force static init on the calling thread
+    s_mainThreadId = std::this_thread::get_id();
 }
 #endif
 

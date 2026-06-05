@@ -98,10 +98,9 @@ const GlyphEntry* FontAtlas::getGlyph(uint32_t codepoint, const Font& fontDesc) 
     }
 
     int ax, ay, texId;
-    if (!allocGlyphRect(gw, gh, ax, ay, texId)) {
-        createAtlasPage();
-        if (!allocGlyphRect(gw, gh, ax, ay, texId)) return nullptr;
-    }
+    // allocGlyphRect now handles page creation internally (up to kMaxAtlasPages),
+    // so the old manual createAtlasPage() fallback here is no longer needed.
+    if (!allocGlyphRect(gw, gh, ax, ay, texId)) return nullptr;
 
     std::vector<uint8_t> gray(gw * gh);
     stbtt_MakeGlyphBitmap(&cache.info, gray.data(), gw, gh, gw,
@@ -242,15 +241,6 @@ float FontAtlas::getAscent(const Font& fontDesc) {
     return 0.0f;
 }
 
-int FontAtlas::atlasTexId(const Font& fontDesc) const {
-    (void)fontDesc;
-    return pages_.empty() ? -1 : 0;
-}
-
-void FontAtlas::flush() {
-    // Atlas texture updates are immediate via update() — nothing to flush
-}
-
 int FontAtlas::createAtlasPage() {
     // Create empty RGBA atlas texture via TextureManager so its texId
     // is valid for binding in flushBatch (unified ID space).
@@ -301,9 +291,16 @@ bool FontAtlas::allocGlyphRect(int w, int h, int& outX, int& outY, int& outTexId
         return false;
     }
     if (createAtlasPage() < 0) return false;
-    // The new page is at the end; recurse once (won't recurse further because
-    // the size guard above and the per-page loop guarantee at most one retry).
-    return allocGlyphRect(w, h, outX, outY, outTexId);
+
+    // Place glyph directly on the newly-created page (always pages_.back())
+    // instead of recursing, which would re-scan all full pages unnecessarily.
+    auto& page = pages_.back();
+    outX = page.cursorX;
+    outY = page.cursorY;
+    outTexId = page.texId;
+    page.cursorX += w + 1;
+    page.rowHeight = std::max(page.rowHeight, h);
+    return true;
 }
 
 uint64_t FontAtlas::fontKey(const Font& f) const {

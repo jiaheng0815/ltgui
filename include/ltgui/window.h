@@ -74,11 +74,6 @@ private:
     // return false. Callers should bail out on false.
     bool validateFocusWidget();
 
-    // IME composition cursor position in screen coordinates.
-    // The focused widget reports its cursor position so the platform
-    // can position the IME composition window correctly.
-    Point imeCursorScreenPos() const;
-
     std::unique_ptr<NativeWindow> nativeWindow_;
     std::unique_ptr<gpu::GpuCanvas> gpuCanvas_;
     NativeCanvas* canvas_ = nullptr;

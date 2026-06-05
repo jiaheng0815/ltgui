@@ -51,11 +51,12 @@ TEST_CASE("Layout cascade: sizeHint change triggers parent re-layout") {
 
 TEST_CASE("Widget focus chain traversal") {
     auto root = std::make_unique<Widget>();
-    auto* a  = root->makeChild<Widget>();
-    auto* a1 = a->makeChild<Widget>();
-    auto* a2 = a->makeChild<Widget>();
-    auto* b  = root->makeChild<Widget>();
-    auto* c  = root->makeChild<Widget>();
+    // Use Button widgets because base Widget::canAcceptFocus() returns false
+    auto* a  = root->makeChild<Button>("a");
+    auto* a1 = a->makeChild<Button>("a1");
+    auto* a2 = a->makeChild<Button>("a2");
+    auto* b  = root->makeChild<Button>("b");
+    auto* c  = root->makeChild<Button>("c");
 
     // nextFocusWidget(): depth-first. Leaf with no children returns self.
     // root: children=[a,b,c] → a->nextFocusWidget()

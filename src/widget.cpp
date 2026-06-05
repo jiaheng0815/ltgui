@@ -1,14 +1,10 @@
 #include "widget.h"
 #include "window.h"
 #include "layout.h"
-#include "signal.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
 
 namespace ltgui {
-namespace detail {
-thread_local const void* tls_emitting_signal = nullptr;
-} // namespace detail
 
 Widget::Widget(Widget* parent) : parent_(parent) {
     style_ = Style::defaultStyle();
@@ -30,7 +26,7 @@ Widget* Widget::addChild(std::unique_ptr<Widget> child) {
     child->parent_ = this;
     Widget* raw = child.get();
     raw->propagateWindow(window_);
-    raw->needsLayout_ = true;
+    raw->flags_ |= kFlagNeedsLayout;
     children_.push_back(std::move(child));
     invalidateSizeHint();
 
@@ -54,7 +50,7 @@ std::unique_ptr<Widget> Widget::removeChild(Widget* child) {
         (*it)->propagateWindow(nullptr);
         auto result = std::move(*it);
         children_.erase(it);
-        needsLayout_ = true;
+        flags_ |= kFlagNeedsLayout;
         invalidateSizeHint();
         return result;
     }
@@ -96,7 +92,7 @@ void Widget::scheduleRelayout() {
     while (ancestor) {
         if (ancestor->layout() && !ancestor->geometry().isEmpty()) {
             ancestor->layout()->layout(ancestor);
-            ancestor->needsLayout_ = false;
+            ancestor->flags_ &= ~kFlagNeedsLayout;
             // Continue walking up in case outer containers also need relayout
             ancestor = ancestor->parent();
             continue;
@@ -111,33 +107,30 @@ void Widget::scheduleRelayout() {
         Rect newGeo(geometry_.x, geometry_.y, hint.width, hint.height);
         setGeometry(newGeo);
     }
-    needsLayout_ = false;
+    flags_ &= ~kFlagNeedsLayout;
 }
 
 Size Widget::sizeHint() const {
-    if (!sizeHintDirty_) return cachedSizeHint_;
+    if (!(flags_ & kFlagSizeHintDirty)) return cachedSizeHint_;
     if (layout_) {
         cachedSizeHint_ = layout_->preferredSize(this);
     } else {
         float dpi = window_ ? window_->dpiScale() : 1.0f;
         cachedSizeHint_ = {static_cast<int>(100 * dpi), static_cast<int>(24 * dpi)};
     }
-    sizeHintDirty_ = false;
+    flags_ &= ~kFlagSizeHintDirty;
     return cachedSizeHint_;
-}
-
-Size Widget::minimumSize() const {
-    return {0, 0};
 }
 
 void Widget::setLayout(std::unique_ptr<Layout> layout) {
     layout_ = std::move(layout);
-    needsLayout_ = true;
+    flags_ |= kFlagNeedsLayout;
 }
 
 void Widget::setEnabled(bool enabled) {
-    if (enabled_ != enabled) {
-        enabled_ = enabled;
+    bool cur = (flags_ & kFlagEnabled) != 0;
+    if (cur != enabled) {
+        if (enabled) flags_ |= kFlagEnabled; else flags_ &= ~kFlagEnabled;
         // Clear focus if this widget is being disabled while focused
         if (!enabled && window_ && window_->focusWidget() == this) {
             window_->setFocusWidget(nullptr);
@@ -147,8 +140,9 @@ void Widget::setEnabled(bool enabled) {
 }
 
 void Widget::setVisible(bool visible) {
-    if (visible_ != visible) {
-        visible_ = visible;
+    bool cur = (flags_ & kFlagVisible) != 0;
+    if (cur != visible) {
+        if (visible) flags_ |= kFlagVisible; else flags_ &= ~kFlagVisible;
         // Clear focus if this widget is being hidden while focused
         if (!visible && window_ && window_->focusWidget() == this) {
             window_->setFocusWidget(nullptr);
@@ -181,14 +175,14 @@ void Widget::raiseToTop() {
 
 void Widget::propagateWindow(Window* window) {
     window_ = window;
-    sizeHintDirty_ = true;  // canvas availability changed — recompute next time
+    flags_ |= kFlagSizeHintDirty;  // canvas availability changed — recompute next time
     for (auto& child : children_) {
         child->propagateWindow(window);
     }
 }
 
 void Widget::paint(NativeCanvas* canvas, const Rect& dirtyRect) {
-    if (!visible_) return;
+    if (!isVisible()) return;
 
     Rect abs = absoluteRect();
     if (!abs.intersects(dirtyRect)) return;
@@ -209,7 +203,7 @@ void Widget::paintSelf(NativeCanvas* /*canvas*/) {
 
 void Widget::paintChildren(NativeCanvas* canvas, const Rect& dirtyRect) {
     for (auto& child : children_) {
-        if (child->visible_) {
+        if (child->isVisible()) {
             child->paint(canvas, dirtyRect);
         }
     }
@@ -306,7 +300,7 @@ Widget* Widget::lastFocusableDescendant() {
 }
 
 bool Widget::handleEvent(Event& event) {
-    if (!enabled_ || !visible_) return false;
+    if (!isEnabled() || !isVisible()) return false;
 
     switch (event.type) {
     case EventType::MouseDown:
@@ -315,7 +309,7 @@ bool Widget::handleEvent(Event& event) {
         Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
         for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
             Widget* child = it->get();
-            if (child->visible_ && child->enabled_) {
+            if (child->isVisible() && child->isEnabled()) {
                 Rect childEff = child->effectiveGeometry().translated(
                     child->geometry_.x, child->geometry_.y);
                 if (childEff.contains(localPos)) {
@@ -340,7 +334,7 @@ bool Widget::handleEvent(Event& event) {
         bool handledAny = false;
         for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
             Widget* child = it->get();
-            if (child->visible_ && child->enabled_) {
+            if (child->isVisible() && child->isEnabled()) {
                 Point savedPos = event.pos;
                 event.pos = localPos;
                 if (child->handleEvent(event))
@@ -362,22 +356,24 @@ bool Widget::handleEvent(Event& event) {
 }
 
 Widget* Widget::hitTest(const Point& pos) {
-    if (!visible_) return nullptr;
+    if (!isVisible()) return nullptr;
+
+    // Use effectiveGeometry() so widgets with extended hit areas
+    // (context menus, tooltips, shadows) properly receive events.
+    Rect eff = effectiveGeometry();
+    if (!eff.contains(pos)) return nullptr;
 
     Point local = {pos.x - geometry_.x, pos.y - geometry_.y};
 
     for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
         Widget* child = it->get();
-        if (child->geometry().contains(local)) {
+        if (child->isVisible()) {
             Widget* hit = child->hitTest(local);
             if (hit) return hit;
         }
     }
 
-    if (geometry_.contains(pos)) {
-        return this;
-    }
-    return nullptr;
+    return this;
 }
 
 } // namespace ltgui

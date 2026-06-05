@@ -6,6 +6,7 @@
 #include "layout.h"
 #include "theme.h"
 #include "app.h"
+#include "animation.h"
 #include "platform/native_canvas.h"
 #include "platform/platform.h"
 
@@ -17,6 +18,8 @@
 #undef MessageBox
 #elif defined(LTGUI_PLATFORM_LINUX)
 #include "platform/x11/x11_window.h"
+#include <X11/Xlib.h>
+#include <unistd.h>
 #elif defined(LTGUI_PLATFORM_MACOS)
 #import <Cocoa/Cocoa.h>
 #endif
@@ -69,29 +72,62 @@ DialogResult Dialog::exec() {
 
 #ifdef LTGUI_PLATFORM_WINDOWS
         // Win32: pump Windows messages so the dialog remains responsive.
-        // Use PeekMessage (not GetMessage) to avoid blocking: processEvents()
-        // already handles the animation/timer heartbeat.
-        MSG msg;
-        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) {
-                running_ = false;
-                Application::instance().quit();
-                break;
+        // Drain all queued messages first, then WaitMessage() to block
+        // efficiently until the next message arrives.
+        {
+            MSG msg;
+            bool hadMessages = false;
+            while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                hadMessages = true;
+                if (msg.message == WM_QUIT) {
+                    running_ = false;
+                    Application::instance().quit();
+                    break;
+                }
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
             }
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
+            // Block only if the queue was empty — avoids busy-waiting
+            if (!hadMessages && running_) {
+                WaitMessage();
+            }
         }
 #elif defined(LTGUI_PLATFORM_LINUX)
-        // X11: flush pending events for all windows on the shared display.
+        // X11: block on the display fd to avoid 100% CPU busy-spin.
+        // Use an adaptive timeout: 16ms when animations are active
+        // (for 60 FPS), 500ms when idle — matching Application::run().
+        {
+            int x11Fd = X11Window::displayFd();
+            bool hasAnim = AnimationManager::instance().hasActive();
+            int wakeMs = hasAnim ? 16 : 500;
+
+            if (x11Fd >= 0) {
+                fd_set fds;
+                FD_ZERO(&fds);
+                FD_SET(x11Fd, &fds);
+                struct timeval tv;
+                tv.tv_sec  = wakeMs / 1000;
+                tv.tv_usec = (wakeMs % 1000) * 1000;
+                int ret;
+                do { ret = select(x11Fd + 1, &fds, nullptr, nullptr, &tv); }
+                while (ret < 0 && errno == EINTR);
+            } else {
+                usleep(wakeMs * 1000);
+            }
+        }
         X11Window::processAllPending();
 #elif defined(LTGUI_PLATFORM_MACOS)
         // Cocoa: pump one event from the main run loop.
-        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                            untilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]
-                               inMode:NSDefaultRunLoopMode
-                              dequeue:YES];
-        if (event) {
-            [NSApp sendEvent:event];
+        // @autoreleasepool prevents autoreleased temporaries (NSEvent,
+        // NSDate, NSString, etc.) from accumulating over the dialog lifetime.
+        @autoreleasepool {
+            NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                untilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]
+                                   inMode:NSDefaultRunLoopMode
+                                  dequeue:YES];
+            if (event) {
+                [NSApp sendEvent:event];
+            }
         }
 #endif
         // Drive the fade-in animation so the overlay appears immediately.

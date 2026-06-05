@@ -11,7 +11,28 @@ namespace detail {
 // Thread-local flag to detect re-entrant emit() on the same Signal.
 // Stored as a pointer so each Signal instance gets its own flag without
 // adding a member to every template instantiation that uses Signal inline.
-extern thread_local const void* tls_emitting_signal;
+// Using 'inline thread_local' (C++17) avoids a layering violation: no
+// separate .cpp definition needed.
+inline thread_local const void* tls_emitting_signal = nullptr;
+
+// RAII guard that saves/restores emit state on the TLS slot and emitting_
+// flag.  This makes emit() exception-safe even if a callback throws:
+// the destructor always runs, so emitting_ and the TLS pointer are never
+// left in a corrupted state.
+struct ScopedEmitGuard {
+    const void*& tlsSlot;
+    const void*  prev;
+    bool&        emitting;
+    ScopedEmitGuard(const void*& slot, const void* self, bool& em)
+        : tlsSlot(slot), prev(slot), emitting(em) {
+        tlsSlot = self;
+        emitting = true;
+    }
+    ~ScopedEmitGuard() {
+        emitting = false;
+        tlsSlot  = prev;
+    }
+};
 } // namespace detail
 
 template<typename... Args>
@@ -39,32 +60,24 @@ public:
         , pendingSlots_(std::move(other.pendingSlots_))
         , nextId_(other.nextId_)
         , emitting_(other.emitting_)
-        , inCleanup_(other.inCleanup_)
-        , emitDepth_(other.emitDepth_)
         , generation_(std::move(other.generation_)) {
         // The moved-from Signal should not be usable — reset its state.
         // We DON'T increment generation_ because the shared_ptr was moved intact.
-        other.nextId_ = 1;
+        other.nextId_   = 1;
         other.emitting_ = false;
-        other.inCleanup_ = false;
-        other.emitDepth_ = 0;
     }
 
     Signal& operator=(Signal&& other) noexcept {
         if (this != &other) {
             // Invalidate our old ScopedConnections before replacing state
             if (generation_) ++(*generation_);
-            slots_ = std::move(other.slots_);
+            slots_        = std::move(other.slots_);
             pendingSlots_ = std::move(other.pendingSlots_);
-            nextId_ = other.nextId_;
-            emitting_ = other.emitting_;
-            inCleanup_ = other.inCleanup_;
-            emitDepth_ = other.emitDepth_;
-            generation_ = std::move(other.generation_);
-            other.nextId_ = 1;
+            nextId_       = other.nextId_;
+            emitting_     = other.emitting_;
+            generation_   = std::move(other.generation_);
+            other.nextId_   = 1;
             other.emitting_ = false;
-            other.inCleanup_ = false;
-            other.emitDepth_ = 0;
         }
         return *this;
     }
@@ -95,19 +108,20 @@ public:
             return false;
         };
 
-        if (eraseFrom(slots_)) return;
-        eraseFrom(pendingSlots_);
-        // Don't physically erase during emit — cleanup happens after emit
-        if (!emitting_ && !inCleanup_) {
-            compactSlots();
-            compactPending();
+        if (eraseFrom(slots_)) {
+            if (!emitting_) compactSlots();
+            return;
+        }
+        if (eraseFrom(pendingSlots_)) {
+            if (!emitting_) compactPending();
+            return;
         }
     }
 
     void disconnectAll() {
-        for (auto& s : slots_) s.cb = nullptr;
+        for (auto& s : slots_)        s.cb = nullptr;
         for (auto& s : pendingSlots_) s.cb = nullptr;
-        if (!emitting_ && !inCleanup_) {
+        if (!emitting_) {
             slots_.clear();
             pendingSlots_.clear();
         }
@@ -121,19 +135,14 @@ public:
         //   3. Risk double-firing newly-connected slots
         // We detect this and assert in debug; in release, we bail.
         assert(detail::tls_emitting_signal != this &&
-               "Recursive Signal::emit() detected — a callback triggered emit() on the same Signal. "
-               "Use a deferred/post mechanism instead.");
+               "Recursive Signal::emit() detected — a callback triggered emit() "
+               "on the same Signal. Use a deferred/post mechanism instead.");
         if (detail::tls_emitting_signal == this) return;
 
-        auto* prev = detail::tls_emitting_signal;
-        detail::tls_emitting_signal = this;
-
-        // Snapshot the current emission depth so nested emits on DIFFERENT
-        // Signal instances can still work correctly.
-        int snapshotDepth = emitDepth_;
-        emitDepth_++;
-
-        emitting_ = true;
+        // RAII guard: saves TLS + emitting_, restores on scope exit.
+        // This makes emit() exception-safe — even if a callback throws,
+        // the state is never left corrupted.
+        detail::ScopedEmitGuard guard(detail::tls_emitting_signal, this, emitting_);
 
         // Iterate over a SIZE snapshot so newly-added slots (in pendingSlots_)
         // are NOT fired during this emit.
@@ -145,38 +154,30 @@ public:
                 slot.cb(args...);
             }
         }
-
-        emitting_ = false;
+        // guard destructor runs here: emitting_ = false, TLS restored
 
         // Merge pending connections added during emit
         if (!pendingSlots_.empty()) {
-            inCleanup_ = true;
-            // Compact nulled slots before merging
-            compactSlots();
+            compactSlots(); // remove nulled before merging
             for (auto& s : pendingSlots_) {
                 if (s.cb) {
                     slots_.push_back(std::move(s));
                 }
             }
             pendingSlots_.clear();
-            inCleanup_ = false;
         }
 
-        // Clean up callbacks nulled during emission (only after all nesting unwinds)
-        if (emitDepth_ == snapshotDepth + 1) {
-            compactSlots();
-            emitDepth_ = 0;
-        } else {
-            emitDepth_ = snapshotDepth;
-        }
-
-        detail::tls_emitting_signal = prev;
+        // Clean up callbacks nulled during emission.
+        // Because same-signal recursion is blocked (TLS guard above),
+        // we are ALWAYS at the outermost emit for this Signal instance,
+        // so it's always safe to compact here.
+        compactSlots();
     }
 
-    bool empty() const { return slots_.empty() && pendingSlots_.empty(); }
+    bool empty() const { return size() == 0; }
     size_t size() const {
         size_t n = 0;
-        for (auto& s : slots_) { if (s.cb) n++; }
+        for (auto& s : slots_)        { if (s.cb) n++; }
         for (auto& s : pendingSlots_) { if (s.cb) n++; }
         return n;
     }
@@ -189,10 +190,8 @@ private:
     struct Slot { int id; Callback cb; };
     std::vector<Slot> slots_;
     std::vector<Slot> pendingSlots_;
-    int nextId_ = 1;
+    int  nextId_   = 1;
     bool emitting_ = false;
-    bool inCleanup_ = false;
-    int emitDepth_ = 0;
 
     // Shared generation counter. Signal holds the owning shared_ptr.
     // ScopedConnection stores a weak_ptr copy. When Signal is destroyed,
@@ -240,11 +239,11 @@ public:
     ScopedConnection& operator=(ScopedConnection&& other) noexcept {
         if (this != &other) {
             disconnect();
-            signal_ = other.signal_;
+            signal_     = other.signal_;
             generation_ = std::move(other.generation_);
-            id_ = other.id_;
+            id_         = other.id_;
             other.signal_ = nullptr;
-            other.id_ = -1;
+            other.id_     = -1;
             other.generation_.reset();
         }
         return *this;
@@ -260,7 +259,7 @@ public:
                 signal_->disconnect(id_);
             }
             signal_ = nullptr;
-            id_ = -1;
+            id_     = -1;
             generation_.reset();
         }
     }
@@ -270,9 +269,9 @@ public:
     }
 
 private:
-    Signal<Args...>* signal_ = nullptr;
-    std::weak_ptr<int> generation_;
-    int id_ = -1;
+    Signal<Args...>*    signal_ = nullptr;
+    std::weak_ptr<int>  generation_;
+    int                 id_ = -1;
 };
 
 } // namespace ltgui

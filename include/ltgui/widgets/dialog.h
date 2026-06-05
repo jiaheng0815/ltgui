@@ -14,8 +14,7 @@ enum class DialogButton {
     OK     = 1,
     Cancel = 2,
     Yes    = 4,
-    No     = 8,
-    Close  = 16
+    No     = 8
 };
 inline DialogButton operator|(DialogButton a, DialogButton b) {
     return static_cast<DialogButton>(static_cast<int>(a) | static_cast<int>(b));

@@ -35,6 +35,7 @@ public:
     Size getSize() const override;
     void invalidate(const Rect& rect) override;
     void* nativeHandle() const override;
+    float dpiScale() const override;
 
     NativeCanvas* getCanvas() override;
 

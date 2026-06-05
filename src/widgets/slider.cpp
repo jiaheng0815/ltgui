@@ -37,7 +37,9 @@ Size Slider::sizeHint() const {
 int Slider::thumbPos() const {
     int range = max_ - min_;
     if (range == 0) return 16;
-    int usableW = width() - 32; // track margins (8+8) + thumb radius (8+8)
+    // Thumb center moves from 16 to width-16 (usable track = width - 32).
+    // This keeps the 16px thumb fully within the widget bounds at both ends.
+    int usableW = width() - 32;
     return 16 + (usableW * (value_ - min_)) / range;
 }
 
@@ -45,23 +47,29 @@ void Slider::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
     Theme t = currentTheme();
 
+    // Track spans from x+8 to x+width-8 (= width-16 wide)
     int trackW = r.width - 16;
     int trackX = r.x + 8;
     int trackY = r.y + r.height / 2 - 3;
 
-    // Track
+    // Track background
     Rect trackRect(trackX, trackY, trackW, 6);
     canvas->setColor(t.bgTertiary);
     canvas->fillRoundedRect(trackRect, 3);
 
-    // Filled portion (tpos is widget-local, so fill width = tpos - 8)
+    // Filled portion.
+    // tpos is the thumb centre in widget-local coords.
+    // fillW = tpos makes the fill extend through the track to match the
+    // thumb's visual right edge, so at max value the fill covers the
+    // entire track (no 8 px gap).
     int tpos = thumbPos();
-    int fillW = tpos - 8;
+    int fillW = tpos;
     if (fillW > 0) {
         Rect filledRect(trackX, trackY, fillW, 6);
         canvas->setColor(t.accent);
         canvas->fillRoundedRect(filledRect, 3);
-        // Clear the right rounded corner of the fill when it overlaps
+        // Flatten the right rounded corner when there is visible
+        // unfilled track to the right (i.e. when fillW < trackW).
         if (fillW < trackW - 3) {
             canvas->fillRect(Rect(trackX + fillW - 3, trackY, 3, 6));
         }

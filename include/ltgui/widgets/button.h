@@ -1,6 +1,5 @@
 #pragma once
 #include "widget.h"
-#include "animation.h"
 #include <string>
 #include <functional>
 
@@ -28,7 +27,6 @@ private:
     std::string text_;
     bool pressed_ = false;
     bool hovered_ = false;
-    int animDuration_ = 150;
     ClickCallback clickCallback_;
 };
 

@@ -3,7 +3,6 @@
 #include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
-#include <cmath>
 
 namespace ltgui {
 

@@ -216,4 +216,53 @@ int64_t Application::nextTimerWakeupMs() const {
     return best;
 }
 
+bool Application::tick(int timeoutMs) {
+    if (!running_) return false;
+
+#ifdef LTGUI_PLATFORM_WINDOWS
+    MSG msg;
+    DWORD timeout = (timeoutMs <= 0) ? 0 : (DWORD)timeoutMs;
+    DWORD result = MsgWaitForMultipleObjects(0, nullptr, FALSE, timeout, QS_ALLINPUT);
+    if (result == WAIT_OBJECT_0) {
+        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                running_ = false;
+                return false;
+            }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+#elif defined(LTGUI_PLATFORM_LINUX)
+    X11Window::processAllPending();
+    if (timeoutMs > 0) {
+        int x11Fd = X11Window::displayFd();
+        if (x11Fd >= 0) {
+            fd_set fds;
+            FD_ZERO(&fds);
+            FD_SET(x11Fd, &fds);
+            struct timeval tv;
+            tv.tv_sec = timeoutMs / 1000;
+            tv.tv_usec = (timeoutMs % 1000) * 1000;
+            select(x11Fd + 1, &fds, nullptr, nullptr, &tv);
+        } else {
+            usleep(timeoutMs * 1000);
+        }
+        X11Window::processAllPending();
+    }
+#elif defined(LTGUI_PLATFORM_MACOS)
+    double interval = (timeoutMs <= 0) ? 0.0 : (timeoutMs / 1000.0);
+    NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                        untilDate:[NSDate dateWithTimeIntervalSinceNow:interval]
+                           inMode:NSDefaultRunLoopMode
+                          dequeue:YES];
+    if (event) {
+        [NSApp sendEvent:event];
+    }
+#endif
+
+    processEvents();
+    return true;
+}
+
 } // namespace ltgui

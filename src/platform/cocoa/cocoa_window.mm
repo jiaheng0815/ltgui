@@ -138,22 +138,19 @@ namespace ltgui { struct Event; }
     if (flags & NSEventModifierFlagShift)     ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Shift);
     if (flags & NSEventModifierFlagControl)   ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Control);
     if (flags & NSEventModifierFlagOption)    ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Alt);
-    if (flags & NSEventModifierFlagCommand)   ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Control);
+    if (flags & NSEventModifierFlagCommand)   ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Super);
     cppWindow_->onKeyEvent(ev);
 }
 - (void)keyUp:(NSEvent*)event {
     ltgui::Event ev;
     ev.type = ltgui::EventType::KeyUp;
-    NSString* chars = [event characters];
-    if ([chars length] > 0) {
-        ev.charCode = [chars characterAtIndex:0];
-    }
+    // [event characters] is typically empty for KeyUp — leave charCode unset.
     ev.key = cppWindow_->mapCocoaKey(static_cast<int>([event keyCode]));
     NSEventModifierFlags flags = [event modifierFlags];
     if (flags & NSEventModifierFlagShift)     ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Shift);
     if (flags & NSEventModifierFlagControl)   ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Control);
     if (flags & NSEventModifierFlagOption)    ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Alt);
-    if (flags & NSEventModifierFlagCommand)   ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Control);
+    if (flags & NSEventModifierFlagCommand)   ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Super);
     cppWindow_->onKeyEvent(ev);
 }
 @end
@@ -277,6 +274,13 @@ void CocoaWindow::invalidate(const Rect& rect) {
 
 void* CocoaWindow::nativeHandle() const {
     return (__bridge void*)nsWindow_;
+}
+
+float CocoaWindow::dpiScale() const {
+    @autoreleasepool {
+        CGFloat sf = [[NSScreen mainScreen] backingScaleFactor];
+        return sf > 0.0f ? (float)sf : 1.0f;
+    }
 }
 
 NativeCanvas* CocoaWindow::getCanvas() {

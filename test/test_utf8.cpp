@@ -20,7 +20,13 @@ TEST_CASE("codePointLen") {
     }
     SUBCASE("4-byte lead") {
         CHECK(codePointLen(0xF0) == 4);
-        CHECK(codePointLen(0xF7) == 4);
+        CHECK(codePointLen(0xF4) == 4);
+    }
+    SUBCASE("RFC 3629 limit (0xF5–0xF7 rejected)") {
+        // Bytes 0xF5–0xF7 would decode beyond U+10FFFF, so treat as 1-byte.
+        CHECK(codePointLen(0xF5) == 1);
+        CHECK(codePointLen(0xF6) == 1);
+        CHECK(codePointLen(0xF7) == 1);
     }
     SUBCASE("continuation byte falls back to 1") {
         CHECK(codePointLen(0x80) == 1);

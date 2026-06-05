@@ -33,6 +33,7 @@ public:
     Size getSize() const override;
     void invalidate(const Rect& rect) override;
     void* nativeHandle() const override;
+    float dpiScale() const override;
 
     // Clipboard
     bool setClipboardText(const std::string& text) override;

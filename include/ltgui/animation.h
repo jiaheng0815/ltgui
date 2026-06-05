@@ -60,14 +60,6 @@ private:
     bool yoyoDir_ = true;
 };
 
-enum class AnimatedProperty {
-    Position,
-    Size,
-    Opacity,
-    ScrollOffset,
-    Color
-};
-
 class WidgetAnimation {
 public:
     using ValueCallback = std::function<void(float)>;

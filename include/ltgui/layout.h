@@ -23,7 +23,16 @@ public:
 
     BoxLayout(Direction dir, int spacing = 4, int margin = 8);
 
+    // Add stretch space at the current position (legacy API).
+    // Prefer setStretch(child, factor) for widget-linked stretch.
     void addStretch(int factor = 1);
+
+    // Set stretch factor for a specific child widget.
+    // Unlike addStretch(), this is bound to the widget, not a position
+    // in the child list, so adding/removing children doesn't break mapping.
+    void setStretch(Widget* child, int factor);
+    int stretch(Widget* child) const;
+
     void setSpacing(int spacing);
     void setMargin(int margin);
     void setDirection(Direction dir);
@@ -35,7 +44,8 @@ private:
     Direction direction_;
     int spacing_;
     int margin_;
-    std::vector<int> stretchFactors_;
+    std::vector<int> stretchFactors_;       // legacy positional stretch
+    std::map<Widget*, int> widgetStretch_;  // widget-linked stretch (preferred)
 };
 
 class GridLayout : public Layout {
