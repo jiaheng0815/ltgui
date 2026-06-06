@@ -2,12 +2,19 @@
 #include <iostream>
 #include <cstdlib>
 #include <ctime>
+#include <cstring>
 
 using namespace ltgui;
 
 static int g_clickCount = 0;
 
-int main() {
+int main(int argc, char* argv[]) {
+    for (int i = 1; i < argc; i++) {
+        if (std::strcmp(argv[i], "--debug") == 0) {
+            Logger::instance().setGlobalDebug(true);
+        }
+    }
+
     Window window;
     if (!window.create(800, 600, "ltgui Showcase")) {
         std::cerr << "Failed to create window." << std::endl;
@@ -142,18 +149,22 @@ int main() {
     progSection->style().bgColor = Color::Transparent;
     auto progSectionLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 12, 0);
 
+    auto* progLabel = progSection->makeChild<Label>("Progress:");
     auto* slider = progSection->makeChild<Slider>();
     slider->setRange(0, 100);
     slider->setValue(60);
-    auto* slValue = progSection->makeChild<Label>("60%");
+    auto* slValue = progSection->makeChild<Label>(" 60%");
     auto* progress = progSection->makeChild<ProgressBar>();
     progress->setValue(60);
     slider->onValueChanged([&](int v) {
-        slValue->setText(std::to_string(v) + "%");
+        // Fixed-width: "  0%", " 50%", "100%" so layout doesn't resize slider
+        if (v >= 100) slValue->setText(std::to_string(v) + "%");
+        else if (v >= 10) slValue->setText(" " + std::to_string(v) + "%");
+        else slValue->setText("  " + std::to_string(v) + "%");
         progress->setValue(v);
     });
 
-    progSection->addChild(std::make_unique<Label>("Progress:"));
+    // Stretch factors: label(0), slider(1), value(0), progress(1)
     progSectionLayout->addStretch(0);
     progSectionLayout->addStretch(1);
     progSectionLayout->addStretch(0);

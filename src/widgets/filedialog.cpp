@@ -23,11 +23,11 @@ FileDialog::FileDialog(Widget* parent) : Dialog(parent) {
     panelH_ = 380;
 }
 
-bool FileDialog::exec() {
+DialogResult FileDialog::exec() {
     buildCustomDialog();
     if (defaultPath_.empty()) defaultPath_ = ".";
     populateFileList(defaultPath_);
-    return Dialog::exec() == DialogResult::OK;
+    return Dialog::exec();
 }
 
 std::string FileDialog::currentDir() const {

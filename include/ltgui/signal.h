@@ -16,21 +16,24 @@ namespace detail {
 inline thread_local const void* tls_emitting_signal = nullptr;
 
 // RAII guard that saves/restores emit state on the TLS slot and emitting_
-// flag.  This makes emit() exception-safe even if a callback throws:
-// the destructor always runs, so emitting_ and the TLS pointer are never
-// left in a corrupted state.
+// flag.  Using shared_ptr<bool> for emitting_ prevents use-after-free
+// when a callback destroys the Signal during emission: the guard holds a
+// shared reference, keeping the flag memory alive until the destructor runs.
+// This also makes emit() exception-safe — even if a callback throws, the
+// destructor always runs, so emitting_ and the TLS pointer are never left
+// in a corrupted state.
 struct ScopedEmitGuard {
-    const void*& tlsSlot;
-    const void*  prev;
-    bool&        emitting;
-    ScopedEmitGuard(const void*& slot, const void* self, bool& em)
-        : tlsSlot(slot), prev(slot), emitting(em) {
-        tlsSlot = self;
-        emitting = true;
+    const void*&            tlsSlot;
+    const void*             prev;
+    std::shared_ptr<bool>   emitting;
+    ScopedEmitGuard(const void*& slot, const void* self, std::shared_ptr<bool> em)
+        : tlsSlot(slot), prev(slot), emitting(std::move(em)) {
+        tlsSlot   = self;
+        *emitting = true;
     }
     ~ScopedEmitGuard() {
-        emitting = false;
-        tlsSlot  = prev;
+        *emitting = false;
+        tlsSlot   = prev;
     }
 };
 } // namespace detail
@@ -40,7 +43,7 @@ class Signal {
 public:
     using Callback = std::function<void(Args...)>;
 
-    Signal() : generation_(std::make_shared<int>(0)) {}
+    Signal() : emitting_(std::make_shared<bool>(false)), generation_(std::make_shared<int>(0)) {}
     ~Signal() {
         // Invalidate all ScopedConnections by incrementing the generation
         // counter. ScopedConnection stores a weak_ptr to this counter;
@@ -55,16 +58,24 @@ public:
 
     // Movable: generation_ is transferred so ScopedConnections stay valid.
     // The moved-from Signal is left empty — its emit() will be a no-op.
+    // We invalidate the old generation_ so ScopedConnections pointing to the
+    // moved-from Signal will see an expired weak_ptr and skip disconnect().
     Signal(Signal&& other) noexcept
         : slots_(std::move(other.slots_))
         , pendingSlots_(std::move(other.pendingSlots_))
         , nextId_(other.nextId_)
-        , emitting_(other.emitting_)
-        , generation_(std::move(other.generation_)) {
-        // The moved-from Signal should not be usable — reset its state.
-        // We DON'T increment generation_ because the shared_ptr was moved intact.
+        , emitting_(std::move(other.emitting_))
+        , generation_(other.generation_) {
+        // Invalidate old generation so ScopedConnections to the moved-from
+        // Signal see an expired weak_ptr (prevents UAF via dangling signal_).
+        if (other.generation_) {
+            ++(*other.generation_);
+            other.generation_.reset();
+        }
+        // Assign a fresh generation for the moved-to Signal.
+        generation_ = std::make_shared<int>(0);
         other.nextId_   = 1;
-        other.emitting_ = false;
+        other.emitting_ = std::make_shared<bool>(false);
     }
 
     Signal& operator=(Signal&& other) noexcept {
@@ -74,17 +85,23 @@ public:
             slots_        = std::move(other.slots_);
             pendingSlots_ = std::move(other.pendingSlots_);
             nextId_       = other.nextId_;
-            emitting_     = other.emitting_;
-            generation_   = std::move(other.generation_);
+            emitting_     = std::move(other.emitting_);
+            // Transfer generation from source, then assign fresh generation
+            generation_ = other.generation_;
+            if (other.generation_) {
+                ++(*other.generation_);
+                other.generation_.reset();
+            }
+            generation_ = std::make_shared<int>(0);
             other.nextId_   = 1;
-            other.emitting_ = false;
+            other.emitting_ = std::make_shared<bool>(false);
         }
         return *this;
     }
 
     int connect(Callback cb) {
         int id = nextId_++;
-        if (emitting_) {
+        if (emitting_ && *emitting_) {
             // During emission, new connections go into a pending list that
             // is merged after the current emit() completes. This prevents
             // the newly-connected slot from firing mid-emit (surprising
@@ -109,11 +126,11 @@ public:
         };
 
         if (eraseFrom(slots_)) {
-            if (!emitting_) compactSlots();
+            if (!emitting_ || !*emitting_) compactSlots();
             return;
         }
         if (eraseFrom(pendingSlots_)) {
-            if (!emitting_) compactPending();
+            if (!emitting_ || !*emitting_) compactPending();
             return;
         }
     }
@@ -121,7 +138,7 @@ public:
     void disconnectAll() {
         for (auto& s : slots_)        s.cb = nullptr;
         for (auto& s : pendingSlots_) s.cb = nullptr;
-        if (!emitting_) {
+        if (!emitting_ || !*emitting_) {
             slots_.clear();
             pendingSlots_.clear();
         }
@@ -145,10 +162,11 @@ public:
         detail::ScopedEmitGuard guard(detail::tls_emitting_signal, this, emitting_);
 
         // Iterate over a SIZE snapshot so newly-added slots (in pendingSlots_)
-        // are NOT fired during this emit.
+        // are NOT fired during this emit.  Disconnect during emit nulls callbacks
+        // but never erases (compactSlots is deferred until after the loop), so
+        // slots_.size() is constant and we don't need a bounds re-check.
         size_t count = slots_.size();
         for (size_t i = 0; i < count; ++i) {
-            if (i >= slots_.size()) break; // slot erased by disconnect
             auto& slot = slots_[i];
             if (slot.cb) {
                 slot.cb(args...);
@@ -190,8 +208,8 @@ private:
     struct Slot { int id; Callback cb; };
     std::vector<Slot> slots_;
     std::vector<Slot> pendingSlots_;
-    int  nextId_   = 1;
-    bool emitting_ = false;
+    int                      nextId_   = 1;
+    std::shared_ptr<bool>    emitting_;
 
     // Shared generation counter. Signal holds the owning shared_ptr.
     // ScopedConnection stores a weak_ptr copy. When Signal is destroyed,

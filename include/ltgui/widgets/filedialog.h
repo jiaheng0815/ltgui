@@ -25,7 +25,7 @@ public:
     std::string selectedPath() const;
     std::vector<std::string> selectedPaths() const { return selection_; }
 
-    bool exec();
+    DialogResult exec() override;
 
     WidgetType widgetType() const override { return WidgetType::Dialog; }
 

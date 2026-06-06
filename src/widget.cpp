@@ -21,7 +21,10 @@ Widget::~Widget() {
 Widget* Widget::addChild(std::unique_ptr<Widget> child) {
     if (!child) return nullptr;
     if (child->parent_ && child->parent_ != this) {
-        child->parent_->removeChild(child.get());
+        // Capture the returned unique_ptr to prevent the temporary from deleting
+        // the child (which would make `child` a dangling pointer).
+        child = child->parent_->removeChild(child.get());
+        if (!child) return nullptr;
     }
     child->parent_ = this;
     Widget* raw = child.get();
@@ -88,24 +91,28 @@ void Widget::scheduleRelayout() {
     // so children get resized after content changes (e.g. setText).
     // Guard against re-entrancy: if any ancestor is already inside a layout
     // pass (detected by needsLayout_ being cleared mid-layout), bail out.
+    bool foundLayout = false;
     Widget* ancestor = parent_;
     while (ancestor) {
         if (ancestor->layout() && !ancestor->geometry().isEmpty()) {
             ancestor->layout()->layout(ancestor);
             ancestor->flags_ &= ~kFlagNeedsLayout;
+            foundLayout = true;
             // Continue walking up in case outer containers also need relayout
             ancestor = ancestor->parent();
             continue;
         }
         ancestor = ancestor->parent();
     }
-    // Fallback: if no ancestor has a Layout, at minimum resize this widget
-    // based on its new size hint so content changes like setText() are visible.
+    // Fallback: only if no ancestor has a Layout, resize this widget based on
+    // its new size hint so content changes like setText() are visible.
     // Without this, widgets in layout-less trees would stay at zero size.
-    Size hint = sizeHint();
-    if (!hint.isEmpty() && (geometry_.width != hint.width || geometry_.height != hint.height)) {
-        Rect newGeo(geometry_.x, geometry_.y, hint.width, hint.height);
-        setGeometry(newGeo);
+    if (!foundLayout) {
+        Size hint = sizeHint();
+        if (!hint.isEmpty() && (geometry_.width != hint.width || geometry_.height != hint.height)) {
+            Rect newGeo(geometry_.x, geometry_.y, hint.width, hint.height);
+            setGeometry(newGeo);
+        }
     }
     flags_ &= ~kFlagNeedsLayout;
 }
@@ -170,6 +177,8 @@ void Widget::raiseToTop() {
         auto self = std::move(*it);
         siblings.erase(it);
         siblings.push_back(std::move(self));
+        // Z-order changed — repaint to reflect the new ordering
+        update();
     }
 }
 
@@ -228,11 +237,17 @@ void Widget::update() {
 
 void Widget::update(const Rect& dirtyLocalRect) {
     if (window_) {
+        // Clip the dirty rect to the widget's local bounds so invalidation
+        // doesn't spill into sibling/parent geometry.
+        Rect localBounds(0, 0, geometry_.width, geometry_.height);
+        Rect clipped = localBounds.intersected(dirtyLocalRect);
+        if (clipped.isEmpty()) return;
+
         Rect absDirty = absoluteRect();
-        absDirty.x += dirtyLocalRect.x;
-        absDirty.y += dirtyLocalRect.y;
-        absDirty.width = dirtyLocalRect.width;
-        absDirty.height = dirtyLocalRect.height;
+        absDirty.x += clipped.x;
+        absDirty.y += clipped.y;
+        absDirty.width = clipped.width;
+        absDirty.height = clipped.height;
         window_->invalidate(absDirty);
     }
 }
@@ -306,9 +321,20 @@ bool Widget::handleEvent(Event& event) {
     case EventType::MouseDown:
     case EventType::MouseWheel: {
         // Targeted dispatch — only the child under the cursor gets the event.
+        // Snapshot raw pointers to guard against children_ mutation during
+        // dispatch (a child's handler may call addChild/removeChild, which
+        // invalidates iterators into the live vector).
         Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
-        for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
-            Widget* child = it->get();
+        std::vector<Widget*> snapshot;
+        snapshot.reserve(children_.size());
+        for (auto& c : children_) snapshot.push_back(c.get());
+        for (auto it = snapshot.rbegin(); it != snapshot.rend(); ++it) {
+            Widget* child = *it;
+            // Verify the child is still in the tree (it may have been removed
+            // by a handler dispatched earlier in this loop).
+            if (std::none_of(children_.begin(), children_.end(),
+                    [child](const auto& ptr) { return ptr.get() == child; }))
+                continue;
             if (child->isVisible() && child->isEnabled()) {
                 Rect childEff = child->effectiveGeometry().translated(
                     child->geometry_.x, child->geometry_.y);
@@ -330,10 +356,17 @@ bool Widget::handleEvent(Event& event) {
     case EventType::MouseMove: {
         // Broadcast — every child gets the event so hover/pressed state
         // can be cleared when the cursor leaves the widget bounds.
+        // Snapshot raw pointers (same rationale as MouseDown/MouseWheel above).
         Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
         bool handledAny = false;
-        for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
-            Widget* child = it->get();
+        std::vector<Widget*> snapshot;
+        snapshot.reserve(children_.size());
+        for (auto& c : children_) snapshot.push_back(c.get());
+        for (auto it = snapshot.rbegin(); it != snapshot.rend(); ++it) {
+            Widget* child = *it;
+            if (std::none_of(children_.begin(), children_.end(),
+                    [child](const auto& ptr) { return ptr.get() == child; }))
+                continue;
             if (child->isVisible() && child->isEnabled()) {
                 Point savedPos = event.pos;
                 event.pos = localPos;

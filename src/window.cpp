@@ -47,6 +47,12 @@ Window::~Window() {
 bool Window::create(int width, int height, const std::string& title) {
     if (!nativeWindow_) return false;
 
+    // Record the main thread BEFORE creating the native window, because
+    // CreateWindowExW (and equivalents on other platforms) can synchronously
+    // dispatch messages to the wndproc during creation.  Those messages flow
+    // through handleMessage() which asserts isMainThread() in debug builds.
+    setMainThread();
+
     // Set callback BEFORE create so WM_SIZE/Resize during creation is captured
     nativeWindow_->setEventCallback([this](Event& event) {
         handleEvent(event);
@@ -184,7 +190,9 @@ void Window::handleEvent(Event& event) {
     case EventType::Close:
         // Close this window. If it's the last window, quit the application.
         // Multi-window apps can close individual windows without exiting.
+        LOG_DEBUG("Window", "Close event received, calling closeWindow");
         Application::instance().closeWindow(this);
+        LOG_DEBUG("Window", "closeWindow returned");
         event.accepted = true;
         break;
     case EventType::KeyDown:

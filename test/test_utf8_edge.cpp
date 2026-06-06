@@ -145,11 +145,9 @@ TEST_CASE("UTF8 edge: nextPos") {
         CHECK(utf8::nextPos(s, 0) == 3); // skips all 3 bytes
     }
 
-    SUBCASE("negative position returns 0") {
-        // nextPos with pos < 0 → not explicitly guarded, but len check catches it
-        // Actually: pos = -1, pos >= len? len=1, -1 >= 1 is false
-        // codePointLen(s[-1]) is UB. But the signature takes int...
-        // This is a known sharp edge.
+    SUBCASE("negative position returns len") {
+        // nextPos guards pos < 0 → returns len (position at string end)
+        CHECK(utf8::nextPos("abc", -1) == 3);
     }
 }
 

@@ -57,22 +57,18 @@ void Slider::paintSelf(NativeCanvas* canvas) {
     canvas->setColor(t.bgTertiary);
     canvas->fillRoundedRect(trackRect, 3);
 
-    // Filled portion.
-    // tpos is the thumb centre in widget-local coords.
-    // fillW = tpos makes the fill extend through the track to match the
-    // thumb's visual right edge, so at max value the fill covers the
-    // entire track (no 8 px gap).
+    // Filled portion — plain fillRect, no rounded corners.
+    // tpos is widget-local (origin = widget left edge).  The track starts
+    // at widget edge + 8, so the thumb centre relative to the track start
+    // is tpos - 8.  At max value, fill the entire track.
     int tpos = thumbPos();
-    int fillW = tpos;
+    int fillW = tpos - 8;
+    if (fillW < 0) fillW = 0;
+    if (value_ == max_) fillW = trackW;
+
     if (fillW > 0) {
-        Rect filledRect(trackX, trackY, fillW, 6);
         canvas->setColor(t.accent);
-        canvas->fillRoundedRect(filledRect, 3);
-        // Flatten the right rounded corner when there is visible
-        // unfilled track to the right (i.e. when fillW < trackW).
-        if (fillW < trackW - 3) {
-            canvas->fillRect(Rect(trackX + fillW - 3, trackY, 3, 6));
-        }
+        canvas->fillRect(Rect(trackX, trackY, fillW, 6));
     }
 
     // Thumb (tpos is widget-local, convert to absolute)
@@ -108,7 +104,7 @@ bool Slider::handleEvent(Event& event) {
         int trackW = width() - 16;
         int clickX = std::max(0, std::min(trackW, localX - 8));
         int range = max_ - min_;
-        if (range > 0) setValue(min_ + (clickX * range) / trackW);
+        if (range > 0 && trackW > 0) setValue(min_ + (clickX * range) / trackW);
     };
 
     switch (event.type) {
@@ -132,6 +128,7 @@ bool Slider::handleEvent(Event& event) {
     }
     case EventType::MouseDown:
         if (event.button == MouseButton::Left) {
+            claimFocus();
             if (isOverThumb()) {
                 dragging_ = true;
                 event.accepted = true;

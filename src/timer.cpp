@@ -6,6 +6,16 @@ namespace ltgui {
 
 int Timer::nextId_ = 0;
 
+Timer::Timer(Timer&& other) noexcept
+    : id_(other.id_), cb_(std::move(other.cb_)), interval_(other.interval_),
+      repeating_(other.repeating_), nextFireMs_(other.nextFireMs_) {
+    if (other.id_ >= 0) {
+        Application::instance().unregisterTimer(&other);
+        Application::instance().registerTimer(this);
+    }
+    other.id_ = -1;
+}
+
 void Timer::start(int ms, bool repeating, Callback cb) {
     stop();
     if (ms <= 0 || !cb) return;
@@ -37,12 +47,21 @@ bool Timer::tick(uint64_t nowMs) {
     }
 
     if (nowMs >= nextFireMs_) {
-        cb_();
-        if (repeating_) {
+        bool wasRepeating = repeating_;
+        if (wasRepeating) {
             nextFireMs_ = nowMs + interval_;
         } else {
-            stop();
+            // Unregister before the callback so that even if the callback
+            // destroys this Timer, we never access freed memory afterward.
+            if (id_ >= 0) {
+                Application::instance().unregisterTimer(this);
+                id_ = -1;
+            }
         }
+        // Capture the callback locally: if cb_() destroys `this`, the
+        // subsequent return statement still executes on valid stack.
+        Callback savedCb = std::move(cb_);
+        savedCb();
         return true;
     }
     return false;

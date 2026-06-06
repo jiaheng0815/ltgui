@@ -24,21 +24,18 @@ public:
 
     Timer(const Timer&) = delete;
     Timer& operator=(const Timer&) = delete;
-    Timer(Timer&& other) noexcept
-        : id_(other.id_), cb_(std::move(other.cb_)), interval_(other.interval_),
-          repeating_(other.repeating_), nextFireMs_(other.nextFireMs_) {
-        other.id_ = -1;
-    }
+    Timer(Timer&& other) noexcept;
 
     // Start the timer. If `repeating` is true, fires every `ms` milliseconds.
     // If false, fires once then auto-stops.
     void start(int ms, bool repeating, Callback cb);
 
     // Convenience: fire once after `ms` milliseconds.
-    static Timer singleShot(int ms, Callback cb) {
-        Timer t;
-        t.start(ms, false, std::move(cb));
-        return t;
+    // Self-managing — the timer is heap-allocated and auto-deletes after firing.
+    static void singleShot(int ms, Callback cb) {
+        auto* t = new Timer();
+        auto wrapped = [t, cb = std::move(cb)]() mutable { cb(); delete t; };
+        t->start(ms, false, std::move(wrapped));
     }
 
     // Stop the timer. Safe to call multiple times.

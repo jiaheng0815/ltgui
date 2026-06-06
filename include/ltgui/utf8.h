@@ -55,6 +55,8 @@ inline std::string encode(unsigned int cp) {
 
 inline int prevPos(const std::string& s, int pos) {
     if (pos <= 0) return 0;
+    int len = static_cast<int>(s.size());
+    if (pos > len) pos = len;
     int p = pos - 1;
     while (p > 0 && (static_cast<unsigned char>(s[p]) & 0xC0) == 0x80) p--;
     return p;
@@ -62,7 +64,7 @@ inline int prevPos(const std::string& s, int pos) {
 
 inline int nextPos(const std::string& s, int pos) {
     int len = static_cast<int>(s.size());
-    if (pos >= len) return len;
+    if (pos < 0 || pos >= len) return len;
     return pos + codePointLen(static_cast<unsigned char>(s[pos]));
 }
 

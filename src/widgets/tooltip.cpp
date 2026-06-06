@@ -86,8 +86,11 @@ void Tooltip::show(Widget* target, const std::string& text) {
 
     auto tooltip = std::make_unique<Tooltip>();
     tooltip->setText(text);
-    tooltip->showAt(pos);
+    // Add to tree BEFORE showAt so sizeHint() can access window() to
+    // measure text.  Without this, sizeHint() falls back to {60,22}.
+    auto* raw = tooltip.get();
     if (parent) parent->addChild(std::move(tooltip));
+    raw->showAt(pos);
 }
 
 } // namespace ltgui

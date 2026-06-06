@@ -134,8 +134,13 @@ def parse_flags(args):
             else:
                 flags[key] = True
                 i += 1
+        elif args[i].startswith("-") and len(args[i]) > 2 and args[i][1].isalpha() and args[i][2:].isdigit():
+            # Combined short flag: -j4, -O2 (letter + digits)
+            key = args[i][1]
+            flags[key] = args[i][2:]
+            i += 1
         elif args[i].startswith("-") and len(args[i]) == 2 and args[i][1].isalpha():
-            # Short flag: -j 4, -O2 (single letter)
+            # Short flag: -j 4, -O2 (single letter, value in next arg)
             key = args[i][1]
             if i + 1 < len(args) and not args[i + 1].startswith("-"):
                 flags[key] = args[i + 1]
@@ -894,7 +899,7 @@ def cmd_build(positional, flags):
 
     # SDK export (--dll) — build shared lib only, skip examples/apps
     dll_dir = flags.get("dll")
-    if dll_dir:
+    if dll_dir and isinstance(dll_dir, str):
         lib_path = build_shared_lib(platform, is_release, compiler)
         if not lib_path:
             return
@@ -1798,7 +1803,11 @@ def main():
     positional, flags = parse_flags(args)
 
     # Global flags (processed before command dispatch)
-    _VERBOSE = flags.pop("verbose", False) is not False
+    _val = flags.pop("verbose", False)
+    if isinstance(_val, str):
+        _VERBOSE = _val.lower() not in ("false", "0", "no", "off")
+    else:
+        _VERBOSE = bool(_val)
     _JSON_MODE = flags.pop("json", False) is not False
 
     jobs_str = flags.pop("jobs", None) or flags.pop("j", None)

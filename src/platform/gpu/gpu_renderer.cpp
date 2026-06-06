@@ -96,7 +96,7 @@ void Renderer2D::strokeRoundedRect(const Rect& r, float radius, float lineWidth,
 
 void Renderer2D::drawLine(const Point& p1, const Point& p2, float lineWidth, const Color& c) {
     if (c.a == 0) return;
-    cmds_.push_back({DrawOp::DrawLine, {}, c, 0, lineWidth, -1, 0, p1, p2});
+    cmds_.push_back({DrawOp::DrawLine, {}, c, 0, lineWidth, -1, p1, p2});
 }
 
 void Renderer2D::strokeEllipse(const Rect& r, float lineWidth, const Color& c) {
@@ -164,8 +164,11 @@ void Renderer2D::flushBatch() {
     };
 
     auto isLineOp = [](DrawOp op) -> bool {
-        return op == DrawOp::StrokeRect ||
-               op == DrawOp::StrokeEllipse;
+        // StrokeEllipse with lineWidth <= 1 uses lines; thicker uses triangles.
+        // We can't check lineWidth here since we only have the op type.
+        // We'll batch StrokeEllipse with the same shader but emit as needed.
+        (void)op;
+        return false;
     };
 
     // Preserve original draw order (painter's algorithm) while batching
@@ -197,7 +200,7 @@ void Renderer2D::flushBatch() {
         }
 
         std::vector<Vertex2D> verts;
-        verts.reserve((batchEnd - idx) * 6);
+        verts.reserve((batchEnd - idx) * 32);  // worst case: StrokeEllipse thick = 192 verts/cmd
 
         for (size_t i = idx; i < batchEnd; i++) {
             auto& cmd = cmds_[i];
@@ -218,7 +221,7 @@ void Renderer2D::flushBatch() {
                          0, -1.0f);
                 break;
             case DrawOp::StrokeRect:
-                emitStrokeRect(verts, cmd.rect, color);
+                emitStrokeRect(verts, cmd.rect, color, cmd.lineWidth);
                 break;
             case DrawOp::StrokeRounded:
                 emitQuad(verts, cmd.rect, 0, 0, 1, 1, color,
@@ -226,7 +229,7 @@ void Renderer2D::flushBatch() {
                          cmd.radius, cmd.lineWidth);
                 break;
             case DrawOp::StrokeEllipse:
-                emitStrokeEllipse(verts, cmd.rect, color);
+                emitStrokeEllipse(verts, cmd.rect, color, cmd.lineWidth);
                 break;
             case DrawOp::DrawGlyph: {
                 float aw = fontAtlas_ ? (float)fontAtlas_->atlasW() : 2048.0f;
@@ -280,34 +283,102 @@ void Renderer2D::emitQuad(std::vector<Vertex2D>& out, const Rect& r,
     out.insert(out.end(), v, v + 6);
 }
 
-void Renderer2D::emitStrokeRect(std::vector<Vertex2D>& out, const Rect& r, uint32_t color) {
-    float x0 = toNdcX(static_cast<float>(r.x), width_);
-    float y0 = toNdcY(static_cast<float>(r.y), height_);
-    float x1 = toNdcX(static_cast<float>(r.right()), width_);
-    float y1 = toNdcY(static_cast<float>(r.bottom()), height_);
-    Vertex2D lines[8] = {
-        {x0, y0, 0,0,color, 0,0,0,0}, {x1, y0, 0,0,color, 0,0,0,0},
-        {x1, y0, 0,0,color, 0,0,0,0}, {x1, y1, 0,0,color, 0,0,0,0},
-        {x1, y1, 0,0,color, 0,0,0,0}, {x0, y1, 0,0,color, 0,0,0,0},
-        {x0, y1, 0,0,color, 0,0,0,0}, {x0, y0, 0,0,color, 0,0,0,0},
+void Renderer2D::emitStrokeRect(std::vector<Vertex2D>& out, const Rect& r, uint32_t color, float lineWidth) {
+    float half = lineWidth * 0.5f;
+    if (half <= 0.0f) return;
+
+    float ox = static_cast<float>(r.x);
+    float oy = static_cast<float>(r.y);
+    float ow = static_cast<float>(r.width);
+    float oh = static_cast<float>(r.height);
+
+    // If stroke is thicker than the rect in either dimension, fill entirely
+    if (half * 2.0f >= ow || half * 2.0f >= oh) {
+        emitQuad(out, r, 0, 0, 1, 1, color, 0, 0, 0, 0);
+        return;
+    }
+
+    // NDC corners of the outer rect
+    float x0 = toNdcX(ox, width_);
+    float y0 = toNdcY(oy, height_);
+    float x1 = toNdcX(ox + ow, width_);
+    float y1 = toNdcY(oy + oh, height_);
+
+    // NDC corners of the inner rect (inset by lineWidth/2 on each side)
+    float xi0 = toNdcX(ox + half, width_);
+    float yi0 = toNdcY(oy + half, height_);
+    float xi1 = toNdcX(ox + ow - half, width_);
+    float yi1 = toNdcY(oy + oh - half, height_);
+
+    // Vertices for each edge band as a pair of triangles (same emitQuad winding).
+    // emitQuad winding is: (TL, TR, BL) then (BL, TR, BR).
+    auto addTriPair = [&](float ax, float ay, float bx, float by,
+                          float cx, float cy, float dx, float dy) {
+        Vertex2D v[6] = {
+            {ax, ay, 0,0,color,0,0,0,0}, {bx, by, 0,0,color,0,0,0,0},
+            {cx, cy, 0,0,color,0,0,0,0}, {cx, cy, 0,0,color,0,0,0,0},
+            {bx, by, 0,0,color,0,0,0,0}, {dx, dy, 0,0,color,0,0,0,0},
+        };
+        out.insert(out.end(), v, v + 6);
     };
-    out.insert(out.end(), lines, lines + 8);
+    // Top band: outer top-left .. outer top-right, inner top-left .. inner top-right
+    addTriPair(x0, y0, x1, y0, x0, yi0, x1, yi0);
+    // Bottom band: outer bottom-left .. outer bottom-right, inner bottom-left .. inner bottom-right
+    addTriPair(x0, yi1, x1, yi1, x0, y1, x1, y1);
+    // Left band: outer left .. inner left, spanning from inner-top to inner-bottom
+    addTriPair(x0, yi0, xi0, yi0, x0, yi1, xi0, yi1);
+    // Right band: inner right .. outer right, spanning from inner-top to inner-bottom
+    addTriPair(xi1, yi0, x1, yi0, xi1, yi1, x1, yi1);
 }
 
-void Renderer2D::emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, uint32_t color) {
+void Renderer2D::emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, uint32_t color, float lineWidth) {
     float rx = r.width * 0.5f, ry = r.height * 0.5f;
     float cx = static_cast<float>(r.x) + rx, cy = static_cast<float>(r.y) + ry;
-    const int kSegments = 16;
-    for (int i = 0; i < kSegments; i++) {
-        float a0 = 2.0f * 3.14159265f * i / kSegments;
-        float a1 = 2.0f * 3.14159265f * (i + 1) / kSegments;
-        Vertex2D v[] = {
-            {toNdcX(cx + rx * cosf(a0), width_),
-             toNdcY(cy + ry * sinf(a0), height_), 0,0,color, 0,0,0,0},
-            {toNdcX(cx + rx * cosf(a1), width_),
-             toNdcY(cy + ry * sinf(a1), height_), 0,0,color, 0,0,0,0},
-        };
-        out.insert(out.end(), v, v + 2);
+
+    if (lineWidth <= 1.0f) {
+        // Thin stroke: use line segments (1px wide on GPU)
+        const int kSegments = 16;
+        for (int i = 0; i < kSegments; i++) {
+            float a0 = 2.0f * 3.14159265f * i / kSegments;
+            float a1 = 2.0f * 3.14159265f * (i + 1) / kSegments;
+            Vertex2D v[] = {
+                {toNdcX(cx + rx * cosf(a0), width_),
+                 toNdcY(cy + ry * sinf(a0), height_), 0,0,color, 0,0,0,0},
+                {toNdcX(cx + rx * cosf(a1), width_),
+                 toNdcY(cy + ry * sinf(a1), height_), 0,0,color, 0,0,0,0},
+            };
+            out.insert(out.end(), v, v + 2);
+        }
+    } else {
+        // Thick stroke: generate a triangle-strip band between inner and outer
+        // ellipses. Each segment = 6 vertices (2 triangles).
+        float half = lineWidth * 0.5f;
+        float irx = std::max(0.0f, rx - half);
+        float iry = std::max(0.0f, ry - half);
+        const int kSegments = 32;
+        for (int i = 0; i < kSegments; i++) {
+            float a0 = 2.0f * 3.14159265f * i / kSegments;
+            float a1 = 2.0f * 3.14159265f * (i + 1) / kSegments;
+            float cos0 = cosf(a0), sin0 = sinf(a0);
+            float cos1 = cosf(a1), sin1 = sinf(a1);
+            // Outer vertices
+            float ox0 = toNdcX(cx + rx * cos0, width_);
+            float oy0 = toNdcY(cy + ry * sin0, height_);
+            float ox1 = toNdcX(cx + rx * cos1, width_);
+            float oy1 = toNdcY(cy + ry * sin1, height_);
+            // Inner vertices
+            float ix0 = toNdcX(cx + irx * cos0, width_);
+            float iy0 = toNdcY(cy + iry * sin0, height_);
+            float ix1 = toNdcX(cx + irx * cos1, width_);
+            float iy1 = toNdcY(cy + iry * sin1, height_);
+
+            Vertex2D v[6] = {
+                {ox0, oy0, 0,0,color,0,0,0,0}, {ox1, oy1, 0,0,color,0,0,0,0},
+                {ix0, iy0, 0,0,color,0,0,0,0}, {ix0, iy0, 0,0,color,0,0,0,0},
+                {ox1, oy1, 0,0,color,0,0,0,0}, {ix1, iy1, 0,0,color,0,0,0,0},
+            };
+            out.insert(out.end(), v, v + 6);
+        }
     }
 }
 
@@ -323,10 +394,11 @@ void Renderer2D::emitLine(std::vector<Vertex2D>& out, const Point& p1, const Poi
 
 void Renderer2D::emitThickLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2,
                                 float lineWidth, uint32_t color) {
-    if (lineWidth <= 1.0f) {
-        emitLine(out, p1, p2, color);
-        return;
-    }
+    // Always emit a quad (6 verts = 2 triangles) so DrawLine commands work with
+    // drawTriangles() — DrawLine is NOT classified as an isLineOp, so the batch
+    // dispatcher calls drawTriangles, not drawLines. Clamp minimum line width to
+    // 1px (same as the old GL_LINES thin-line path) so thin lines are visible.
+    if (lineWidth < 1.0f) lineWidth = 1.0f;
     // Draw a rectangle (2 tris) oriented along the line segment.
     float dx = static_cast<float>(p2.x - p1.x);
     float dy = static_cast<float>(p2.y - p1.y);

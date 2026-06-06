@@ -268,23 +268,29 @@ bool MenuBar::handleEvent(Event& event) {
             return true;
         case Key::Down:
             if (hoveredItem_ < (int)items.size() - 1) {
+                int orig = hoveredItem_;
                 do { hoveredItem_++; } while (hoveredItem_ < (int)items.size() && items[hoveredItem_].separator);
                 if (hoveredItem_ >= (int)items.size()) hoveredItem_ = (int)items.size() - 1;
+                if (items[hoveredItem_].separator) hoveredItem_ = orig;
             }
             update();
             return true;
         case Key::Up:
             if (hoveredItem_ > 0) {
+                int orig = hoveredItem_;
                 do { hoveredItem_--; } while (hoveredItem_ > 0 && items[hoveredItem_].separator);
                 if (hoveredItem_ < 0) hoveredItem_ = 0;
+                if (items[hoveredItem_].separator) hoveredItem_ = orig;
             }
             update();
             return true;
         case Key::Right:
             if (hoveredItem_ >= 0 && hoveredItem_ < (int)items.size() &&
                 !items[hoveredItem_].submenu.empty()) {
-                openMenu_ = hoveredItem_;
-                // TODO: proper submenu navigation
+                // TODO: proper submenu navigation — needs a separate
+                // submenu tracking variable; openMenu_ is a top-level
+                // menu index, not an items index, so assigning
+                // openMenu_ = hoveredItem_ would be an out-of-bounds bug.
             } else if (openMenu_ < (int)menus_.size() - 1) {
                 openMenu_++;
                 hoveredItem_ = 0;
@@ -298,8 +304,7 @@ bool MenuBar::handleEvent(Event& event) {
         case Key::Enter:
         case Key::Space:
             if (hoveredItem_ >= 0 && hoveredItem_ < (int)items.size() && !items[hoveredItem_].separator) {
-                if (items[hoveredItem_].callback) items[hoveredItem_].callback();
-                closeMenu();
+                activateItem(openMenu_, hoveredItem_);
             }
             return true;
         default:
@@ -326,34 +331,43 @@ bool MenuBar::handleEvent(Event& event) {
         return event.accepted;
     case EventType::MouseDown:
         if (event.button != MouseButton::Left) return false;
-        event.accepted = true;
-        return handleMouseDown(menuIdx, itemIdx);
+        {
+            bool handled = handleMouseDown(menuIdx, itemIdx);
+            event.accepted = handled;
+            return handled;
+        }
     default:
         break;
     }
     return false;
 }
 
+void MenuBar::activateItem(int menuIdx, int itemIdx) {
+    if (menuIdx < 0 || menuIdx >= (int)menus_.size()) return;
+    auto& items = menus_[menuIdx].items;
+    if (itemIdx < 0 || itemIdx >= (int)items.size()) return;
+    auto& item = items[itemIdx];
+    if (item.separator) return;
+
+    if (item.checkable) {
+        item.checked = !item.checked;
+        if (item.callback) item.callback();
+    } else if (item.radio) {
+        for (auto& mi : items) {
+            if (mi.radio && mi.radioGroup == item.radioGroup) mi.checked = false;
+        }
+        item.checked = true;
+        if (item.callback) item.callback();
+    } else if (item.callback) {
+        item.callback();
+    }
+    closeMenu();
+}
+
 bool MenuBar::handleMouseDown(int menuIdx, int itemIdx) {
     if (openMenu_ >= 0) {
         if (itemIdx >= 0 && !menus_[openMenu_].items[itemIdx].separator) {
-            auto& item = menus_[openMenu_].items[itemIdx];
-            if (item.checkable) {
-                item.checked = !item.checked;
-                if (item.callback) item.callback();
-                closeMenu();
-                return true;
-            }
-            if (item.radio) {
-                for (auto& mi : menus_[openMenu_].items) {
-                    if (mi.radio && mi.radioGroup == item.radioGroup) mi.checked = false;
-                }
-                item.checked = true;
-                if (item.callback) item.callback();
-                closeMenu();
-                return true;
-            }
-            if (item.callback) item.callback();
+            activateItem(openMenu_, itemIdx);
         }
         closeMenu();
         return true;

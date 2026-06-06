@@ -64,25 +64,18 @@ TEST_CASE("Widget tree edge: remove child that isn't ours") {
     CHECK(result == nullptr);
 }
 
-TEST_CASE("Widget tree edge: add child that's already our child") {
+TEST_CASE("Widget tree edge: remove then re-add child") {
     auto w = std::make_unique<Widget>();
     auto* child = w->makeChild<Widget>();
+    (void)child; // unused, fixture ensures makeChild works
 
-    // Try to add the same child again (via raw pointer)
-    // addChild checks: if child->parent_ && child->parent_ != this → remove
-    // But here parent_ == this, so it should... hmm
-    // Actually addChild would remove from old parent first.
-    // But if it's already ours, it would:
-    //   child->parent_ == this → skip removeChild
-    // Then push_back again → DUPLICATE in children_!
-    // This is a potential bug, let's document it.
-    SUBCASE("adding already-owned child is a no-op (current behavior)") {
+    SUBCASE("remove then re-add child works") {
         auto child2 = std::make_unique<Widget>();
         Widget* raw2 = child2.get();
         w->addChild(std::move(child2));
         size_t before = w->children().size();
 
-        // Can't re-add without first removing
+        // Remove the child, then re-add it — should restore the count
         auto released = w->removeChild(raw2);
         CHECK(released.get() == raw2);
         w->addChild(std::move(released));

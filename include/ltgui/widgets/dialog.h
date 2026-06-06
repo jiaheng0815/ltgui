@@ -27,7 +27,7 @@ class Dialog : public Widget {
 public:
     explicit Dialog(Widget* parent = nullptr);
 
-    DialogResult exec();
+    virtual DialogResult exec();
     void done(DialogResult result);
     DialogResult result() const { return result_; }
 

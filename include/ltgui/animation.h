@@ -127,7 +127,7 @@ public:
     KeyframeAnimation& operator=(KeyframeAnimation&& other) noexcept;
 
     void addKeyframe(const Keyframe& kf);
-    void setDuration(int ms) { durationMs_ = ms; }
+    void setDuration(int ms) { if (ms > 0) durationMs_ = ms; }
     void setLoop(bool loop) { loop_ = loop; }
     void setValueCallback(ValueCallback cb) { onValue_ = std::move(cb); }
 

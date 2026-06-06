@@ -26,6 +26,8 @@ void TextBox::setText(const std::string& text) {
     scrollOffset_ = 0;
     undoStack_.clear();
     redoStack_.clear();
+    invalidateSizeHint();
+    scheduleRelayout();
     update();
     if (textChangedCallback_) textChangedCallback_(text_);
 }
@@ -342,6 +344,7 @@ bool TextBox::handleEvent(Event& event) {
     switch (event.type) {
     case EventType::MouseDown: {
         focused_ = true;
+        dragging_ = (event.button == MouseButton::Left);
         claimFocus();
         selectionStart_ = -1;
         int pad = style().paddingLeft;
@@ -368,7 +371,7 @@ bool TextBox::handleEvent(Event& event) {
         return true;
     }
     case EventType::MouseMove: {
-        if (event.button == MouseButton::Left && focused_) {
+        if (dragging_ && focused_) {
             // Extend selection
             if (selectionStart_ < 0) selectionStart_ = cursorPos_;
             int pad = style().paddingLeft;
@@ -392,8 +395,13 @@ bool TextBox::handleEvent(Event& event) {
         }
         return false;
     }
+    case EventType::MouseUp:
+        dragging_ = false;
+        event.accepted = true;
+        return true;
     case EventType::FocusOut:
         focused_ = false;
+        dragging_ = false;
         selectionStart_ = -1;
         imePreedit_.clear();
         update();

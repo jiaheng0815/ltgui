@@ -321,8 +321,9 @@ bool TranslationTable::loadFromJsonFile(const std::string& path) {
     fseek(f, 0, SEEK_SET);
     if (size <= 0) { fclose(f); return false; }
     std::string content(size, '\0');
-    fread(&content[0], 1, size, f);
+    size_t bytesRead = fread(&content[0], 1, size, f);
     fclose(f);
+    if (bytesRead != static_cast<size_t>(size)) return false;
     return loadFromJsonString(content);
 }
 

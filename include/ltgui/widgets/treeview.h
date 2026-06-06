@@ -30,6 +30,8 @@ public:
 
 private:
     friend class TreeView;
+    bool hasDescendant(const TreeViewItem* item) const;
+
     std::string text_;
     std::vector<std::unique_ptr<TreeViewItem>> children_;
     TreeViewItem* parent_ = nullptr;
@@ -69,9 +71,6 @@ private:
 
     int visibleItems() const;
     int totalRows() const;
-    int rowForItem(TreeViewItem* item) const;
-    TreeViewItem* itemForRow(TreeViewItem* parent, int& row, int target) const;
-    int rowHeight(TreeViewItem* item, int depth) const;
     int countVisible(TreeViewItem* item) const;
 };
 

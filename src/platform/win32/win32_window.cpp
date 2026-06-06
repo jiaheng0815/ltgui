@@ -4,6 +4,7 @@
 
 #include "platform/win32/win32_canvas.h"
 #include "app.h"
+#include "log.h"
 #include <cassert>
 #include <windowsx.h>
 #include <imm.h>
@@ -58,7 +59,7 @@ void Win32Window::registerClass() {
     };
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    wc.hbrBackground = nullptr;  // Suppress system background paint to prevent flicker
     wc.lpszClassName = L"ltgui_Window";
 
     RegisterClassExW(&wc);
@@ -121,8 +122,13 @@ void Win32Window::hide() {
 }
 
 void Win32Window::close() {
+    // DestroyWindow sends WM_DESTROY synchronously (not WM_CLOSE), so it
+    // does NOT re-enter the WM_CLOSE handler.  PostMessage(WM_CLOSE) would
+    // create an infinite loop when called from inside the close handler.
+    LOG_DEBUG("Win32", "close() called, hwnd=%p", hwnd_);
     if (hwnd_) {
-        PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+        DestroyWindow(hwnd_);
+        LOG_DEBUG("Win32", "DestroyWindow returned, hwnd=%p", hwnd_);
     }
 }
 
@@ -185,7 +191,11 @@ bool Win32Window::setClipboardText(const std::string& text) {
             MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, p, wlen);
             GlobalUnlock(hMem);
         }
-        SetClipboardData(CF_UNICODETEXT, hMem);
+        if (p && SetClipboardData(CF_UNICODETEXT, hMem)) {
+            // success — ownership transferred to clipboard
+        } else {
+            GlobalFree(hMem);  // SetClipboardData failed or lock failed
+        }
     }
     CloseClipboard();
     return hMem != nullptr;
@@ -247,9 +257,11 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     }
 
     case WM_CLOSE: {
+        LOG_DEBUG("Win32", "WM_CLOSE received, hwnd=%p", hwnd_);
         Event ev;
         ev.type = EventType::Close;
         eventCallback_(ev);
+        LOG_DEBUG("Win32", "WM_CLOSE handler returned, hwnd=%p", hwnd_);
         return 0;
     }
 
@@ -348,8 +360,7 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         return 0;
     }
 
-    case WM_KEYDOWN:
-    case WM_SYSKEYDOWN: {
+    case WM_KEYDOWN: {
         // Filter auto-repeat: bit 30 of lParam is 1 if this is a repeated key
         if (lParam & 0x40000000) return 0;
 
@@ -358,6 +369,7 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         // Track modifier state
         if (GetKeyState(VK_CONTROL) & 0x8000) ev.modifiers |= static_cast<int>(KeyModifier::Control);
         if (GetKeyState(VK_SHIFT)   & 0x8000) ev.modifiers |= static_cast<int>(KeyModifier::Shift);
+        if (GetKeyState(VK_MENU)    & 0x8000) ev.modifiers |= static_cast<int>(KeyModifier::Alt);
         // Map common virtual keys
         switch (wParam) {
         case VK_BACK:   ev.key = Key::Backspace; break;
@@ -384,6 +396,12 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
         }
         eventCallback_(ev);
         return 0;
+    }
+
+    case WM_SYSKEYDOWN: {
+        // Let system key combinations (Alt+F4, Alt+Space, etc.) reach
+        // DefWindowProcW so the OS can handle them.
+        return DefWindowProcW(hwnd_, msg, wParam, lParam);
     }
 
     case WM_CHAR: {
@@ -486,10 +504,24 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                     WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), static_cast<int>(wstr.size()),
                                         &utf8[0], utf8Len, nullptr, nullptr);
 
+                    // Query the actual cursor position within the composition
+                    LONG cursorPos = ImmGetCompositionStringW(hIMC, GCS_CURSORPOS, nullptr, 0);
+                    int imeCursorByte = static_cast<int>(utf8.size()); // fallback: end of string
+                    if (cursorPos >= 0 && static_cast<size_t>(cursorPos) <= wstr.size()) {
+                        // Convert the UTF-16 prefix up to the cursor to UTF-8 byte offset
+                        std::wstring wstrBefore = wstr.substr(0, static_cast<size_t>(cursorPos));
+                        int beforeLen = WideCharToMultiByte(CP_UTF8, 0, wstrBefore.c_str(),
+                                                            static_cast<int>(wstrBefore.size()),
+                                                            nullptr, 0, nullptr, nullptr);
+                        if (beforeLen > 0) {
+                            imeCursorByte = beforeLen;
+                        }
+                    }
+
                     Event ev;
                     ev.type = EventType::ImeComposition;
                     ev.imeText = utf8;
-                    ev.imeCursor = static_cast<int>(utf8.size());
+                    ev.imeCursor = imeCursorByte;
                     eventCallback_(ev);
                 }
             }

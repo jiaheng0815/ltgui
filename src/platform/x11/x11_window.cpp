@@ -19,6 +19,7 @@
 
 namespace ltgui {
 
+#include <chrono>
 #include <unordered_map>
 
 Display* X11Window::s_display_ = nullptr;
@@ -149,10 +150,14 @@ void X11Window::hide() {
 }
 
 void X11Window::close() {
-    if (window_ && s_display_ && eventCallback_) {
-        Event ev;
-        ev.type = EventType::Close;
-        eventCallback_(ev);
+    // Destroy the window directly.  Using XSendEvent(WM_DELETE_WINDOW) would
+    // create an infinite loop when called from inside the close handler, just
+    // like PostMessage(WM_CLOSE) on Win32.  XDestroyWindow is synchronous and
+    // does not re-trigger the ClientMessage handler.
+    if (window_ && s_display_) {
+        unregisterWindow(this);
+        XDestroyWindow(s_display_, window_);
+        window_ = 0;
     }
 }
 
@@ -247,10 +252,12 @@ std::string X11Window::getClipboardText() {
     // Wait for SelectionNotify, processing all X11 events while we wait.
     // This avoids the old busy-poll loop and allows other window events
     // (expose, input) to be handled during the clipboard round-trip.
-    uint64_t deadline = AnimationManager::instance().nowMs() + 1000; // 1s timeout
+    // Use std::chrono wall-clock for the timeout — AnimationManager::nowMs()
+    // only advances on tick() and would never fire if no frames have been rendered.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1000);
     while (!pendingReadDone_) {
-        // Check timeout
-        if (AnimationManager::instance().nowMs() > deadline) break;
+        // Check timeout with real wall-clock time
+        if (std::chrono::steady_clock::now() > deadline) break;
 
         // Process any pending X11 events (including our SelectionNotify)
         if (XPending(s_display_)) {
@@ -340,9 +347,12 @@ void X11Window::handleEvent(XEvent& xev) {
         int btn = xev.xbutton.button;
         ev.pos = {xev.xbutton.x, xev.xbutton.y};
 
-        if (btn >= 4) {  // Scroll wheel (buttons 4/5)
+        if (btn >= 4 && btn <= 5) {  // Scroll wheel (buttons 4=up, 5=down)
             ev.type = EventType::MouseWheel;
             ev.wheelDelta = (btn == 4) ? 1 : -1;
+        } else if (btn >= 6) {
+            // Horizontal scroll not supported — ignore buttons 6/7
+            break;
         } else {
             ev.type = EventType::MouseDown;
             if (btn == 1) ev.button = MouseButton::Left;

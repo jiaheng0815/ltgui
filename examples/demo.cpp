@@ -1,9 +1,17 @@
 #include "ltgui.h"
 #include <iostream>
+#include <cstring>
 
 using namespace ltgui;
 
-int main() {
+int main(int argc, char* argv[]) {
+    // Enable full debug logging when --debug is passed
+    for (int i = 1; i < argc; i++) {
+        if (std::strcmp(argv[i], "--debug") == 0) {
+            Logger::instance().setGlobalDebug(true);
+        }
+    }
+
     Window window;
     if (!window.create(640, 480, "ltgui Demo")) {
         std::cerr << "Failed to create window." << std::endl;
@@ -11,14 +19,14 @@ int main() {
     }
 
     auto root = std::make_unique<Widget>();
-    root->style().bgColor = Color::WindowBg;
+    root->style().bgColor = currentTheme().bgPrimary;
 
     auto mainLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 4, 8);
 
     // Title
     auto* title = root->makeChild<Label>("ltgui Widget Demo");
     title->style().font = Font("Segoe UI", 20, FontWeight::Bold);
-    title->style().fgColor = Color::DarkBlue;
+    title->style().fgColor = currentTheme().accent;
 
     // Button row
     auto* buttonRow = root->makeChild<Widget>();
@@ -76,9 +84,13 @@ int main() {
     auto* slider = sliderRow->makeChild<Slider>();
     slider->setRange(0, 100);
     slider->setValue(50);
-    auto* slValue = sliderRow->makeChild<Label>("50");
+    auto* slValue = sliderRow->makeChild<Label>(" 50");
     slider->onValueChanged([&](int v) {
-        slValue->setText(std::to_string(v));
+        // Fixed-width formatting so the label width never changes,
+        // preventing the layout from resizing the slider track.
+        if (v >= 100) slValue->setText(std::to_string(v));
+        else if (v >= 10) slValue->setText(" " + std::to_string(v));
+        else slValue->setText("  " + std::to_string(v));
     });
     sliderLayout->addStretch(0);
     sliderLayout->addStretch(1);

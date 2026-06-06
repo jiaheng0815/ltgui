@@ -25,24 +25,24 @@ struct Style {
     static Style defaultStyle();
 
     void setPadding(int all) {
-        all = std::max(0, all);
-        paddingLeft = paddingTop = paddingRight = paddingBottom = all;
+        all = std::clamp(all, 0, static_cast<int>(INT16_MAX));
+        paddingLeft = paddingTop = paddingRight = paddingBottom = static_cast<int16_t>(all);
     }
     void setPadding(int h, int v) {
-        h = std::max(0, h);
-        v = std::max(0, v);
-        paddingLeft = paddingRight = h;
-        paddingTop = paddingBottom = v;
+        h = std::clamp(h, 0, static_cast<int>(INT16_MAX));
+        v = std::clamp(v, 0, static_cast<int>(INT16_MAX));
+        paddingLeft = paddingRight = static_cast<int16_t>(h);
+        paddingTop = paddingBottom = static_cast<int16_t>(v);
     }
     void setMargin(int all) {
-        all = std::max(0, all);
-        marginLeft = marginTop = marginRight = marginBottom = all;
+        all = std::clamp(all, 0, static_cast<int>(INT16_MAX));
+        marginLeft = marginTop = marginRight = marginBottom = static_cast<int16_t>(all);
     }
     void setMargin(int h, int v) {
-        h = std::max(0, h);
-        v = std::max(0, v);
-        marginLeft = marginRight = h;
-        marginTop = marginBottom = v;
+        h = std::clamp(h, 0, static_cast<int>(INT16_MAX));
+        v = std::clamp(v, 0, static_cast<int>(INT16_MAX));
+        marginLeft = marginRight = static_cast<int16_t>(h);
+        marginTop = marginBottom = static_cast<int16_t>(v);
     }
 
     int paddingHorz() const { return paddingLeft + paddingRight; }

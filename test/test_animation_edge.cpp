@@ -61,8 +61,8 @@ TEST_CASE("AnimatedFloat edge: extreme values") {
         AnimatedFloat af(0.0f);
         float inf = std::numeric_limits<float>::infinity();
         af.setTarget(inf, 100);
-        // Same — should not crash
-        CHECK(true);
+        // Infinity targets are rejected — value stays at initial
+        CHECK(af.value() == 0.0f);
     }
 }
 

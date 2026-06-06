@@ -210,7 +210,13 @@ void X11Canvas::drawText(const std::string& text, const Rect& rect, int flags) {
     }
 
     // Vertical alignment — use font ascent/descent for accurate baseline
-    ty = rect.y + (rect.height + xftFont_->ascent - xftFont_->descent) / 2;
+    if (flags & AlignBottom) {
+        ty = rect.y + rect.height - xftFont_->descent;
+    } else if (flags & AlignVCenter) {
+        ty = rect.y + (rect.height + xftFont_->ascent - xftFont_->descent) / 2;
+    } else {
+        ty = rect.y + xftFont_->ascent;  // AlignTop (default)
+    }
 
     XftDrawStringUtf8(xftDraw_, &xftColor_, xftFont_,
                        tx, ty,

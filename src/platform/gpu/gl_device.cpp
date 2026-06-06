@@ -213,7 +213,7 @@ public:
         w_ = width; h_ = height;
 
         // Get native display and window
-        auto* display = (EGLNativeDisplayType)eglGetDisplay(EGL_DEFAULT_DISPLAY);
+        EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
         if (display == EGL_NO_DISPLAY) {
             LOG_ERROR("GL", "eglGetDisplay failed");
             return false;
@@ -224,6 +224,7 @@ public:
             LOG_ERROR("GL", "eglInitialize failed");
             return false;
         }
+        display_ = display;
 
         EGLint configAttr[] = {
             EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
@@ -240,6 +241,7 @@ public:
             configAttr[3] = EGL_OPENGL_ES2_BIT;
             if (!eglChooseConfig(display, configAttr, &config, 1, &numConfigs) || numConfigs == 0) {
                 LOG_ERROR("GL", "No suitable EGL config");
+                shutdown();
                 return false;
             }
         }
@@ -253,30 +255,31 @@ public:
         }
         if (ctx == EGL_NO_CONTEXT) {
             LOG_ERROR("GL", "eglCreateContext failed");
+            shutdown();
             return false;
         }
+        context_ = ctx;
 
         EGLSurface surface = eglCreateWindowSurface(display, config,
             (EGLNativeWindowType)windowHandle, nullptr);
         if (surface == EGL_NO_SURFACE) {
             LOG_ERROR("GL", "eglCreateWindowSurface failed");
-            eglDestroyContext(display, ctx);
+            shutdown();
             return false;
         }
+        surface_ = surface;
 
         if (!eglMakeCurrent(display, surface, surface, ctx)) {
             LOG_ERROR("GL", "eglMakeCurrent failed");
-            eglDestroySurface(display, surface);
-            eglDestroyContext(display, ctx);
+            shutdown();
             return false;
         }
 
-        display_ = display;
-        surface_ = surface;
-        context_ = ctx;
-
         // Compile shaders
-        if (!compileShaders()) return false;
+        if (!compileShaders()) {
+            shutdown();
+            return false;
+        }
 
         // Orthographic projection
         float L = 0, R = (float)w_, T = 0, B = (float)h_;

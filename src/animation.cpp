@@ -157,7 +157,10 @@ float AnimatedFloat::value() {
     uint64_t elapsed = now - startTickMs_;
 
     if (elapsed >= static_cast<uint64_t>(durationMs_) || durationMs_ <= 0) {
-        current_ = yoyoDir_ ? target_ : startValue_;
+        // Target is always the endpoint of the current segment regardless of
+        // yoyo direction — when yoyoDir_ is false, target_ was swapped to
+        // the "return" value by the previous completion.
+        current_ = target_;
         if (loop_ && (repeatCount_ <= 0 || repeatsDone_ < repeatCount_ - 1)) {
             repeatsDone_++;
             startTickMs_ = now;
@@ -171,8 +174,12 @@ float AnimatedFloat::value() {
         }
         animating_ = false;
         AnimationManager::instance().onAnimStopped();
+        // Copy to stack before emitting — onFinished callbacks may destroy
+        // this AnimatedFloat (or its owning WidgetAnimation), making `this`
+        // dangling.  Returning a local avoids use-after-free.
+        float result = current_;
         onFinished.emit();
-        return current_;
+        return result;
     }
 
     float t = static_cast<float>(elapsed) / static_cast<float>(durationMs_);
@@ -181,7 +188,10 @@ float AnimatedFloat::value() {
 }
 
 void AnimatedFloat::setTarget(float v, int durationMs, Easing e) {
-    if (target_ == v && animating_) return;
+    // Reject non-finite targets (inf/nan) — they produce garbage animation values
+    if (!std::isfinite(v)) return;
+    // Only skip when NOTHING changed — target, duration, and easing all match.
+    if (target_ == v && durationMs_ == durationMs && easing_ == e && animating_) return;
 
     repeatsDone_ = 0;
     yoyoDir_ = true;
@@ -205,6 +215,13 @@ void AnimatedFloat::setTarget(float v, int durationMs, Easing e) {
 
     if (durationMs <= 0 || startValue_ == target_) {
         current_ = target_;
+        // If we were previously animating, stop cleanly.  Without this,
+        // AnimationManager keeps tracking an animation that will never
+        // complete, wasting CPU and preventing the idle-state transition.
+        if (animating_) {
+            animating_ = false;
+            AnimationManager::instance().onAnimStopped();
+        }
         return;
     }
 
@@ -245,7 +262,8 @@ WidgetAnimation::~WidgetAnimation() {
 }
 
 WidgetAnimation::WidgetAnimation(WidgetAnimation&& other) noexcept
-    : anim_(std::move(other.anim_)), durationMs_(other.durationMs_),
+    : onFinished(std::move(other.onFinished)),
+      anim_(std::move(other.anim_)), durationMs_(other.durationMs_),
       delayMs_(other.delayMs_), easing_(other.easing_),
       loop_(other.loop_), yoyo_(other.yoyo_),
       playing_(other.playing_), startTickMs_(other.startTickMs_),
@@ -274,6 +292,7 @@ WidgetAnimation& WidgetAnimation::operator=(WidgetAnimation&& other) noexcept {
         startVal_ = other.startVal_;
         endVal_ = other.endVal_;
         onValue_ = std::move(other.onValue_);
+        onFinished = std::move(other.onFinished);
         delayPhase_ = other.delayPhase_;
         if (playing_) {
             AnimationManager::instance().unregisterAnimation(&other);
@@ -290,6 +309,12 @@ void WidgetAnimation::play() {
     startTickMs_ = AnimationManager::instance().nowMs();
     delayPhase_ = delayMs_ > 0;
     anim_.setImmediate(startVal_);
+
+    if (!delayPhase_) {
+        anim_.setTarget(endVal_, durationMs_, easing_);
+        anim_.setLoop(loop_);
+        anim_.setYoyo(yoyo_);
+    }
 
     AnimationManager::instance().registerAnimation(this);
 }
@@ -317,7 +342,8 @@ KeyframeAnimation::~KeyframeAnimation() {
 }
 
 KeyframeAnimation::KeyframeAnimation(KeyframeAnimation&& other) noexcept
-    : keyframes_(std::move(other.keyframes_)),
+    : onFinished(std::move(other.onFinished)),
+      keyframes_(std::move(other.keyframes_)),
       durationMs_(other.durationMs_), loop_(other.loop_),
       playing_(other.playing_), startTickMs_(other.startTickMs_),
       onValue_(std::move(other.onValue_)) {
@@ -337,6 +363,7 @@ KeyframeAnimation& KeyframeAnimation::operator=(KeyframeAnimation&& other) noexc
         playing_ = other.playing_;
         startTickMs_ = other.startTickMs_;
         onValue_ = std::move(other.onValue_);
+        onFinished = std::move(other.onFinished);
         if (playing_) {
             AnimationManager::instance().unregisterKeyframe(&other);
             AnimationManager::instance().registerKeyframe(this);
@@ -355,6 +382,7 @@ void KeyframeAnimation::addKeyframe(const Keyframe& kf) {
 float KeyframeAnimation::currentValue() const {
     if (keyframes_.empty()) return 0.0f;
     if (keyframes_.size() == 1) return keyframes_[0].value;
+    if (durationMs_ <= 0) return keyframes_.back().value;
 
     uint64_t now = AnimationManager::instance().nowMs();
     uint64_t elapsed = now - startTickMs_;
@@ -435,6 +463,13 @@ void AnimationManager::tick() {
         float v = anim->anim_.value();
         if (anim->onValue_) anim->onValue_(v);
 
+        // If the callback destroyed this animation (auto-unregisters it
+        // via ~WidgetAnimation), anim is now dangling. Verify liveness.
+        {
+            auto it = std::find(widgetAnims_.begin(), widgetAnims_.end(), anim);
+            if (it == widgetAnims_.end()) continue; // destroyed; vector shifted
+        }
+
         if (!anim->anim_.isAnimating() && !anim->delayPhase_) {
             anim->playing_ = false;
             // Shell the completed animation out; if the callback adds/removes
@@ -447,7 +482,12 @@ void AnimationManager::tick() {
             // If the vector changed (element was removed), don't advance i
             // because the current slot now holds the next element.
             if (widgetAnims_.size() == oldSize) i++;
-            anim->onFinished.emit();
+            // Move the signal to a local before emitting so that even if
+            // a connected slot destroys the WidgetAnimation during the
+            // emit, the stack-local Signal remains valid and the emit
+            // runs to completion safely.
+            auto finishedSignal = std::move(anim->onFinished);
+            finishedSignal.emit();
         } else {
             i++;
         }
@@ -462,6 +502,13 @@ void AnimationManager::tick() {
         float v = kf->currentValue();
         if (kf->onValue_) kf->onValue_(v);
 
+        // If the callback destroyed this animation (auto-unregisters it
+        // via ~KeyframeAnimation), kf is now dangling. Verify liveness.
+        {
+            auto it = std::find(keyframeAnims_.begin(), keyframeAnims_.end(), kf);
+            if (it == keyframeAnims_.end()) continue; // destroyed; vector shifted
+        }
+
         uint64_t elapsed = nowMs_ - kf->startTickMs_;
         if (elapsed >= static_cast<uint64_t>(kf->durationMs_) && !kf->loop_) {
             kf->playing_ = false;
@@ -470,7 +517,11 @@ void AnimationManager::tick() {
                 std::remove(keyframeAnims_.begin(), keyframeAnims_.end(), kf),
                 keyframeAnims_.end());
             if (keyframeAnims_.size() == oldSize) i++;
-            kf->onFinished.emit();
+            // Move the signal to a local before emitting so that even if
+            // a connected slot destroys the KeyframeAnimation during the
+            // emit, the stack-local Signal remains valid.
+            auto finishedSignal = std::move(kf->onFinished);
+            finishedSignal.emit();
         } else {
             i++;
         }

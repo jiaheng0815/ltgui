@@ -5,7 +5,6 @@
 #include "font.h"
 #include <vector>
 #include <string>
-#include <unordered_map>
 
 namespace ltgui {
 namespace gpu {
@@ -31,7 +30,6 @@ struct DrawCmd {
     float radius = 0;   // for rounded rect / ellipse
     float lineWidth = 1; // for stroke / line
     int texId = -1;     // -1 = solid color, >=0 = texture
-    unsigned int sortKey = 0; // (texId << 16) | (colorHash & 0xFFFF); unsigned avoids UB on shift
     Point p1, p2;       // for DrawLine
 };
 
@@ -100,8 +98,8 @@ private:
     void emitQuad(std::vector<Vertex2D>& out, const Rect& r,
                   float u0, float v0, float u1, float v1, uint32_t color,
                   float p0, float p1, float p2, float p3);
-    void emitStrokeRect(std::vector<Vertex2D>& out, const Rect& r, uint32_t color);
-    void emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, uint32_t color);
+    void emitStrokeRect(std::vector<Vertex2D>& out, const Rect& r, uint32_t color, float lineWidth);
+    void emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, uint32_t color, float lineWidth);
     void emitLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2, uint32_t color);
     void emitThickLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2,
                        float lineWidth, uint32_t color);

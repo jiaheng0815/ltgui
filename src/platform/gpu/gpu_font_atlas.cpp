@@ -156,8 +156,12 @@ Size FontAtlas::measureText(const std::string& text, const Font& fontDesc) {
     auto& cache = fit->second;
     float ascent = cache.ascent * cache.scale;
     float descent = cache.descent * cache.scale;
-    float lineGap = cache.lineGap * cache.scale;
-    float lineHeight = ascent - descent + lineGap;
+    // Exclude lineGap from the measured height.  lineGap is inter-line
+    // spacing and does not contribute to the visual extent of a single
+    // line.  Including it makes AlignVCenter text appear high by lineGap/2
+    // because drawText() positions glyphs relative to the baseline (ascent
+    // only), not the bottom of the line-gap box.
+    float lineHeight = ascent - descent;
 
     float width = 0;
     uint32_t cp = 0;
@@ -166,11 +170,26 @@ Size FontAtlas::measureText(const std::string& text, const Font& fontDesc) {
 
     while (p < end) {
         // UTF-8 decode
-        if ((*p & 0x80) == 0)      { cp = *p++; }
-        else if ((*p & 0xE0) == 0xC0) { cp = (*p++ & 0x1F) << 6;  cp |= (*p++ & 0x3F); }
-        else if ((*p & 0xF0) == 0xE0) { cp = (*p++ & 0x0F) << 12; cp |= (*p++ & 0x3F) << 6; cp |= (*p++ & 0x3F); }
-        else if ((*p & 0xF8) == 0xF0) { cp = (*p++ & 0x07) << 18; cp |= (*p++ & 0x3F) << 12; cp |= (*p++ & 0x3F) << 6; cp |= (*p++ & 0x3F); }
-        else { p++; continue; }
+        if ((*p & 0x80) == 0) {
+            cp = *p++;
+        } else if ((*p & 0xE0) == 0xC0) {
+            if (p + 1 >= end) { p++; continue; }
+            cp = (*p++ & 0x1F) << 6;
+            cp |= (*p++ & 0x3F);
+        } else if ((*p & 0xF0) == 0xE0) {
+            if (p + 2 >= end) { p++; continue; }
+            cp = (*p++ & 0x0F) << 12;
+            cp |= (*p++ & 0x3F) << 6;
+            cp |= (*p++ & 0x3F);
+        } else if ((*p & 0xF8) == 0xF0) {
+            if (p + 3 >= end) { p++; continue; }
+            cp = (*p++ & 0x07) << 18;
+            cp |= (*p++ & 0x3F) << 12;
+            cp |= (*p++ & 0x3F) << 6;
+            cp |= (*p++ & 0x3F);
+        } else {
+            p++; continue;
+        }
 
         int glyphIdx = stbtt_FindGlyphIndex(&cache.info, (int)cp);
         int advanceW = 0;

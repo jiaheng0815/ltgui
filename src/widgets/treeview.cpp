@@ -24,10 +24,22 @@ TreeViewItem* TreeViewItem::addChild(const std::string& text) {
     return raw;
 }
 
+bool TreeViewItem::hasDescendant(const TreeViewItem* item) const {
+    for (const auto& child : children_) {
+        if (child.get() == item || child->hasDescendant(item))
+            return true;
+    }
+    return false;
+}
+
 void TreeViewItem::removeChild(int index) {
     if (index >= 0 && index < static_cast<int>(children_.size())) {
-        if (treeView_ && treeView_->selectedItem() == children_[index].get()) {
-            treeView_->setSelectedItem(nullptr);
+        TreeViewItem* child = children_[index].get();
+        if (treeView_ && treeView_->selectedItem()) {
+            TreeViewItem* sel = treeView_->selectedItem();
+            if (sel == child || child->hasDescendant(sel)) {
+                treeView_->setSelectedItem(nullptr);
+            }
         }
         children_.erase(children_.begin() + index); // destroys the child
     }

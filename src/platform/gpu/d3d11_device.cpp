@@ -472,21 +472,33 @@ private:
         }
 
         // Helper to create input layout from bytecode or blob
-        auto createSolidIL = [this](const void* bytecode, size_t len) {
+        auto createSolidIL = [this](const void* bytecode, size_t len) -> bool {
             D3D11_INPUT_ELEMENT_DESC layout[] = {
                 { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
                 { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
             };
-            device_->CreateInputLayout(layout, 2, bytecode, len, &ilSolid_);
+            HRESULT hr = device_->CreateInputLayout(layout, 2, bytecode, len, &ilSolid_);
+            if (FAILED(hr)) {
+                LOG_ERROR("D3D11", "CreateInputLayout failed for solid shader: 0x%08lx", hr);
+                ilSolid_ = nullptr;
+                return false;
+            }
+            return true;
         };
-        auto createRoundedIL = [this](const void* bytecode, size_t len) {
+        auto createRoundedIL = [this](const void* bytecode, size_t len) -> bool {
             D3D11_INPUT_ELEMENT_DESC layout[] = {
                 { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
                 { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
                 { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM,  0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
                 { "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 },
             };
-            device_->CreateInputLayout(layout, 4, bytecode, len, &ilRounded_);
+            HRESULT hr = device_->CreateInputLayout(layout, 4, bytecode, len, &ilRounded_);
+            if (FAILED(hr)) {
+                LOG_ERROR("D3D11", "CreateInputLayout failed for rounded shader: 0x%08lx", hr);
+                ilRounded_ = nullptr;
+                return false;
+            }
+            return true;
         };
 
         // --- Solid shader ---
@@ -494,19 +506,32 @@ private:
         if (precompiled) {
             if (createFromBytecode(kSolid_vsBytecode, kSolid_vsBytecodeLen, true, &solidVS_, nullptr) &&
                 createFromBytecode(kSolid_psBytecode, kSolid_psBytecodeLen, false, nullptr, &solidPS_)) {
-                createSolidIL(kSolid_vsBytecode, kSolid_vsBytecodeLen);
+                if (!createSolidIL(kSolid_vsBytecode, kSolid_vsBytecodeLen)) {
+                    solidVS_->Release(); solidVS_ = nullptr;
+                    solidPS_->Release(); solidPS_ = nullptr;
+                    precompiled = false; // fall through to runtime
+                }
             } else {
                 precompiled = false; // fall through to runtime
             }
         }
 #endif
         if (!precompiled) {
-            if (compile(kSolidShader, "VSMain", "vs_4_0", &vsBlob) &&
-                compile(kSolidShader, "PSMain", "ps_4_0", &psBlob)) {
-                createFromBlob(vsBlob, true, &solidVS_, nullptr);
-                createFromBlob(psBlob, false, nullptr, &solidPS_);
-                createSolidIL(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize());
-                vsBlob->Release(); psBlob->Release();
+            if (compile(kSolidShader, "VSMain", "vs_4_0", &vsBlob)) {
+                if (compile(kSolidShader, "PSMain", "ps_4_0", &psBlob)) {
+                    createFromBlob(vsBlob, true, &solidVS_, nullptr);
+                    createFromBlob(psBlob, false, nullptr, &solidPS_);
+                    if (!createSolidIL(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize())) {
+                        if (solidVS_) { solidVS_->Release(); solidVS_ = nullptr; }
+                        if (solidPS_) { solidPS_->Release(); solidPS_ = nullptr; }
+                        vsBlob->Release(); psBlob->Release();
+                        return false;
+                    }
+                    vsBlob->Release(); psBlob->Release();
+                } else {
+                    vsBlob->Release();
+                    return false;
+                }
             } else { return false; }
         }
 
@@ -517,21 +542,34 @@ private:
         if (precompiledRounded) {
             if (createFromBytecode(kRounded_vsBytecode, kRounded_vsBytecodeLen, true, &roundedVS_, nullptr) &&
                 createFromBytecode(kRounded_psBytecode, kRounded_psBytecodeLen, false, nullptr, &roundedPS_)) {
-                createRoundedIL(kRounded_vsBytecode, kRounded_vsBytecodeLen);
+                if (!createRoundedIL(kRounded_vsBytecode, kRounded_vsBytecodeLen)) {
+                    if (roundedVS_) { roundedVS_->Release(); roundedVS_ = nullptr; }
+                    if (roundedPS_) { roundedPS_->Release(); roundedPS_ = nullptr; }
+                    precompiledRounded = false;
+                }
             } else {
                 precompiledRounded = false;
             }
         }
 #endif
         if (!precompiledRounded) {
-            if (compile(kRoundedShader, "VSMain", "vs_4_0", &vsBlob) &&
-                compile(kRoundedShader, "PSMain", "ps_4_0", &psBlob)) {
-                createFromBlob(vsBlob, true, &roundedVS_, nullptr);
-                createFromBlob(psBlob, false, nullptr, &roundedPS_);
-                if (ilRounded_ == nullptr) {
-                    createRoundedIL(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize());
+            if (compile(kRoundedShader, "VSMain", "vs_4_0", &vsBlob)) {
+                if (compile(kRoundedShader, "PSMain", "ps_4_0", &psBlob)) {
+                    createFromBlob(vsBlob, true, &roundedVS_, nullptr);
+                    createFromBlob(psBlob, false, nullptr, &roundedPS_);
+                    if (ilRounded_ == nullptr) {
+                        if (!createRoundedIL(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize())) {
+                            if (roundedVS_) { roundedVS_->Release(); roundedVS_ = nullptr; }
+                            if (roundedPS_) { roundedPS_->Release(); roundedPS_ = nullptr; }
+                            vsBlob->Release(); psBlob->Release();
+                            return false;
+                        }
+                    }
+                    vsBlob->Release(); psBlob->Release();
+                } else {
+                    vsBlob->Release();
+                    return false;
                 }
-                vsBlob->Release(); psBlob->Release();
             } else { return false; }
         }
 
@@ -550,11 +588,15 @@ private:
 #if LTGUI_HAS_PRECOMPILED_SHADERS
         compile_ellipse_runtime:
 #endif
-            if (compile(kEllipseShader, "VSMain", "vs_4_0", &vsBlob) &&
-                compile(kEllipseShader, "PSMain", "ps_4_0", &psBlob)) {
-                createFromBlob(vsBlob, true, &ellipseVS_, nullptr);
-                createFromBlob(psBlob, false, nullptr, &ellipsePS_);
-                vsBlob->Release(); psBlob->Release();
+            if (compile(kEllipseShader, "VSMain", "vs_4_0", &vsBlob)) {
+                if (compile(kEllipseShader, "PSMain", "ps_4_0", &psBlob)) {
+                    createFromBlob(vsBlob, true, &ellipseVS_, nullptr);
+                    createFromBlob(psBlob, false, nullptr, &ellipsePS_);
+                    vsBlob->Release(); psBlob->Release();
+                } else {
+                    vsBlob->Release();
+                    return false;
+                }
             } else { return false; }
         }
 
@@ -573,11 +615,15 @@ private:
 #if LTGUI_HAS_PRECOMPILED_SHADERS
         compile_texture_runtime:
 #endif
-            if (compile(kTextureShader, "VSMain", "vs_4_0", &vsBlob) &&
-                compile(kTextureShader, "PSMain", "ps_4_0", &psBlob)) {
-                createFromBlob(vsBlob, true, &texVS_, nullptr);
-                createFromBlob(psBlob, false, nullptr, &texPS_);
-                vsBlob->Release(); psBlob->Release();
+            if (compile(kTextureShader, "VSMain", "vs_4_0", &vsBlob)) {
+                if (compile(kTextureShader, "PSMain", "ps_4_0", &psBlob)) {
+                    createFromBlob(vsBlob, true, &texVS_, nullptr);
+                    createFromBlob(psBlob, false, nullptr, &texPS_);
+                    vsBlob->Release(); psBlob->Release();
+                } else {
+                    vsBlob->Release();
+                    return false;
+                }
             } else { return false; }
         }
 

@@ -46,6 +46,13 @@ inline KeyModifier operator|(KeyModifier a, KeyModifier b) {
 inline KeyModifier operator&(KeyModifier a, KeyModifier b) {
     return static_cast<KeyModifier>(static_cast<int>(a) & static_cast<int>(b));
 }
+// Mixed-type operators for use with Event::modifiers (int-typed)
+inline int operator|(int a, KeyModifier b) {
+    return a | static_cast<int>(b);
+}
+inline int operator&(int a, KeyModifier b) {
+    return a & static_cast<int>(b);
+}
 
 inline bool hasModifier(int modifiers, KeyModifier mod) {
     return (modifiers & static_cast<int>(mod)) != 0;

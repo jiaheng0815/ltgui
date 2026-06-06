@@ -46,6 +46,7 @@ private:
     int selectionStart_ = -1; // -1 = no selection
     int scrollOffset_ = 0;
     bool focused_ = false;
+    bool dragging_ = false;
     bool multiLine_ = false;
 
     // IME composition state

@@ -2,6 +2,7 @@
 #include "window.h"
 #include "timer.h"
 #include "animation.h"
+#include "log.h"
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 #ifndef NOMINMAX
@@ -179,10 +180,16 @@ void Application::unregisterWindow(Window* window) {
 
 void Application::closeWindow(Window* window) {
     if (!window) return;
-    // Destroy the window
+    LOG_DEBUG("App", "closeWindow: destroying native window (windows_.size=%zu)", windows_.size());
     window->close();
+    LOG_DEBUG("App", "closeWindow: native window destroyed, unregistering");
+    // Remove from the window list so the last-window check can trigger quit().
+    // The Window destructor also calls unregisterWindow — this is idempotent.
+    unregisterWindow(window);
+    LOG_DEBUG("App", "closeWindow: unregistered, windows_.size=%zu", windows_.size());
     // If it was the last window, quit the application
     if (windows_.empty()) {
+        LOG_DEBUG("App", "closeWindow: last window closed, calling quit()");
         quit();
     }
 }

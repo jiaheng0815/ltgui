@@ -1,0 +1,986 @@
+diff --git a/include/ltgui/app.h b/include/ltgui/app.h
+index 750bf34..54bc165 100644
+--- a/include/ltgui/app.h
++++ b/include/ltgui/app.h
+@@ -3,12 +3,29 @@
+ #include "geometry.h"
+ #include "event.h"
+ #include <vector>
++#include <thread>
+ 
+ namespace ltgui {
+ 
+ class Window;
+ class Timer;
+ 
++// ltgui is a single-threaded framework. All widget operations, painting,
++// and event handling must happen on the thread that calls Application::run().
++// These helpers detect cross-thread misuse at runtime in debug builds.
++#ifdef NDEBUG
++inline bool isMainThread() { return true; }
++inline void setMainThread() {}
++#else
++inline bool isMainThread() {
++    static std::thread::id s_mainThreadId = std::this_thread::get_id();
++    return std::this_thread::get_id() == s_mainThreadId;
++}
++inline void setMainThread() {
++    isMainThread(); // force static init on the calling thread
++}
++#endif
++
+ class Application {
+ public:
+     static Application& instance();
+diff --git a/include/ltgui/platform/cocoa/cocoa_window.h b/include/ltgui/platform/cocoa/cocoa_window.h
+index ffd9be0..678d2f8 100644
+--- a/include/ltgui/platform/cocoa/cocoa_window.h
++++ b/include/ltgui/platform/cocoa/cocoa_window.h
+@@ -41,6 +41,7 @@ public:
+     void onResize(int width, int height);
+     void onClose();
+     void onMouseEvent(Event& ev);
++    void onKeyEvent(Event& ev);
+ 
+ private:
+     NSWindow* nsWindow_ = nullptr;
+diff --git a/include/ltgui/platform/gpu/gpu_font_atlas.h b/include/ltgui/platform/gpu/gpu_font_atlas.h
+index c35b14e..c5c5ae3 100644
+--- a/include/ltgui/platform/gpu/gpu_font_atlas.h
++++ b/include/ltgui/platform/gpu/gpu_font_atlas.h
+@@ -108,6 +108,8 @@ private:
+     bool allocGlyphRect(int w, int h, int& outX, int& outY, int& outTexId);
+     uint64_t fontKey(const Font& f) const;
+ 
++    static constexpr int kMaxAtlasPages = 16; // prevent unbounded page growth
++
+     GpuDevice* device_;
+     TextureManager* texMgr_;
+     int atlasW_, atlasH_;
+diff --git a/include/ltgui/platform/gpu/gpu_renderer.h b/include/ltgui/platform/gpu/gpu_renderer.h
+index 0514057..f6cd0b7 100644
+--- a/include/ltgui/platform/gpu/gpu_renderer.h
++++ b/include/ltgui/platform/gpu/gpu_renderer.h
+@@ -31,7 +31,7 @@ struct DrawCmd {
+     float radius = 0;   // for rounded rect / ellipse
+     float lineWidth = 1; // for stroke / line
+     int texId = -1;     // -1 = solid color, >=0 = texture
+-    int sortKey = 0;    // computed: (texId << 16) | (colorHash & 0xFFFF)
++    unsigned int sortKey = 0; // (texId << 16) | (colorHash & 0xFFFF); unsigned avoids UB on shift
+     Point p1, p2;       // for DrawLine
+ };
+ 
+diff --git a/include/ltgui/platform/x11/x11_window.h b/include/ltgui/platform/x11/x11_window.h
+index 3e1e502..1049ecf 100644
+--- a/include/ltgui/platform/x11/x11_window.h
++++ b/include/ltgui/platform/x11/x11_window.h
+@@ -66,6 +66,7 @@ private:
+     NativeCanvas* canvas_ = nullptr;
+     Size size_;
+     bool mapped_ = false;
++    bool ownsDisplayRef_ = false;
+     Atom wmDeleteMessage_;
+     Atom wmProtocols_;
+ };
+diff --git a/include/ltgui/signal.h b/include/ltgui/signal.h
+index f508d54..cfc6442 100644
+--- a/include/ltgui/signal.h
++++ b/include/ltgui/signal.h
+@@ -2,9 +2,17 @@
+ #include <functional>
+ #include <vector>
+ #include <algorithm>
++#include <cassert>
+ 
+ namespace ltgui {
+ 
++namespace detail {
++// Thread-local flag to detect re-entrant emit() on the same Signal.
++// Stored as a pointer so each Signal instance gets its own flag without
++// adding a member to every template instantiation that uses Signal inline.
++extern thread_local const void* tls_emitting_signal;
++} // namespace detail
++
+ template<typename... Args>
+ class Signal {
+ public:
+@@ -12,50 +20,138 @@ public:
+ 
+     int connect(Callback cb) {
+         int id = nextId_++;
+-        slots_.push_back({id, std::move(cb)});
++        if (emitting_) {
++            // During emission, new connections go into a pending list that
++            // is merged after the current emit() completes. This prevents
++            // the newly-connected slot from firing mid-emit (surprising
++            // the caller who just connected it) and avoids iterator
++            // invalidation.
++            pendingSlots_.push_back({id, std::move(cb)});
++        } else {
++            slots_.push_back({id, std::move(cb)});
++        }
+         return id;
+     }
+ 
+     void disconnect(int id) {
+-        auto it = std::find_if(slots_.begin(), slots_.end(),
+-                               [id](const Slot& s) { return s.id == id; });
+-        if (it == slots_.end()) return;
+-        if (emitting_) {
+-            it->cb = nullptr; // defer erase until emit completes
+-        } else {
+-            slots_.erase(it);
++        auto eraseFrom = [id](std::vector<Slot>& vec) -> bool {
++            auto it = std::find_if(vec.begin(), vec.end(),
++                                   [id](const Slot& s) { return s.id == id; });
++            if (it != vec.end()) {
++                it->cb = nullptr; // null the callback so emit skips it
++                return true;
++            }
++            return false;
++        };
++
++        if (eraseFrom(slots_)) return;
++        eraseFrom(pendingSlots_);
++        // Don't physically erase during emit — cleanup happens after emit
++        if (!emitting_ && !inCleanup_) {
++            compactSlots();
++            compactPending();
+         }
+     }
+ 
+     void disconnectAll() {
+-        if (emitting_) {
+-            for (auto& s : slots_) s.cb = nullptr;
+-        } else {
++        for (auto& s : slots_) s.cb = nullptr;
++        for (auto& s : pendingSlots_) s.cb = nullptr;
++        if (!emitting_ && !inCleanup_) {
+             slots_.clear();
++            pendingSlots_.clear();
+         }
+     }
+ 
+     void emit(Args... args) {
++        // Guard against recursive emit of the SAME Signal instance.
++        // Recursive emit would:
++        //   1. Re-use the same slots_ vector while iterating it
++        //   2. Allow callbacks to see stale emitting_ state
++        //   3. Risk double-firing newly-connected slots
++        // We detect this and assert in debug; in release, we bail.
++        assert(detail::tls_emitting_signal != this &&
++               "Recursive Signal::emit() detected — a callback triggered emit() on the same Signal. "
++               "Use a deferred/post mechanism instead.");
++        if (detail::tls_emitting_signal == this) return;
++
++        auto* prev = detail::tls_emitting_signal;
++        detail::tls_emitting_signal = this;
++
++        // Snapshot the current emission depth so nested emits on DIFFERENT
++        // Signal instances can still work correctly.
++        int snapshotDepth = emitDepth_;
++        emitDepth_++;
++
+         emitting_ = true;
+-        for (auto& slot : slots_) {
+-            if (slot.cb) slot.cb(args...);
++
++        // Iterate over a SIZE snapshot so newly-added slots (in pendingSlots_)
++        // are NOT fired during this emit.
++        size_t count = slots_.size();
++        for (size_t i = 0; i < count; ++i) {
++            if (i >= slots_.size()) break; // slot erased by disconnect
++            auto& slot = slots_[i];
++            if (slot.cb) {
++                slot.cb(args...);
++            }
+         }
++
+         emitting_ = false;
+-        // Clean up callbacks nulled during emission
+-        slots_.erase(
+-            std::remove_if(slots_.begin(), slots_.end(),
+-                           [](const Slot& s) { return !s.cb; }),
+-            slots_.end());
++
++        // Merge pending connections added during emit
++        if (!pendingSlots_.empty()) {
++            inCleanup_ = true;
++            // Compact nulled slots before merging
++            compactSlots();
++            for (auto& s : pendingSlots_) {
++                if (s.cb) {
++                    slots_.push_back(std::move(s));
++                }
++            }
++            pendingSlots_.clear();
++            inCleanup_ = false;
++        }
++
++        // Clean up callbacks nulled during emission (only after all nesting unwinds)
++        if (emitDepth_ == snapshotDepth + 1) {
++            compactSlots();
++            emitDepth_ = 0;
++        } else {
++            emitDepth_ = snapshotDepth;
++        }
++
++        detail::tls_emitting_signal = prev;
+     }
+ 
+-    bool empty() const { return slots_.empty(); }
+-    size_t size() const { return slots_.size(); }
++    bool empty() const { return slots_.empty() && pendingSlots_.empty(); }
++    size_t size() const {
++        size_t n = 0;
++        for (auto& s : slots_) { if (s.cb) n++; }
++        for (auto& s : pendingSlots_) { if (s.cb) n++; }
++        return n;
++    }
+ 
+ private:
+     struct Slot { int id; Callback cb; };
+     std::vector<Slot> slots_;
++    std::vector<Slot> pendingSlots_;
+     int nextId_ = 1;
+     bool emitting_ = false;
++    bool inCleanup_ = false;
++    int emitDepth_ = 0;
++
++    void compactSlots() {
++        slots_.erase(
++            std::remove_if(slots_.begin(), slots_.end(),
++                           [](const Slot& s) { return !s.cb; }),
++            slots_.end());
++    }
++
++    void compactPending() {
++        pendingSlots_.erase(
++            std::remove_if(pendingSlots_.begin(), pendingSlots_.end(),
++                           [](const Slot& s) { return !s.cb; }),
++            pendingSlots_.end());
++    }
+ };
+ 
+ template<typename... Args>
+diff --git a/include/ltgui/utf8.h b/include/ltgui/utf8.h
+index b8ca602..be99f0e 100644
+--- a/include/ltgui/utf8.h
++++ b/include/ltgui/utf8.h
+@@ -5,10 +5,27 @@ namespace ltgui {
+ namespace utf8 {
+ 
+ inline int codePointLen(unsigned char c) {
++    // Valid UTF-8 lead byte patterns (RFC 3629):
++    // 0xxxxxxx           → 1 byte  (0x00–0x7F)
++    // 110xxxxx           → 2 bytes (0xC2–0xDF; reject overlong 0xC0/0xC1)
++    // 1110xxxx           → 3 bytes (0xE0–0xEF)
++    // 11110xxx           → 4 bytes (0xF0–0xF4; reject 0xF5–0xF7, RFC 3629 limit)
+     if ((c & 0x80) == 0) return 1;
+-    if ((c & 0xE0) == 0xC0) return 2;
++    if ((c & 0xE0) == 0xC0) {
++        // Reject overlong 2-byte sequences: 0xC0 and 0xC1 always encode
++        // codepoints ≤ 0x7F which must use 1-byte form.
++        if (c < 0xC2) return 1;
++        return 2;
++    }
+     if ((c & 0xF0) == 0xE0) return 3;
+-    if ((c & 0xF8) == 0xF0) return 4;
++    if ((c & 0xF8) == 0xF0) {
++        // RFC 3629 restricts max codepoint to U+10FFFF.
++        // Bytes 0xF5–0xF7 would decode beyond that; reject them.
++        if (c > 0xF4) return 1;
++        return 4;
++    }
++    // Invalid lead bytes (0xFE, 0xFF, etc.) or continuation bytes at start:
++    // treat as a single-byte raw byte so cursor navigation doesn't get stuck.
+     return 1;
+ }
+ 
+diff --git a/src/animation.cpp b/src/animation.cpp
+index 70afa15..43044ea 100644
+--- a/src/animation.cpp
++++ b/src/animation.cpp
+@@ -322,8 +322,15 @@ AnimationManager& AnimationManager::instance() {
+ void AnimationManager::tick() {
+     nowMs_ = steadyNowMs();
+ 
+-    for (auto* anim : widgetAnims_) {
+-        if (!anim->isPlaying()) continue;
++    // Tick widget animations.  We iterate by index because a callback
++    // (onValue_ or onFinished) may modify widgetAnims_ (via stop() /
++    // play()), so a range-for with iterators is not safe.
++    for (size_t i = 0; i < widgetAnims_.size(); ) {
++        WidgetAnimation* anim = widgetAnims_[i];
++        if (!anim->isPlaying()) {
++            i++;
++            continue;
++        }
+ 
+         uint64_t elapsed = nowMs_ - anim->startTickMs_;
+         if (anim->delayPhase_) {
+@@ -335,6 +342,7 @@ void AnimationManager::tick() {
+                 anim->anim_.setYoyo(anim->yoyo_);
+                 elapsed = 0;
+             } else {
++                i++;
+                 continue;
+             }
+         }
+@@ -344,25 +352,42 @@ void AnimationManager::tick() {
+ 
+         if (!anim->anim_.isAnimating() && !anim->delayPhase_) {
+             anim->playing_ = false;
++            // Shell the completed animation out; if the callback adds/removes
++            // animations, our index is safe because we use the stale size
++            // and move the element to the end before erasing.
++            size_t oldSize = widgetAnims_.size();
+             widgetAnims_.erase(
+                 std::remove(widgetAnims_.begin(), widgetAnims_.end(), anim),
+                 widgetAnims_.end());
++            // If the vector changed (element was removed), don't advance i
++            // because the current slot now holds the next element.
++            if (widgetAnims_.size() == oldSize) i++;
+             anim->onFinished.emit();
++        } else {
++            i++;
+         }
+     }
+ 
+-    for (auto* kf : keyframeAnims_) {
+-        if (!kf->isPlaying()) continue;
++    for (size_t i = 0; i < keyframeAnims_.size(); ) {
++        KeyframeAnimation* kf = keyframeAnims_[i];
++        if (!kf->isPlaying()) {
++            i++;
++            continue;
++        }
+         float v = kf->currentValue();
+         if (kf->onValue_) kf->onValue_(v);
+ 
+         uint64_t elapsed = nowMs_ - kf->startTickMs_;
+         if (elapsed >= static_cast<uint64_t>(kf->durationMs_) && !kf->loop_) {
+             kf->playing_ = false;
++            size_t oldSize = keyframeAnims_.size();
+             keyframeAnims_.erase(
+                 std::remove(keyframeAnims_.begin(), keyframeAnims_.end(), kf),
+                 keyframeAnims_.end());
++            if (keyframeAnims_.size() == oldSize) i++;
+             kf->onFinished.emit();
++        } else {
++            i++;
+         }
+     }
+ }
+diff --git a/src/app.cpp b/src/app.cpp
+index d5a7b50..ee43a8f 100644
+--- a/src/app.cpp
++++ b/src/app.cpp
+@@ -24,6 +24,7 @@ Application& Application::instance() {
+ }
+ 
+ int Application::run() {
++    setMainThread(); // record the UI thread for debug assertions
+     running_ = true;
+ 
+ #ifdef LTGUI_PLATFORM_WINDOWS
+@@ -106,13 +107,18 @@ void Application::processEvents() {
+ 
+     uint64_t now = anim.nowMs();
+ 
+-    // Tick timers (iterate backwards so stopped timers can be removed safely)
+-    for (size_t i = timers_.size(); i > 0; i--) {
+-        // Timer may stop itself during tick(), invalidating the pointer.
+-        // But stop() removes from timers_, so we re-fetch each time.
+-        if (i - 1 < timers_.size()) {
+-            Timer* t = timers_[i - 1];
+-            if (t) t->tick(now);
++    // Tick timers safely against mutations during callbacks.
++    // We copy the timer list because a timer callback can:
++    //   1. stop() / destroy itself (removes from timers_)
++    //   2. start new timers (adds to timers_)
++    //   3. stop another timer (removes from timers_)
++    // All of these would invalidate iterators or skip entries if we
++    // iterated the live vector directly.
++    auto timersSnapshot = timers_;
++    for (auto* t : timersSnapshot) {
++        // Only tick if still active (not stopped by a previous timer's callback)
++        if (t->isActive()) {
++            t->tick(now);
+         }
+     }
+ 
+diff --git a/src/clipboard.cpp b/src/clipboard.cpp
+index 89e90a0..91911c4 100644
+--- a/src/clipboard.cpp
++++ b/src/clipboard.cpp
+@@ -30,10 +30,17 @@ bool ClipboardData::hasFormat(ClipboardFormat f) const {
+     return false;
+ }
+ 
++// Find the first window with a valid native window handle.
++// Previously this always returned wins[0], which is wrong in multi-window
++// apps or when the first window was closed but others remain open.
+ static NativeWindow* getNativeWindow() {
+     auto& wins = Application::instance().windows();
+-    if (wins.empty()) return nullptr;
+-    return wins[0]->nativeWindow();
++    for (auto* w : wins) {
++        if (w && w->nativeWindow() && w->nativeWindow()->nativeHandle()) {
++            return w->nativeWindow();
++        }
++    }
++    return nullptr;
+ }
+ 
+ std::string Clipboard::getText() {
+diff --git a/src/dragdrop.cpp b/src/dragdrop.cpp
+index 82af52c..47c7fbb 100644
+--- a/src/dragdrop.cpp
++++ b/src/dragdrop.cpp
+@@ -24,7 +24,6 @@ std::vector<uint8_t> DragData::data(const std::string& mime) const {
+ }
+ 
+ void DragData::setFiles(const std::vector<std::string>& paths) {
+-    files(); // ensure vector exists
+     std::string uriList;
+     for (auto& p : paths) {
+         if (!uriList.empty()) uriList += "\r\n";
+@@ -41,11 +40,27 @@ std::vector<std::string> DragData::files() const {
+     size_t pos = 0;
+     while (pos < uriList.size()) {
+         size_t end = uriList.find("\r\n", pos);
+-        if (end == std::string::npos) end = uriList.size();
++        if (end == std::string::npos) {
++            // Last entry (no trailing \r\n) — also handle \n-only separators
++            end = uriList.find('\n', pos);
++            if (end == std::string::npos) end = uriList.size();
++        }
+         std::string uri = uriList.substr(pos, end - pos);
+-        if (uri.substr(0, 7) == "file://") uri = uri.substr(7);
+-        result.push_back(uri);
+-        pos = end + 2;
++        // Handle file://, file://localhost/, and file:/// URI schemes
++        if (uri.compare(0, 7, "file://") == 0) {
++            uri = uri.substr(7);
++            // Strip localhost prefix if present
++            if (uri.compare(0, 10, "localhost/") == 0 || uri.compare(0, 10, "localhost") == 0) {
++                uri = uri.substr(uri[9] == '/' ? 10 : 9);
++            }
++        }
++        if (!uri.empty()) {
++            result.push_back(uri);
++        }
++        pos = end;
++        // Skip the separator
++        if (pos < uriList.size() && uriList[pos] == '\r') pos++;
++        if (pos < uriList.size() && uriList[pos] == '\n') pos++;
+         if (end == uriList.size()) break;
+     }
+     return result;
+diff --git a/src/layout.cpp b/src/layout.cpp
+index 4fc3dec..d3b6210 100644
+--- a/src/layout.cpp
++++ b/src/layout.cpp
+@@ -168,32 +168,72 @@ void GridLayout::layout(Widget* container) {
+ 
+     int rows = (n + cols_ - 1) / cols_;
+ 
+-    // Calculate column widths
++    // Compute per-column max width from content sizeHints
++    std::vector<int> colWidths(cols_, 0);
++    std::vector<int> rowHeights(rows, 0);
++    for (int i = 0; i < n; i++) {
++        int col = i % cols_;
++        int row = i / cols_;
++        Size hint = children[i]->sizeHint();
++        colWidths[col] = std::max(colWidths[col], hint.width);
++        rowHeights[row] = std::max(rowHeights[row], hint.height);
++    }
++
++    // Distribute remaining horizontal space proportionally to stretch factors
+     int totalColSpacing = colSpacing_ * (cols_ - 1);
+-    int colWidth = (availW - totalColSpacing) / cols_;
++    int usedColW = 0;
++    for (int w : colWidths) usedColW += w;
++    int extraW = std::max(0, availW - totalColSpacing - usedColW);
++    int totalColStretch = 0;
++    for (int c = 0; c < cols_; c++) {
++        auto it = colStretch_.find(c);
++        if (it != colStretch_.end()) totalColStretch += it->second;
++    }
++    if (totalColStretch > 0 && extraW > 0) {
++        for (int c = 0; c < cols_; c++) {
++            auto it = colStretch_.find(c);
++            if (it != colStretch_.end() && it->second > 0) {
++                colWidths[c] += extraW * it->second / totalColStretch;
++            }
++        }
++    }
+ 
+-    // Calculate row heights
++    // Distribute remaining vertical space
+     int totalRowSpacing = rowSpacing_ * (rows - 1);
+-    int rowHeight = (availH - totalRowSpacing) / rows;
++    int usedRowH = 0;
++    for (int h : rowHeights) usedRowH += h;
++    int extraH = std::max(0, availH - totalRowSpacing - usedRowH);
++    int totalRowStretch = 0;
++    for (int r = 0; r < rows; r++) {
++        auto it = rowStretch_.find(r);
++        if (it != rowStretch_.end()) totalRowStretch += it->second;
++    }
++    if (totalRowStretch > 0 && extraH > 0) {
++        for (int r = 0; r < rows; r++) {
++            auto it = rowStretch_.find(r);
++            if (it != rowStretch_.end() && it->second > 0) {
++                rowHeights[r] += extraH * it->second / totalRowStretch;
++            }
++        }
++    }
+ 
+-    int x = margin_;
+-    int y = margin_;
++    // Position children
++    int startX = margin_;
++    int startY = margin_;
+ 
+     for (int i = 0; i < n; i++) {
+         int col = i % cols_;
+         int row = i / cols_;
+ 
+-        int cx = x + col * (colWidth + colSpacing_);
+-        int cy = y + row * (rowHeight + rowSpacing_);
++        // Compute cumulative X offset
++        int cx = startX;
++        for (int c = 0; c < col; c++) cx += colWidths[c] + colSpacing_;
+ 
+-        // Apply column/row stretches if set
+-        int extraW = 0, extraH = 0;
+-        auto cs = colStretch_.find(col);
+-        if (cs != colStretch_.end() && cs->second > 0) {
+-            extraW = cs->second * 10; // Simple stretch
+-        }
++        // Compute cumulative Y offset
++        int cy = startY;
++        for (int r = 0; r < row; r++) cy += rowHeights[r] + rowSpacing_;
+ 
+-        children[i]->setGeometry(Rect(cx, cy, colWidth + extraW, rowHeight + extraH));
++        children[i]->setGeometry(Rect(cx, cy, colWidths[col], rowHeights[row]));
+     }
+ }
+ 
+@@ -204,17 +244,26 @@ Size GridLayout::preferredSize(const Widget* container) const {
+     int n = static_cast<int>(children.size());
+     if (n == 0) return {0, 0};
+ 
+-    int maxColW = 0, maxRowH = 0;
+     int rows = (n + cols_ - 1) / cols_;
+ 
++    // Per-column max width, per-row max height
++    std::vector<int> colWidths(cols_, 0);
++    std::vector<int> rowHeights(rows, 0);
+     for (int i = 0; i < n; i++) {
++        int col = i % cols_;
++        int row = i / cols_;
+         Size hint = children[i]->sizeHint();
+-        maxColW = std::max(maxColW, hint.width);
+-        maxRowH = std::max(maxRowH, hint.height);
++        colWidths[col] = std::max(colWidths[col], hint.width);
++        rowHeights[row] = std::max(rowHeights[row], hint.height);
+     }
+ 
+-    int totalW = cols_ * maxColW + (cols_ - 1) * colSpacing_ + 2 * margin_;
+-    int totalH = rows * maxRowH + (rows - 1) * rowSpacing_ + 2 * margin_;
++    int totalW = 0;
++    for (int w : colWidths) totalW += w;
++    totalW += (cols_ - 1) * colSpacing_ + 2 * margin_;
++
++    int totalH = 0;
++    for (int h : rowHeights) totalH += h;
++    totalH += (rows - 1) * rowSpacing_ + 2 * margin_;
+ 
+     return {totalW, totalH};
+ }
+diff --git a/src/platform/cocoa/cocoa_window.mm b/src/platform/cocoa/cocoa_window.mm
+index ec9ff73..fd520c5 100644
+--- a/src/platform/cocoa/cocoa_window.mm
++++ b/src/platform/cocoa/cocoa_window.mm
+@@ -45,7 +45,21 @@ namespace ltgui { struct Event; }
+ @implementation CocoaView
+ - (instancetype)initWithCppWindow:(ltgui::CocoaWindow*)w {
+     self = [super init];
+-    if (self) cppWindow_ = w;
++    if (self) {
++        cppWindow_ = w;
++        // Enable mouse-moved events for hover tracking.
++        // Without a tracking area, mouseMoved: is never called
++        // even if the window accepts mouse moved events.
++        NSTrackingAreaOptions opts = NSTrackingMouseMoved
++                                   | NSTrackingActiveInActiveApp
++                                   | NSTrackingInVisibleRect;
++        NSTrackingArea* area = [[NSTrackingArea alloc] initWithRect:NSZeroRect
++                                                            options:opts
++                                                              owner:self
++                                                           userInfo:nil];
++        [self addTrackingArea:area];
++        [area release];
++    }
+     return self;
+ }
+ - (BOOL)isFlipped { return YES; }
+@@ -110,12 +124,25 @@ namespace ltgui { struct Event; }
+     if ([chars length] > 0) {
+         ev.charCode = [chars characterAtIndex:0];
+     }
+-    cppWindow_->onMouseEvent(ev);
++    // Map Cocoa modifier flags
++    NSEventModifierFlags flags = [event modifierFlags];
++    if (flags & NSEventModifierFlagShift)     ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Shift);
++    if (flags & NSEventModifierFlagControl)   ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Control);
++    if (flags & NSEventModifierFlagOption)    ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Alt);
++    cppWindow_->onKeyEvent(ev);
+ }
+ - (void)keyUp:(NSEvent*)event {
+     ltgui::Event ev;
+     ev.type = ltgui::EventType::KeyUp;
+-    cppWindow_->onMouseEvent(ev);
++    NSString* chars = [event characters];
++    if ([chars length] > 0) {
++        ev.charCode = [chars characterAtIndex:0];
++    }
++    NSEventModifierFlags flags = [event modifierFlags];
++    if (flags & NSEventModifierFlagShift)     ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Shift);
++    if (flags & NSEventModifierFlagControl)   ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Control);
++    if (flags & NSEventModifierFlagOption)    ev.modifiers |= static_cast<int>(ltgui::KeyModifier::Alt);
++    cppWindow_->onKeyEvent(ev);
+ }
+ @end
+ 
+@@ -275,6 +302,12 @@ void CocoaWindow::onMouseEvent(Event& ev) {
+     }
+ }
+ 
++void CocoaWindow::onKeyEvent(Event& ev) {
++    if (eventCallback_) {
++        eventCallback_(ev);
++    }
++}
++
+ } // namespace ltgui
+ 
+ #endif // LTGUI_PLATFORM_MACOS
+diff --git a/src/platform/gpu/gpu_font_atlas.cpp b/src/platform/gpu/gpu_font_atlas.cpp
+index 7da8f47..a74fa8b 100644
+--- a/src/platform/gpu/gpu_font_atlas.cpp
++++ b/src/platform/gpu/gpu_font_atlas.cpp
+@@ -256,11 +256,22 @@ int FontAtlas::createAtlasPage() {
+     // is valid for binding in flushBatch (unified ID space).
+     std::vector<uint8_t> empty(atlasW_ * atlasH_ * 4, 0);
+     int texId = texMgr_->upload(atlasW_, atlasH_, empty.data());
++    if (texId < 0) {
++        fprintf(stderr, "[FontAtlas] ERROR: failed to create atlas page (GPU texture upload failed)\n");
++        return -1;
++    }
+     pages_.push_back({texId, 1, 1, 0});
+     return texId;
+ }
+ 
+ bool FontAtlas::allocGlyphRect(int w, int h, int& outX, int& outY, int& outTexId) {
++    // Reject glyphs larger than the atlas itself — they can never fit.
++    if (w > atlasW_ || h > atlasH_) {
++        fprintf(stderr, "[FontAtlas] WARN: glyph (%dx%d) exceeds atlas (%dx%d), skipped\n",
++                w, h, atlasW_, atlasH_);
++        return false;
++    }
++
+     if (pages_.empty()) {
+         if (createAtlasPage() < 0) return false;
+     }
+@@ -281,7 +292,18 @@ bool FontAtlas::allocGlyphRect(int w, int h, int& outX, int& outY, int& outTexId
+         page.rowHeight = std::max(page.rowHeight, h);
+         return true;
+     }
+-    return false;
++
++    // No room on any existing page — create a new one.
++    // Guard against infinite page creation for oddly shaped glyphs.
++    if (static_cast<int>(pages_.size()) >= kMaxAtlasPages) {
++        fprintf(stderr, "[FontAtlas] ERROR: max atlas pages (%d) reached, glyph (%dx%d) skipped\n",
++                kMaxAtlasPages, w, h);
++        return false;
++    }
++    if (createAtlasPage() < 0) return false;
++    // The new page is at the end; recurse once (won't recurse further because
++    // the size guard above and the per-page loop guarantee at most one retry).
++    return allocGlyphRect(w, h, outX, outY, outTexId);
+ }
+ 
+ uint64_t FontAtlas::fontKey(const Font& f) const {
+diff --git a/src/platform/gpu/gpu_renderer.cpp b/src/platform/gpu/gpu_renderer.cpp
+index 4cbcd2c..b8225a0 100644
+--- a/src/platform/gpu/gpu_renderer.cpp
++++ b/src/platform/gpu/gpu_renderer.cpp
+@@ -18,16 +18,21 @@ TextureManager::~TextureManager() {
+ }
+ 
+ int TextureManager::upload(int w, int h, const uint8_t* rgba) {
++    if (!rgba || w <= 0 || h <= 0) return -1;
++
++    GpuTexture* tex = device_->createTexture(w, h, rgba);
++    if (!tex) return -1; // GPU texture creation failed — don't store nullptr
++
+     // Reuse freed slots
+     if (!freeSlots_.empty()) {
+         int id = freeSlots_.back();
+         freeSlots_.pop_back();
+         if (textures_[id]) device_->destroyTexture(textures_[id]);
+-        textures_[id] = device_->createTexture(w, h, rgba);
++        textures_[id] = tex;
+         return id;
+     }
+     int id = static_cast<int>(textures_.size());
+-    textures_.push_back(device_->createTexture(w, h, rgba));
++    textures_.push_back(tex);
+     return id;
+ }
+ 
+diff --git a/src/platform/x11/x11_window.cpp b/src/platform/x11/x11_window.cpp
+index 316d51b..0a00821 100644
+--- a/src/platform/x11/x11_window.cpp
++++ b/src/platform/x11/x11_window.cpp
+@@ -72,6 +72,7 @@ X11Window::X11Window() {
+     }
+     if (s_display_) {
+         s_displayRefCount_++;
++        ownsDisplayRef_ = true; // only decrement if we actually have a display
+     }
+ }
+ 
+@@ -80,11 +81,13 @@ X11Window::~X11Window() {
+     delete canvas_;
+     canvas_ = nullptr;
+ 
+-    s_displayRefCount_--;
+-    if (s_displayRefCount_ <= 0 && s_display_) {
+-        XCloseDisplay(s_display_);
+-        s_display_ = nullptr;
+-        s_displayRefCount_ = 0;
++    if (ownsDisplayRef_ && s_display_) {
++        s_displayRefCount_--;
++        if (s_displayRefCount_ <= 0) {
++            XCloseDisplay(s_display_);
++            s_display_ = nullptr;
++            s_displayRefCount_ = 0;
++        }
+     }
+ }
+ 
+diff --git a/src/widget.cpp b/src/widget.cpp
+index 64df34c..cf23d48 100644
+--- a/src/widget.cpp
++++ b/src/widget.cpp
+@@ -1,10 +1,14 @@
+ #include "widget.h"
+ #include "window.h"
+ #include "layout.h"
++#include "signal.h"
+ #include "platform/native_canvas.h"
+ #include <algorithm>
+ 
+ namespace ltgui {
++namespace detail {
++thread_local const void* tls_emitting_signal = nullptr;
++} // namespace detail
+ 
+ Widget::Widget(Widget* parent) : parent_(parent) {
+     style_ = Style::defaultStyle();
+diff --git a/src/widgets/contextmenu.cpp b/src/widgets/contextmenu.cpp
+index 783c232..f070709 100644
+--- a/src/widgets/contextmenu.cpp
++++ b/src/widgets/contextmenu.cpp
+@@ -118,12 +118,22 @@ void ContextMenu::paintSelf(NativeCanvas* canvas) {
+ bool ContextMenu::handleEvent(Event& event) {
+     if (!isEnabled() || !isVisible()) return false;
+ 
++    // Compute visual Y offset accounting for separator rows (which are 8px, not itemHeight_)
+     int localY = event.pos.y - y();
++    int yOff = style().paddingTop;
++    int itemIdx = -1;
++    for (int i = 0; i < static_cast<int>(items_.size()); i++) {
++        int rowH = items_[i].separator ? 8 : itemHeight_;
++        if (localY >= yOff && localY < yOff + rowH) {
++            itemIdx = i;
++            break;
++        }
++        yOff += rowH;
++    }
+ 
+     if (event.type == EventType::MouseMove) {
+-        int idx = (localY - style().paddingTop) / itemHeight_;
+-        if (idx >= 0 && idx < static_cast<int>(items_.size()) && !items_[idx].separator) {
+-            hovered_ = idx;
++        if (itemIdx >= 0 && !items_[itemIdx].separator) {
++            hovered_ = itemIdx;
+         } else {
+             hovered_ = -1;
+         }
+@@ -132,18 +142,17 @@ bool ContextMenu::handleEvent(Event& event) {
+         return true;
+     }
+ 
+-    if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
+-        int idx = (localY - style().paddingTop) / itemHeight_;
+-        if (idx >= 0 && idx < static_cast<int>(items_.size()) && !items_[idx].separator) {
+-            if (items_[idx].callback) items_[idx].callback();
++    if (event.type == EventType::MouseDown) {
++        if (event.button == MouseButton::Left && itemIdx >= 0 && !items_[itemIdx].separator) {
++            if (items_[itemIdx].callback) items_[itemIdx].callback();
+         }
++        // Any click on the menu (item hit or not, any button) dismisses it.
+         dismiss();
+         event.accepted = true;
+         return true;
+     }
+ 
+-    if (event.type == EventType::MouseDown ||
+-        (event.type == EventType::KeyDown && event.key == Key::Escape)) {
++    if (event.type == EventType::KeyDown && event.key == Key::Escape) {
+         dismiss();
+         event.accepted = true;
+         return true;
+diff --git a/src/widgets/dialog.cpp b/src/widgets/dialog.cpp
+index b764daf..f40d5a3 100644
+--- a/src/widgets/dialog.cpp
++++ b/src/widgets/dialog.cpp
+@@ -15,6 +15,10 @@
+ #endif
+ #include <windows.h>
+ #undef MessageBox
++#elif defined(LTGUI_PLATFORM_LINUX)
++#include "platform/x11/x11_window.h"
++#elif defined(LTGUI_PLATFORM_MACOS)
++#import <Cocoa/Cocoa.h>
+ #endif
+ 
+ namespace ltgui {
+@@ -51,19 +55,50 @@ DialogResult Dialog::exec() {
+     claimFocus();
+ 
+     auto* win = window();
+-    if (!win) return DialogResult::None;
++    if (!win) {
++        running_ = false;
++        return DialogResult::None;
++    }
+ 
++    // Cross-platform inner event loop. We pump platform events AND call
++    // processEvents() so animations, timers, and deferred work progress.
++    // This prevents the rest of the app from freezing during modal dialogs
++    // and works identically on Win32, X11, and Cocoa.
+     while (running_) {
+         Application::instance().processEvents();
++
+ #ifdef LTGUI_PLATFORM_WINDOWS
++        // Win32: pump Windows messages so the dialog remains responsive.
++        // Use PeekMessage (not GetMessage) to avoid blocking: processEvents()
++        // already handles the animation/timer heartbeat.
+         MSG msg;
+         while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+-            if (msg.message == WM_QUIT) { running_ = false; Application::instance().quit(); break; }
++            if (msg.message == WM_QUIT) {
++                running_ = false;
++                Application::instance().quit();
++                break;
++            }
+             TranslateMessage(&msg);
+             DispatchMessage(&msg);
+         }
++#elif defined(LTGUI_PLATFORM_LINUX)
++        // X11: flush pending events for all windows on the shared display.
++        X11Window::processAllPending();
++#elif defined(LTGUI_PLATFORM_MACOS)
++        // Cocoa: pump one event from the main run loop.
++        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
++                            untilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]
++                               inMode:NSDefaultRunLoopMode
++                              dequeue:YES];
++        if (event) {
++            [NSApp sendEvent:event];
++        }
+ #endif
++        // Drive the fade-in animation so the overlay appears immediately.
++        // (The returned value updates the internal state; the next paint
++        //  pass reads it via fadeAnim_.value() in paintSelf.)
+         fadeAnim_.value();
++
+         if (!running_) break;
+     }
+ 
+diff --git a/src/widgets/scrollarea.cpp b/src/widgets/scrollarea.cpp
+index df8f02a..10d7507 100644
+--- a/src/widgets/scrollarea.cpp
++++ b/src/widgets/scrollarea.cpp
+@@ -78,8 +78,8 @@ void ScrollArea::paintSelf(NativeCanvas* canvas) {
+     canvas->setColor(style().bgColor);
+     canvas->fillRoundedRect(r, style().borderRadius);
+ 
+-    // Scrollbar track
+-    if (contentHeight_ > height()) {
++    // Scrollbar track — guard against zero contentHeight (avoids div-by-zero)
++    if (contentHeight_ > 0 && contentHeight_ > height()) {
+         int sbWidth = 12;
+         int scrollY = currentScrollY();
+         int thumbH = std::max(24, height() * height() / contentHeight_);
+@@ -116,12 +116,12 @@ bool ScrollArea::handleEvent(Event& event) {
+     // Scrollbar hit test — check if mouse is on the scrollbar track
+     int localX = event.pos.x - x();
+     int localY = event.pos.y - y();
+-    bool onScrollbar = (contentHeight_ > height()) && (localX >= width() - 12);
++    bool onScrollbar = (contentHeight_ > 0 && contentHeight_ > height()) && (localX >= width() - 12);
+ 
+     if (event.type == EventType::MouseDown && onScrollbar) {
+-        // Calculate scrollbar thumb position
++        // Calculate scrollbar thumb position (contentHeight_ > 0 guaranteed by onScrollbar)
+         int curScrollY = currentScrollY();
+-        int thumbH = std::max(24, height() * height() / contentHeight_);
++        int thumbH = std::max(24, (height() * height()) / contentHeight_);
+         int maxScroll = contentHeight_ - height();
+         int thumbY = 0;
+         if (maxScroll > 0) {
+diff --git a/src/window.cpp b/src/window.cpp
+index 1564fee..b436220 100644
+--- a/src/window.cpp
++++ b/src/window.cpp
+@@ -28,10 +28,12 @@ Window::Window() {
+ Window::~Window() {
+     Application::instance().unregisterWindow(this);
+ 
+-    // Clear focus BEFORE destroying the central widget.
++    // Clear focus and open combo BEFORE destroying the central widget.
+     // Otherwise Widget::~Widget() may access a partially-destroyed Window
+-    // via its window_ pointer when trying to clear the focusWidget_.
++    // via its window_ pointer when trying to clear the focusWidget_ or
++    // openCombo_ state.
+     focusWidget_ = nullptr;
++    openCombo_ = nullptr;
+ 
+     // Destroy central widget while nativeWindow_ is still valid, since
+     // widget destructors may need to call update() which uses nativeWindow_.
+@@ -225,8 +227,14 @@ void Window::handleEvent(Event& event) {
+         }
+         break;
+     case EventType::MouseDown: {
+-        // Close open ComboBox dropdown if click is outside it
+-        if (openCombo_) openCombo_->closeIfClickOutside(event.pos);
++        // Close open ComboBox dropdown if click is outside it.
++        // Copy the pointer locally — closeIfClickOutside() may call
++        // closeDropdown() which sets openCombo_ = nullptr, but the
++        // ComboBox itself still exists; using a local copy lets us
++        // safely call the method without re-reading the member.
++        if (auto* combo = openCombo_) {
++            combo->closeIfClickOutside(event.pos);
++        }
+         if (centralWidget_) {
+             Widget* prevFocus = focusWidget_;
+             bool handled = centralWidget_->handleEvent(event);

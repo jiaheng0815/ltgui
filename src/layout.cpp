@@ -23,7 +23,7 @@ void BoxLayout::setStretch(Widget* child, int factor) {
 
 int BoxLayout::stretch(Widget* child) const {
     if (!child) return 0;
-    auto it = widgetStretch_.find(const_cast<Widget*>(child));
+    auto it = widgetStretch_.find(child);
     return (it != widgetStretch_.end()) ? it->second : 0;
 }
 
@@ -44,7 +44,23 @@ void BoxLayout::layout(Widget* container) {
 
     const auto& children = container->children();
     int n = static_cast<int>(children.size());
-    if (n == 0) return;
+    if (n == 0) {
+        widgetStretch_.clear();
+        return;
+    }
+
+    // Purge stale widgetStretch_ entries for children no longer in this
+    // container.  This prevents unbounded map growth and ABA problems where
+    // a new Widget allocated at a recycled pointer address would incorrectly
+    // inherit the old widget's stretch factor.
+    for (auto it = widgetStretch_.begin(); it != widgetStretch_.end(); ) {
+        bool alive = false;
+        for (int i = 0; i < n && !alive; i++) {
+            if (children[i].get() == it->first) alive = true;
+        }
+        if (alive) ++it;
+        else       it = widgetStretch_.erase(it);
+    }
 
     Rect area = container->geometry();
     int availW = area.width - 2 * margin_;
@@ -109,7 +125,7 @@ void BoxLayout::layout(Widget* container) {
         if (direction_ == LeftToRight) {
             childW = hint.width;
             if (totalStretch > 0 && stretch > 0) {
-                childW += remaining * stretch / totalStretch;
+                childW += static_cast<int>(static_cast<int64_t>(remaining) * stretch / totalStretch);
             }
             childH = availH;
             child->setGeometry(Rect(pos, margin_, childW, childH));
@@ -118,7 +134,7 @@ void BoxLayout::layout(Widget* container) {
             childW = availW;
             childH = hint.height;
             if (totalStretch > 0 && stretch > 0) {
-                childH += remaining * stretch / totalStretch;
+                childH += static_cast<int>(static_cast<int64_t>(remaining) * stretch / totalStretch);
             }
             child->setGeometry(Rect(margin_, pos, childW, childH));
             pos += childH + spacing_;
@@ -289,7 +305,7 @@ void GridLayout::layout(Widget* container) {
 }
 
 Size GridLayout::preferredSize(const Widget* container) const {
-    if (!container) return {0, 0};
+    if (!container || cols_ <= 0) return {0, 0};
 
     const auto& children = container->children();
     int n = static_cast<int>(children.size());

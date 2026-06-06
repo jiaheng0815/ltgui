@@ -66,6 +66,7 @@ private:
     int hitTestMenu(int localX, int localY) const;
     int hitTestItem(int localY) const;
     bool handleMouseDown(int menuIdx, int itemIdx);
+    void activateItem(int menuIdx, int itemIdx);
     void closeMenu();
     void paintItem(NativeCanvas* canvas, const Rect& r, const MenuItem& item,
                    bool hovered, int depth);

@@ -1,9 +1,16 @@
 #include "ltgui.h"
 #include <iostream>
+#include <cstring>
 
 using namespace ltgui;
 
-int main() {
+int main(int argc, char* argv[]) {
+    for (int i = 1; i < argc; i++) {
+        if (std::strcmp(argv[i], "--debug") == 0) {
+            Logger::instance().setGlobalDebug(true);
+        }
+    }
+
     Window window;
     if (!window.create(400, 300, "Hello, ltgui!")) {
         std::cerr << "Failed to create window." << std::endl;
@@ -12,13 +19,13 @@ int main() {
 
     auto root = std::make_unique<Widget>();
     root->setStyle(Style::defaultStyle());
-    root->style().bgColor = Color::WindowBg;
+    root->style().bgColor = currentTheme().bgPrimary;
 
     auto layout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12);
 
     auto* label = root->makeChild<Label>("Welcome to ltgui!");
     label->style().font = Font("Segoe UI", 18, FontWeight::Bold);
-    label->style().fgColor = Color::DarkBlue;
+    label->style().fgColor = currentTheme().accent;
 
     auto* button = root->makeChild<Button>("Click Me!");
     int clickCount = 0;

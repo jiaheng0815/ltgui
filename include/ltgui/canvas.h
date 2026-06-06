@@ -63,25 +63,41 @@ public:
         return {p.x + stack_.back().tx, p.y + stack_.back().ty};
     }
 
-    // Transform-aware drawing helpers
+    // Apply current transform and clip to a rect (for forwarding to native canvas)
+    Rect clippedRect(const Rect& r) const {
+        auto result = mapRect(r);
+        auto& s = stack_.back();
+        if (s.hasClip) {
+            auto clipNative = s.clip.translated(s.tx, s.ty);
+            result = result.intersected(clipNative);
+        }
+        return result;
+    }
+
+    // Transform-aware drawing helpers (with clipping)
     void fillRect(const Rect& rect) {
-        native_->fillRect(mapRect(rect));
+        auto r = clippedRect(rect);
+        if (!r.isEmpty()) native_->fillRect(r);
     }
 
     void strokeRect(const Rect& rect, int lineWidth = 1) {
-        native_->strokeRect(mapRect(rect), lineWidth);
+        auto r = clippedRect(rect);
+        if (!r.isEmpty()) native_->strokeRect(r, lineWidth);
     }
 
     void fillRoundedRect(const Rect& rect, int radius) {
-        native_->fillRoundedRect(mapRect(rect), radius);
+        auto r = clippedRect(rect);
+        if (!r.isEmpty()) native_->fillRoundedRect(r, radius);
     }
 
     void strokeRoundedRect(const Rect& rect, int radius, int lineWidth = 1) {
-        native_->strokeRoundedRect(mapRect(rect), radius, lineWidth);
+        auto r = clippedRect(rect);
+        if (!r.isEmpty()) native_->strokeRoundedRect(r, radius, lineWidth);
     }
 
     void drawText(const std::string& text, const Rect& rect, int flags = 0) {
-        native_->drawText(text, mapRect(rect), flags);
+        auto r = clippedRect(rect);
+        if (!r.isEmpty()) native_->drawText(text, r, flags);
     }
 
 private:

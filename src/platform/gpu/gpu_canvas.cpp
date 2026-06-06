@@ -53,15 +53,28 @@ GpuCanvas::~GpuCanvas() {
         }
     }
     // renderer_, fontAtlas_, device_ destroyed automatically via unique_ptr
-    if (device_) {
-        device_->shutdown();
-    }
+    // in reverse declaration order: fontAtlas_ → renderer_ → device_.
+    // This ensures GL textures are deleted before EGL termination.
+    // Do NOT call device_->shutdown() here — it would terminate EGL/GL
+    // before texture destructors run, causing undefined behaviour.
 }
 
 bool GpuCanvas::initialize(void* windowHandle, int width, int height) {
     gpuInfo_ = selectBestGpu();
-    if (gpuInfo_.backend == GpuBackend::None) {
-        LOG_INFO("GPU", "No GPU found, falling back to CPU rendering.");
+
+    // Even if no GPUs were detected, still attempt device creation.
+    // On Windows, D3D11CreateDevice with D3D_DRIVER_TYPE_WARP provides
+    // a software rasterizer. On Linux, EGL might have a software fallback.
+    // This ensures GPU acceleration works on VMs and driverless systems.
+    GpuBackend target = gpuInfo_.backend;
+#ifdef LTGUI_PLATFORM_WINDOWS
+    if (target == GpuBackend::None) target = GpuBackend::D3D11;
+#elif defined(LTGUI_PLATFORM_LINUX)
+    if (target == GpuBackend::None) target = GpuBackend::OpenGL;
+#endif
+
+    if (target == GpuBackend::None) {
+        LOG_INFO("GPU", "No GPU back-end available on this platform.");
         return false;
     }
 
@@ -181,11 +194,26 @@ void GpuCanvas::drawText(const std::string& text, const Rect& rect, int flags) {
 
     while (p < end) {
         uint32_t cp;
-        if ((*p & 0x80) == 0)      { cp = *p++; }
-        else if ((*p & 0xE0) == 0xC0) { cp = (*p++ & 0x1F) << 6;  cp |= (*p++ & 0x3F); }
-        else if ((*p & 0xF0) == 0xE0) { cp = (*p++ & 0x0F) << 12; cp |= (*p++ & 0x3F) << 6; cp |= (*p++ & 0x3F); }
-        else if ((*p & 0xF8) == 0xF0) { cp = (*p++ & 0x07) << 18; cp |= (*p++ & 0x3F) << 12; cp |= (*p++ & 0x3F) << 6; cp |= (*p++ & 0x3F); }
-        else { p++; continue; }
+        if ((*p & 0x80) == 0) {
+            cp = *p++;
+        } else if ((*p & 0xE0) == 0xC0) {
+            if (p + 1 >= end) { p++; continue; }
+            cp = (*p++ & 0x1F) << 6;
+            cp |= (*p++ & 0x3F);
+        } else if ((*p & 0xF0) == 0xE0) {
+            if (p + 2 >= end) { p++; continue; }
+            cp = (*p++ & 0x0F) << 12;
+            cp |= (*p++ & 0x3F) << 6;
+            cp |= (*p++ & 0x3F);
+        } else if ((*p & 0xF8) == 0xF0) {
+            if (p + 3 >= end) { p++; continue; }
+            cp = (*p++ & 0x07) << 18;
+            cp |= (*p++ & 0x3F) << 12;
+            cp |= (*p++ & 0x3F) << 6;
+            cp |= (*p++ & 0x3F);
+        } else {
+            p++; continue;
+        }
 
         const GlyphEntry* g = fontAtlas_->getGlyph(cp, currentFont_);
         if (g && g->texId >= 0 && g->w > 0) {
@@ -329,6 +357,18 @@ void GpuCanvas::loadImageTexture(const std::string& path) {
         CGContextDrawImage(ctx, CGRectMake(0, 0, (CGFloat)w, (CGFloat)h), img);
         CGContextRelease(ctx);
         CGImageRelease(img);
+
+        // CoreGraphics produces premultiplied alpha by default, but the GPU
+        // blending pipeline uses non-premultiplied alpha (GL_SRC_ALPHA blending).
+        // Unpremultiply to prevent dark halos on semi-transparent pixels.
+        for (int i = 0; i < w * h; i++) {
+            uint8_t* p = &rgba[i * 4];
+            if (p[3] > 0 && p[3] < 255) {
+                p[0] = static_cast<uint8_t>((static_cast<int>(p[0]) * 255) / p[3]);
+                p[1] = static_cast<uint8_t>((static_cast<int>(p[1]) * 255) / p[3]);
+                p[2] = static_cast<uint8_t>((static_cast<int>(p[2]) * 255) / p[3]);
+            }
+        }
     }
 #else
     (void)path;
