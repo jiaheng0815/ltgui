@@ -18,6 +18,10 @@ public:
     explicit Win32Canvas(HWND hwnd);
     ~Win32Canvas() override;
 
+    // Non-copyable (owns raw GDI+ resources — accidental copy would double-delete)
+    Win32Canvas(const Win32Canvas&) = delete;
+    Win32Canvas& operator=(const Win32Canvas&) = delete;
+
     void resize(int width, int height) override;
     void beginPaint() override;
     void endPaint() override;

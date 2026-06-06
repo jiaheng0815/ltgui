@@ -21,6 +21,10 @@ public:
     CocoaCanvas(void* nsView);
     ~CocoaCanvas() override;
 
+    // Non-copyable (owns CGContextRef / ObjC resources — accidental copy would double-free)
+    CocoaCanvas(const CocoaCanvas&) = delete;
+    CocoaCanvas& operator=(const CocoaCanvas&) = delete;
+
     void resize(int width, int height) override;
     void beginPaint() override;
     void endPaint() override;

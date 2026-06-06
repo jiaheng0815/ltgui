@@ -82,11 +82,12 @@ void ScrollArea::paintSelf(NativeCanvas* canvas) {
     if (contentHeight_ > 0 && contentHeight_ > height()) {
         int sbWidth = 12;
         int scrollY = currentScrollY();
-        int thumbH = std::max(24, height() * height() / contentHeight_);
+        // Use int64_t to avoid overflow when height >= 46341 (sqrt(INT_MAX))
+        int thumbH = std::max(24, (int)((int64_t)height() * height() / contentHeight_));
         int maxScroll = contentHeight_ - height();
         int thumbY = r.y;
         if (maxScroll > 0) {
-            thumbY += (scrollY * (height() - thumbH)) / maxScroll;
+            thumbY += (int)((int64_t)scrollY * (height() - thumbH) / maxScroll);
         }
 
         canvas->setColor(t.scrollbarTrack);
@@ -121,7 +122,7 @@ bool ScrollArea::handleEvent(Event& event) {
     if (event.type == EventType::MouseDown && onScrollbar) {
         // Calculate scrollbar thumb position (contentHeight_ > 0 guaranteed by onScrollbar)
         int curScrollY = currentScrollY();
-        int thumbH = std::max(24, (height() * height()) / contentHeight_);
+        int thumbH = std::max(24, (int)((int64_t)height() * height() / contentHeight_));
         int maxScroll = contentHeight_ - height();
         int thumbY = 0;
         if (maxScroll > 0) {
@@ -146,7 +147,7 @@ bool ScrollArea::handleEvent(Event& event) {
     }
 
     if (event.type == EventType::MouseMove && draggingScrollbar_) {
-        int thumbH = std::max(24, height() * height() / contentHeight_);
+        int thumbH = std::max(24, (int)((int64_t)height() * height() / contentHeight_));
         int maxScroll = contentHeight_ - height();
         int trackH = height() - thumbH;
         if (maxScroll > 0 && trackH > 0) {

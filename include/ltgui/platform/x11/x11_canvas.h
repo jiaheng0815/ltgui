@@ -25,6 +25,10 @@ public:
     X11Canvas(Display* display, ::Window window, int screen);
     ~X11Canvas() override;
 
+    // Non-copyable (owns X server resources — accidental copy would double-free)
+    X11Canvas(const X11Canvas&) = delete;
+    X11Canvas& operator=(const X11Canvas&) = delete;
+
     void resize(int width, int height) override;
     void beginPaint() override;
     void endPaint() override;

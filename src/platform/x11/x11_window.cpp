@@ -4,7 +4,9 @@
 
 #include "platform/x11/x11_canvas.h"
 #include <X11/keysym.h>
+#include <X11/Xatom.h>
 #include <cstring>
+#include <unistd.h>
 #include <sys/select.h>
 #include <sys/time.h>
 
@@ -17,10 +19,10 @@
 #undef Button4
 #undef Button5
 
-namespace ltgui {
-
 #include <chrono>
 #include <unordered_map>
+
+namespace ltgui {
 
 Display* X11Window::s_display_ = nullptr;
 int X11Window::s_displayRefCount_ = 0;
@@ -265,7 +267,7 @@ std::string X11Window::getClipboardText() {
             XNextEvent(s_display_, &xev);
 
             if (xev.type == SelectionNotify && xev.xselection.requestor == window_) {
-                if (xev.xselection.property != None) {
+                if (xev.xselection.property != 0) { // None (X11 macro, #undef'd above)
                     Atom type;
                     int format;
                     unsigned long nitems = 0, bytesAfter = 0;
@@ -448,10 +450,10 @@ void X11Window::handleEvent(XEvent& xev) {
                                 (int)clipboardText_.size());
                 resp.xselection.property = req.property;
             } else {
-                resp.xselection.property = None; // unsupported target
+                resp.xselection.property = 0; // None (X11 macro, #undef'd above)
             }
         } else {
-            resp.xselection.property = None;
+            resp.xselection.property = 0; // None (X11 macro, #undef'd above)
         }
         XSendEvent(s_display_, req.requestor, False, NoEventMask, &resp);
         break;

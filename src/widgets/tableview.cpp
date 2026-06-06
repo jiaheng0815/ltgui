@@ -251,7 +251,7 @@ bool TableView::handleEvent(Event& event) {
 
         // Row click → select
         {
-            int row = (localY - headerHeight_ + scrollY_ * rowHeight_) / rowHeight_;
+            int row = (int)((localY - headerHeight_ + (int64_t)scrollY_ * rowHeight_) / rowHeight_);
             if (row >= 0 && model_ && row < model_->rowCount()) {
                 selectRow(row);
                 update();

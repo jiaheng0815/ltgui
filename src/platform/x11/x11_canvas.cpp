@@ -79,16 +79,22 @@ void X11Canvas::resize(int width, int height) {
     backbuffer_ = XCreatePixmap(display_, window_, width, height, depth_);
     xftDraw_ = XftDrawCreate(display_, backbuffer_,
                               DefaultVisual(display_, screen_), colormap_);
+
+    // Clear the new backbuffer to white so we don't show uninitialized
+    // garbage on the first paint pass after a resize.
+    unsigned long white = allocColor(Color::White);
+    unsigned long saved = currentPixel_;
+    XSetForeground(display_, gc_, white);
+    XFillRectangle(display_, backbuffer_, gc_, 0, 0, width, height);
+    XSetForeground(display_, gc_, saved);
 }
 
 void X11Canvas::beginPaint() {
-    if (backbuffer_) {
-        XSetFillStyle(display_, gc_, FillSolid);
-        unsigned long white = allocColor(Color::White);
-        XSetForeground(display_, gc_, white);
-        XFillRectangle(display_, backbuffer_, gc_, 0, 0, canvasWidth_, canvasHeight_);
-        XSetForeground(display_, gc_, currentPixel_);
-    }
+    // Do NOT clear the backbuffer.  The widget paint tree only repaints
+    // widgets that intersect the dirty rect.  Clearing the entire buffer
+    // would erase every widget outside the dirty region, making them
+    // disappear (white) until the next full-window repaint.
+    (void)backbuffer_;
 }
 
 void X11Canvas::endPaint() {
@@ -285,7 +291,8 @@ void X11Canvas::strokeRoundedRect(const Rect& rect, int radius, int lineWidth) {
 }
 
 Size X11Canvas::measureText(const std::string& text) {
-    if (!display_ || !xftFont_) {
+    if (!display_) return {0, 0};
+    if (!xftFont_) {
         int fs = static_cast<int>(12 * dpiScale_);
         std::string fb = "sans:pixelsize=" + std::to_string(fs);
         XftFont* f = XftFontOpenName(display_, screen_, fb.c_str());
