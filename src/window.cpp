@@ -245,6 +245,25 @@ void Window::handleEvent(Event& event) {
         if (auto* combo = openCombo_) {
             combo->closeIfClickOutside(event.pos);
         }
+        // If an open ComboBox survived closeIfClickOutside (meaning
+        // the click was inside its effective area), route the event
+        // directly to the ComboBox.  This prevents a sibling widget
+        // that overlaps the dropdown area (e.g. a Slider) from
+        // stealing the click via normal hit-testing z-order.
+        if (openCombo_) {
+            Widget* combo = openCombo_;
+            Point savedPos = event.pos;
+            // ComboBox::handleEvent expects coordinates relative to
+            // the combo's parent widget.  Convert from window-absolute.
+            Widget* p = combo->parent();
+            if (p) {
+                Rect pabs = p->absoluteRect();
+                event.pos = {savedPos.x - pabs.x, savedPos.y - pabs.y};
+            }
+            combo->handleEvent(event);
+            event.pos = savedPos;
+            if (event.accepted) break;
+        }
         if (centralWidget_) {
             Widget* prevFocus = focusWidget_;
             bool handled = centralWidget_->handleEvent(event);

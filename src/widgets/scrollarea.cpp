@@ -75,6 +75,20 @@ void ScrollArea::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
     Theme t = currentTheme();
 
+    // Update the content widget position from the current animated
+    // scroll value each frame.  scrollTo() sets the animation target
+    // but only sets the geometry once; without this the content jumps
+    // to the target while the scrollbar thumb animates smoothly —
+    // producing a visual disconnect.  Updating here ties the content
+    // position to the animation frame rate (~60 FPS while animating).
+    if (auto* cw = contentWidget()) {
+        int curScrollY = currentScrollY();
+        Rect targetGeo(-scrollX_, -curScrollY, contentWidth_, contentHeight_);
+        if (cw->geometry() != targetGeo) {
+            cw->setGeometry(targetGeo);
+        }
+    }
+
     canvas->setColor(style().bgColor);
     canvas->fillRoundedRect(r, style().borderRadius);
 
