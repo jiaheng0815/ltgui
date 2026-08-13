@@ -20,43 +20,43 @@ namespace ltgui {
 
 class CocoaWindow : public NativeWindow {
 public:
-    CocoaWindow();
-    ~CocoaWindow() override;
+  CocoaWindow();
+  ~CocoaWindow() override;
 
-    bool create(int width, int height, const std::string& title) override;
-    void destroy() override;
-    void show() override;
-    void hide() override;
-    void close() override;
-    void setTitle(const std::string& title) override;
-    void setSize(int width, int height) override;
-    Size getSize() const override;
-    void invalidate(const Rect& rect) override;
-    void* nativeHandle() const override;
-    float dpiScale() const override;
+  bool create(int width, int height, const std::string &title) override;
+  void destroy() override;
+  void show() override;
+  void hide() override;
+  void close() override;
+  void setTitle(const std::string &title) override;
+  void setSize(int width, int height) override;
+  Size getSize() const override;
+  void invalidate(const Rect &rect) override;
+  void *nativeHandle() const override;
+  float dpiScale() const override;
 
-    // Clipboard
-    bool setClipboardText(const std::string& text) override;
-    std::string getClipboardText() override;
+  // Clipboard
+  bool setClipboardText(const std::string &text) override;
+  std::string getClipboardText() override;
 
-    NativeCanvas* getCanvas() override;
+  NativeCanvas *getCanvas() override;
 
-    // Called from Objective-C delegate
-    void onPaint();
-    void onResize(int width, int height);
-    void onClose();
-    void onMouseEvent(Event& ev);
-    void onKeyEvent(Event& ev);
+  // Called from Objective-C delegate
+  void onPaint();
+  void onResize(int width, int height);
+  void onClose();
+  void onMouseEvent(Event &ev);
+  void onKeyEvent(Event &ev);
 
-    // Map macOS keyCode to ltgui Key enum
-    Key mapCocoaKey(int keyCode) const;
+  // Map macOS keyCode to ltgui Key enum
+  Key mapCocoaKey(int keyCode) const;
 
 private:
-    NSWindow* nsWindow_ = nullptr;
-    CocoaWindowDelegate* delegate_ = nullptr;
-    CocoaView* view_ = nullptr;
-    NativeCanvas* canvas_ = nullptr;
-    Size size_;
+  NSWindow *nsWindow_ = nullptr;
+  CocoaWindowDelegate *delegate_ = nullptr;
+  CocoaView *view_ = nullptr;
+  NativeCanvas *canvas_ = nullptr;
+  Size size_;
 };
 
 } // namespace ltgui

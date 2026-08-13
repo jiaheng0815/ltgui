@@ -1,29 +1,29 @@
 #pragma once
-#include "widgets/range.h"
 #include "animation.h"
+#include "widgets/range.h"
 
 namespace ltgui {
 
 class Slider : public Range {
 public:
-    explicit Slider(Widget* parent = nullptr);
+  explicit Slider(Widget *parent = nullptr);
 
-    LTGUI_DECLARE_WIDGET_TYPE(Slider)
-    bool canAcceptFocus() const override { return true; }
-    Size sizeHint() const override;
+  LTGUI_DECLARE_WIDGET_TYPE(Slider)
+  bool canAcceptFocus() const override { return true; }
+  Size sizeHint() const override;
 
 protected:
-    void paintSelf(NativeCanvas* canvas) override;
-    bool handleEvent(Event& event) override;
+  void paintSelf(NativeCanvas *canvas) override;
+  bool handleEvent(Event &event) override;
 
 private:
-    // Smoothly transitions the thumb outline between normal/hover/active.
-    void animateThumb();
+  // Smoothly transitions the thumb outline between normal/hover/active.
+  void animateThumb();
 
-    bool dragging_ = false;
-    AnimatedColor thumbAnim_;
+  bool dragging_ = false;
+  AnimatedColor thumbAnim_;
 
-    int thumbPos() const;
+  int thumbPos() const;
 };
 
 } // namespace ltgui

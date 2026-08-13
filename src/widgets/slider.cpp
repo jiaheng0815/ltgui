@@ -1,154 +1,160 @@
 #include "widgets/slider.h"
-#include "window.h"
-#include "theme.h"
 #include "platform/native_canvas.h"
+#include "theme.h"
+#include "window.h"
 #include <algorithm>
 
 namespace ltgui {
 
-Slider::Slider(Widget* parent) : Range(parent) {
-    style().bgColor = Color::Transparent;
-    thumbAnim_.setImmediate(resolvedStyle().borderColor);
+Slider::Slider(Widget *parent) : Range(parent) {
+  style().bgColor = Color::Transparent;
+  thumbAnim_.setImmediate(resolvedStyle().borderColor);
 }
 
 Size Slider::sizeHint() const {
-    if (!sizeHintDirty()) return cachedSizeHint();
-    setCachedSizeHint(dpiScaleSize(150, 28));
+  if (!sizeHintDirty())
     return cachedSizeHint();
+  setCachedSizeHint(dpiScaleSize(150, 28));
+  return cachedSizeHint();
 }
 
 int Slider::thumbPos() const {
-    int range = maximum() - minimum();
-    if (range == 0) return 16;
-    // Thumb center moves from 16 to width-16 (usable track = width - 32).
-    // This keeps the 16px thumb fully within the widget bounds at both ends.
-    int usableW = width() - 32;
-    return 16 + (usableW * (value() - minimum())) / range;
+  int range = maximum() - minimum();
+  if (range == 0)
+    return 16;
+  // Thumb center moves from 16 to width-16 (usable track = width - 32).
+  // This keeps the 16px thumb fully within the widget bounds at both ends.
+  int usableW = width() - 32;
+  return 16 + (usableW * (value() - minimum())) / range;
 }
 
-void Slider::paintSelf(NativeCanvas* canvas) {
-    Rect r = absoluteRect();
-    ResolvedStyle st = resolvedStyle();
-    const Theme& t = currentTheme();
+void Slider::paintSelf(NativeCanvas *canvas) {
+  Rect r = absoluteRect();
+  ResolvedStyle st = resolvedStyle();
+  const Theme &t = currentTheme();
 
-    // Track spans from x+8 to x+width-8 (= width-16 wide)
-    int trackW = r.width - 16;
-    int trackX = r.x + 8;
-    int trackY = r.y + r.height / 2 - 3;
+  // Track spans from x+8 to x+width-8 (= width-16 wide)
+  int trackW = r.width - 16;
+  int trackX = r.x + 8;
+  int trackY = r.y + r.height / 2 - 3;
 
-    // Track background
-    Rect trackRect(trackX, trackY, trackW, 6);
-    canvas->setColor(t.bgTertiary);
-    canvas->fillRoundedRect(trackRect, 3);
+  // Track background
+  Rect trackRect(trackX, trackY, trackW, 6);
+  canvas->setColor(t.bgTertiary);
+  canvas->fillRoundedRect(trackRect, 3);
 
-    // Filled portion — plain fillRect, no rounded corners.
-    // tpos is widget-local (origin = widget left edge).  The track starts
-    // at widget edge + 8, so the thumb centre relative to the track start
-    // is tpos - 8.  At max value, fill the entire track.
-    int tpos = thumbPos();
-    int fillW = tpos - 8;
-    if (fillW < 0) fillW = 0;
-    if (value() == maximum()) fillW = trackW;
+  // Filled portion — plain fillRect, no rounded corners.
+  // tpos is widget-local (origin = widget left edge).  The track starts
+  // at widget edge + 8, so the thumb centre relative to the track start
+  // is tpos - 8.  At max value, fill the entire track.
+  int tpos = thumbPos();
+  int fillW = tpos - 8;
+  if (fillW < 0)
+    fillW = 0;
+  if (value() == maximum())
+    fillW = trackW;
 
-    if (fillW > 0) {
-        canvas->setColor(st.accent);
-        canvas->fillRect(Rect(trackX, trackY, fillW, 6));
-    }
+  if (fillW > 0) {
+    canvas->setColor(st.accent);
+    canvas->fillRect(Rect(trackX, trackY, fillW, 6));
+  }
 
-    // Thumb (tpos is widget-local, convert to absolute)
-    int thumbSize = 16;
-    int thumbAbsX = r.x + tpos - thumbSize / 2;
-    int thumbY = r.y + (r.height - thumbSize) / 2;
-    Rect thumbRect(thumbAbsX, thumbY, thumbSize, thumbSize);
+  // Thumb (tpos is widget-local, convert to absolute)
+  int thumbSize = 16;
+  int thumbAbsX = r.x + tpos - thumbSize / 2;
+  int thumbY = r.y + (r.height - thumbSize) / 2;
+  Rect thumbRect(thumbAbsX, thumbY, thumbSize, thumbSize);
 
-    canvas->setColor(st.bgColor);
-    canvas->fillEllipse(thumbRect);
-    // Animated while transitioning between normal/hover/active; falls back
-    // to the resolved style once settled (theme-fresh).
-    Color thumbColor = thumbAnim_.isAnimating()
-                           ? thumbAnim_.current()
-                           : (hovered_ || dragging_ ? st.accent : st.borderColor);
-    canvas->setColor(thumbColor);
-    canvas->strokeEllipse(thumbRect, 2);
+  canvas->setColor(st.bgColor);
+  canvas->fillEllipse(thumbRect);
+  // Animated while transitioning between normal/hover/active; falls back
+  // to the resolved style once settled (theme-fresh).
+  Color thumbColor = thumbAnim_.isAnimating()
+                         ? thumbAnim_.current()
+                         : (hovered_ || dragging_ ? st.accent : st.borderColor);
+  canvas->setColor(thumbColor);
+  canvas->strokeEllipse(thumbRect, 2);
 }
 
 void Slider::animateThumb() {
-    ResolvedStyle st = resolvedStyle();
-    Color target = (hovered_ || dragging_) ? st.accent : st.borderColor;
-    thumbAnim_.setTarget(target, 150, Easing::EaseOut);
-    update();
+  ResolvedStyle st = resolvedStyle();
+  Color target = (hovered_ || dragging_) ? st.accent : st.borderColor;
+  thumbAnim_.setTarget(target, 150, Easing::EaseOut);
+  update();
 }
 
-bool Slider::handleEvent(Event& event) {
-    if (!isEnabled()) return false;
+bool Slider::handleEvent(Event &event) {
+  if (!isEnabled())
+    return false;
 
-    int localX = event.pos.x - x();
+  int localX = event.pos.x - x();
 
-    // Helper: is the cursor over the thumb?
-    auto isOverThumb = [&]() -> bool {
-        int thumbSize = 16;
-        int tpos = thumbPos();
-        int thumbCenterX = x() + tpos;
-        int thumbCenterY = y() + height() / 2;
-        int dx = event.pos.x - thumbCenterX;
-        int dy = event.pos.y - thumbCenterY;
-        return (dx * dx + dy * dy) < (thumbSize * thumbSize / 2);
-    };
+  // Helper: is the cursor over the thumb?
+  auto isOverThumb = [&]() -> bool {
+    int thumbSize = 16;
+    int tpos = thumbPos();
+    int thumbCenterX = x() + tpos;
+    int thumbCenterY = y() + height() / 2;
+    int dx = event.pos.x - thumbCenterX;
+    int dy = event.pos.y - thumbCenterY;
+    return (dx * dx + dy * dy) < (thumbSize * thumbSize / 2);
+  };
 
-    // Helper: snap value to click position on the track
-    auto snapToTrack = [&]() {
-        int trackW = width() - 16;
-        int clickX = std::max(0, std::min(trackW, localX - 8));
-        int range = maximum() - minimum();
-        if (range > 0 && trackW > 0) setValue(minimum() + (clickX * range) / trackW);
-    };
+  // Helper: snap value to click position on the track
+  auto snapToTrack = [&]() {
+    int trackW = width() - 16;
+    int clickX = std::max(0, std::min(trackW, localX - 8));
+    int range = maximum() - minimum();
+    if (range > 0 && trackW > 0)
+      setValue(minimum() + (clickX * range) / trackW);
+  };
 
-    switch (event.type) {
-    case EventType::MouseMove: {
-        bool over = isOverThumb();
-        if (over != hovered_) {
-            hovered_ = over;
-            animateThumb();
-        }
-        if (dragging_) {
-            snapToTrack();
-            event.accepted = true;
-            return true;
-        }
-        // Only consume MouseMove when we actually did something
-        if (over) {
-            event.accepted = true;
-            return true;
-        }
-        return false;
+  switch (event.type) {
+  case EventType::MouseMove: {
+    bool over = isOverThumb();
+    if (over != hovered_) {
+      hovered_ = over;
+      animateThumb();
     }
-    case EventType::MouseDown:
-        if (event.button == MouseButton::Left) {
-            claimFocus();
-            if (isOverThumb()) {
-                dragging_ = true;
-                animateThumb();
-                event.accepted = true;
-                return true;
-            }
-            // Click on track (not thumb): jump value to click position
-            snapToTrack();
-            event.accepted = true;
-            return true;
-        }
-        break;
-    case EventType::MouseUp:
-        if (dragging_) {
-            dragging_ = false;
-            animateThumb();
-            event.accepted = true;
-            return true;
-        }
-        return false;
-    default:
-        break;
+    if (dragging_) {
+      snapToTrack();
+      event.accepted = true;
+      return true;
+    }
+    // Only consume MouseMove when we actually did something
+    if (over) {
+      event.accepted = true;
+      return true;
     }
     return false;
+  }
+  case EventType::MouseDown:
+    if (event.button == MouseButton::Left) {
+      claimFocus();
+      if (isOverThumb()) {
+        dragging_ = true;
+        animateThumb();
+        event.accepted = true;
+        return true;
+      }
+      // Click on track (not thumb): jump value to click position
+      snapToTrack();
+      event.accepted = true;
+      return true;
+    }
+    break;
+  case EventType::MouseUp:
+    if (dragging_) {
+      dragging_ = false;
+      animateThumb();
+      event.accepted = true;
+      return true;
+    }
+    return false;
+  default:
+    break;
+  }
+  return false;
 }
 
 } // namespace ltgui

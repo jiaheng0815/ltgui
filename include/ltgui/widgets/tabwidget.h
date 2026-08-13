@@ -7,43 +7,43 @@ namespace ltgui {
 
 class TabWidget : public Widget {
 public:
-    explicit TabWidget(Widget* parent = nullptr);
+  explicit TabWidget(Widget *parent = nullptr);
 
-    int addTab(const std::string& label);
-    void removeTab(int index);
-    int count() const;
-    int currentIndex() const { return current_; }
-    void setCurrentIndex(int index);
+  int addTab(const std::string &label);
+  void removeTab(int index);
+  int count() const;
+  int currentIndex() const { return current_; }
+  void setCurrentIndex(int index);
 
-    Widget* tabContent(int index) const;
-    Widget* currentContent() const;
+  Widget *tabContent(int index) const;
+  Widget *currentContent() const;
 
-    LTGUI_DECLARE_WIDGET_TYPE(TabWidget)
-    bool canAcceptFocus() const override { return true; }
-    Size sizeHint() const override;
-    void setGeometry(const Rect& rect) override;
+  LTGUI_DECLARE_WIDGET_TYPE(TabWidget)
+  bool canAcceptFocus() const override { return true; }
+  Size sizeHint() const override;
+  void setGeometry(const Rect &rect) override;
 
 protected:
-    void paintSelf(NativeCanvas* canvas) override;
-    bool handleEvent(Event& event) override;
+  void paintSelf(NativeCanvas *canvas) override;
+  bool handleEvent(Event &event) override;
 
 private:
-    struct Tab {
-        std::string label;
-        Widget* content = nullptr;
-    };
-    std::vector<Tab> tabs_;
-    int current_ = -1;
-    int hoveredTab_ = -1;
-    int tabBarHeight_ = 32;
+  struct Tab {
+    std::string label;
+    Widget *content = nullptr;
+  };
+  std::vector<Tab> tabs_;
+  int current_ = -1;
+  int hoveredTab_ = -1;
+  int tabBarHeight_ = 32;
 
-    mutable std::vector<int> cachedTabWidths_;
-    mutable bool tabWidthsDirty_ = true;
+  mutable std::vector<int> cachedTabWidths_;
+  mutable bool tabWidthsDirty_ = true;
 
-    void invalidateTabWidths() const { tabWidthsDirty_ = true; }
-    void ensureTabWidths() const;
-    Rect tabRect(int index) const;
-    int totalTabWidth() const;
+  void invalidateTabWidths() const { tabWidthsDirty_ = true; }
+  void ensureTabWidths() const;
+  Rect tabRect(int index) const;
+  int totalTabWidth() const;
 };
 
 } // namespace ltgui

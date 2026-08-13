@@ -11,17 +11,17 @@ class Widget;
 // The host widget is stored so state changes can trigger a repaint.
 class Checkable {
 public:
-    explicit Checkable(Widget* host) : host_(host) {}
+  explicit Checkable(Widget *host) : host_(host) {}
 
-    bool isChecked() const { return checked_; }
-    virtual void setChecked(bool checked);
+  bool isChecked() const { return checked_; }
+  virtual void setChecked(bool checked);
 
-    // Emitted whenever the checked state changes.
-    Signal<bool> onToggled;
+  // Emitted whenever the checked state changes.
+  Signal<bool> onToggled;
 
 protected:
-    Widget* host_ = nullptr;
-    bool checked_ = false;
+  Widget *host_ = nullptr;
+  bool checked_ = false;
 };
 
 } // namespace ltgui

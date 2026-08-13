@@ -1,8 +1,8 @@
 #pragma once
 #include "event.h"
 #include <functional>
-#include <vector>
 #include <string>
+#include <vector>
 
 namespace ltgui {
 
@@ -16,22 +16,23 @@ class Window;
 
 class Shortcut {
 public:
-    using Callback = std::function<void()>;
+  using Callback = std::function<void()>;
 
-    Key key = Key::Unknown;
-    KeyModifier modifiers = KeyModifier::None;
+  Key key = Key::Unknown;
+  KeyModifier modifiers = KeyModifier::None;
 
-    Shortcut() = default;
-    Shortcut(Key k, KeyModifier m = KeyModifier::None) : key(k), modifiers(m) {}
+  Shortcut() = default;
+  Shortcut(Key k, KeyModifier m = KeyModifier::None) : key(k), modifiers(m) {}
 
-    bool matches(Key pressedKey, KeyModifier pressedMods) const {
-        if (key == Key::Unknown) return false;
-        return pressedKey == key && pressedMods == modifiers;
-    }
+  bool matches(Key pressedKey, KeyModifier pressedMods) const {
+    if (key == Key::Unknown)
+      return false;
+    return pressedKey == key && pressedMods == modifiers;
+  }
 
-    bool operator==(const Shortcut& o) const {
-        return key == o.key && modifiers == o.modifiers;
-    }
+  bool operator==(const Shortcut &o) const {
+    return key == o.key && modifiers == o.modifiers;
+  }
 };
 
 } // namespace ltgui

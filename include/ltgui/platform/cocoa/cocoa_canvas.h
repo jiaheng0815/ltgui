@@ -18,43 +18,46 @@ namespace ltgui {
 
 class CocoaCanvas : public NativeCanvas {
 public:
-    CocoaCanvas(void* nsView);
-    ~CocoaCanvas() override;
+  CocoaCanvas(void *nsView);
+  ~CocoaCanvas() override;
 
-    // Non-copyable (owns CGContextRef / ObjC resources — accidental copy would double-free)
-    CocoaCanvas(const CocoaCanvas&) = delete;
-    CocoaCanvas& operator=(const CocoaCanvas&) = delete;
+  // Non-copyable (owns CGContextRef / ObjC resources — accidental copy would
+  // double-free)
+  CocoaCanvas(const CocoaCanvas &) = delete;
+  CocoaCanvas &operator=(const CocoaCanvas &) = delete;
 
-    void resize(int width, int height) override;
-    void beginPaint() override;
-    void endPaint() override;
+  void resize(int width, int height) override;
+  void beginPaint() override;
+  void endPaint() override;
 
-    void setColor(const Color& color) override;
-    void setFont(const Font& font) override;
+  void setColor(const Color &color) override;
+  void setFont(const Font &font) override;
 
-    void fillRect(const Rect& rect) override;
-    void strokeRect(const Rect& rect, int lineWidth = 1) override;
-    void fillRoundedRect(const Rect& rect, int radius) override;
-    void strokeRoundedRect(const Rect& rect, int radius, int lineWidth = 1) override;
-    void drawText(const std::string& text, const Rect& rect, int flags = 0) override;
-    void drawLine(const Point& p1, const Point& p2, int lineWidth = 1) override;
-    void fillEllipse(const Rect& rect) override;
-    void strokeEllipse(const Rect& rect, int lineWidth = 1) override;
+  void fillRect(const Rect &rect) override;
+  void strokeRect(const Rect &rect, int lineWidth = 1) override;
+  void fillRoundedRect(const Rect &rect, int radius) override;
+  void strokeRoundedRect(const Rect &rect, int radius,
+                         int lineWidth = 1) override;
+  void drawText(const std::string &text, const Rect &rect,
+                int flags = 0) override;
+  void drawLine(const Point &p1, const Point &p2, int lineWidth = 1) override;
+  void fillEllipse(const Rect &rect) override;
+  void strokeEllipse(const Rect &rect, int lineWidth = 1) override;
 
-    Size measureText(const std::string& text) override;
+  Size measureText(const std::string &text) override;
 
 private:
-    void* nsView_ = nullptr;      // CocoaView*
-    void* context_ = nullptr;     // CGContextRef
-    void* backbuffer_ = nullptr;  // CGContextRef (bitmap)
+  void *nsView_ = nullptr;     // CocoaView*
+  void *context_ = nullptr;    // CGContextRef
+  void *backbuffer_ = nullptr; // CGContextRef (bitmap)
 
-    int currentR_ = 0, currentG_ = 0, currentB_ = 0, currentA_ = 255;
-    NSFont* currentFont_ = nullptr;
-    NSColor* currentColor_ = nullptr;
-    Font currentFontDesc_;
+  int currentR_ = 0, currentG_ = 0, currentB_ = 0, currentA_ = 255;
+  NSFont *currentFont_ = nullptr;
+  NSColor *currentColor_ = nullptr;
+  Font currentFontDesc_;
 
-    int canvasWidth_ = 0;
-    int canvasHeight_ = 0;
+  int canvasWidth_ = 0;
+  int canvasHeight_ = 0;
 };
 
 } // namespace ltgui

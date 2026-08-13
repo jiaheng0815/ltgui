@@ -5,12 +5,12 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <windows.h>
-#include <d3d11.h>
-#include <dxgi.h>
-#include <d3dcompiler.h>
 #include "log.h"
 #include <cstdio>
+#include <d3d11.h>
+#include <d3dcompiler.h>
+#include <dxgi.h>
+#include <windows.h>
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -29,7 +29,7 @@ namespace gpu {
 
 // ---- Embedded shaders (fallback for runtime compilation) ----
 
-static const char* kSolidShader = R"(
+static const char *kSolidShader = R"(
 struct VS_IN { float2 pos : POSITION; float4 col : COLOR; };
 struct VS_OUT { float4 pos : SV_POSITION; float4 col : COLOR; };
 
@@ -45,7 +45,7 @@ float4 PSMain(VS_OUT input) : SV_TARGET {
 }
 )";
 
-static const char* kRoundedShader = R"(
+static const char *kRoundedShader = R"(
 struct VS_IN { float2 pos : POSITION; float2 uv : TEXCOORD; float4 col : COLOR; float4 params : TEXCOORD1; };
 struct VS_OUT { float4 pos : SV_POSITION; float2 uv : TEXCOORD; float4 col : COLOR; float4 params : TEXCOORD1; };
 
@@ -89,7 +89,7 @@ float4 PSMain(VS_OUT input) : SV_TARGET {
 }
 )";
 
-static const char* kEllipseShader = R"(
+static const char *kEllipseShader = R"(
 struct VS_IN { float2 pos : POSITION; float2 uv : TEXCOORD; float4 col : COLOR; float4 params : TEXCOORD1; };
 struct VS_OUT { float4 pos : SV_POSITION; float2 uv : TEXCOORD; float4 col : COLOR; float4 params : TEXCOORD1; };
 
@@ -124,7 +124,7 @@ float4 PSMain(VS_OUT input) : SV_TARGET {
 }
 )";
 
-static const char* kTextureShader = R"(
+static const char *kTextureShader = R"(
 struct VS_IN { float2 pos : POSITION; float2 uv : TEXCOORD; float4 col : COLOR; };
 struct VS_OUT { float4 pos : SV_POSITION; float2 uv : TEXCOORD; float4 col : COLOR; };
 
@@ -148,596 +148,737 @@ float4 PSMain(VS_OUT input) : SV_TARGET {
 
 class D3D11Texture : public GpuTexture {
 public:
-    D3D11Texture(ID3D11Device* dev, ID3D11DeviceContext* ctx, int w, int h, const uint8_t* rgba)
-        : device_(dev), context_(ctx), width_(w), height_(h) {
-        D3D11_TEXTURE2D_DESC desc = {};
-        desc.Width = w;
-        desc.Height = h;
-        desc.MipLevels = 1;
-        desc.ArraySize = 1;
-        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        desc.SampleDesc.Count = 1;
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+  D3D11Texture(ID3D11Device *dev, ID3D11DeviceContext *ctx, int w, int h,
+               const uint8_t *rgba)
+      : device_(dev), context_(ctx), width_(w), height_(h) {
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = w;
+    desc.Height = h;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
-        D3D11_SUBRESOURCE_DATA init = {};
-        init.pSysMem = rgba;
-        init.SysMemPitch = w * 4;
+    D3D11_SUBRESOURCE_DATA init = {};
+    init.pSysMem = rgba;
+    init.SysMemPitch = w * 4;
 
-        HRESULT hr = dev->CreateTexture2D(&desc, rgba ? &init : nullptr, &tex_);
-        if (FAILED(hr)) {
-            LOG_ERROR("D3D11", "CreateTexture2D failed: 0x%08lx", hr);
-            tex_ = nullptr;
-            return;
-        }
-
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = desc.Format;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
-        hr = dev->CreateShaderResourceView(tex_, &srvDesc, &srv_);
-        if (FAILED(hr)) {
-            LOG_ERROR("D3D11", "CreateShaderResourceView failed: 0x%08lx", hr);
-            srv_ = nullptr;
-        }
+    HRESULT hr = dev->CreateTexture2D(&desc, rgba ? &init : nullptr, &tex_);
+    if (FAILED(hr)) {
+      LOG_ERROR("D3D11", "CreateTexture2D failed: 0x%08lx", hr);
+      tex_ = nullptr;
+      return;
     }
 
-    ~D3D11Texture() override {
-        if (srv_) srv_->Release();
-        if (tex_) tex_->Release();
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = desc.Format;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+    hr = dev->CreateShaderResourceView(tex_, &srvDesc, &srv_);
+    if (FAILED(hr)) {
+      LOG_ERROR("D3D11", "CreateShaderResourceView failed: 0x%08lx", hr);
+      srv_ = nullptr;
     }
+  }
 
-    int width() const override { return width_; }
-    int height() const override { return height_; }
+  ~D3D11Texture() override {
+    if (srv_)
+      srv_->Release();
+    if (tex_)
+      tex_->Release();
+  }
 
-    void update(const uint8_t* rgba, int x, int y, int w, int h) override {
-        D3D11_BOX box = {(UINT)x, (UINT)y, 0, (UINT)(x + w), (UINT)(y + h), 1};
-        context_->UpdateSubresource(tex_, 0, &box, rgba, w * 4, 0);
-    }
+  int width() const override { return width_; }
+  int height() const override { return height_; }
 
-    void bind(int slot) override {
-        context_->PSSetShaderResources(slot, 1, &srv_);
-    }
+  void update(const uint8_t *rgba, int x, int y, int w, int h) override {
+    D3D11_BOX box = {(UINT)x, (UINT)y, 0, (UINT)(x + w), (UINT)(y + h), 1};
+    context_->UpdateSubresource(tex_, 0, &box, rgba, w * 4, 0);
+  }
 
-    ID3D11Texture2D* tex() const { return tex_; }
+  void bind(int slot) override {
+    context_->PSSetShaderResources(slot, 1, &srv_);
+  }
+
+  ID3D11Texture2D *tex() const { return tex_; }
 
 private:
-    ID3D11Device* device_;
-    ID3D11DeviceContext* context_;
-    ID3D11Texture2D* tex_ = nullptr;
-    ID3D11ShaderResourceView* srv_ = nullptr;
-    int width_, height_;
+  ID3D11Device *device_;
+  ID3D11DeviceContext *context_;
+  ID3D11Texture2D *tex_ = nullptr;
+  ID3D11ShaderResourceView *srv_ = nullptr;
+  int width_, height_;
 };
 
 // ---- D3D11 Device ----
 
 class D3D11Device : public GpuDevice {
 public:
-    D3D11Device() = default;
+  D3D11Device() = default;
 
-    const char* name() const override { return "D3D11"; }
-    int width() const override { return width_; }
-    int height() const override { return height_; }
-    bool isValid() const { return device_ != nullptr; }
+  const char *name() const override { return "D3D11"; }
+  int width() const override { return width_; }
+  int height() const override { return height_; }
+  bool isValid() const { return device_ != nullptr; }
 
-    bool initialize(void* windowHandle, int w, int h) override {
-        HWND hwnd = static_cast<HWND>(windowHandle);
-        width_ = w;
-        height_ = h;
+  bool initialize(void *windowHandle, int w, int h) override {
+    HWND hwnd = static_cast<HWND>(windowHandle);
+    width_ = w;
+    height_ = h;
 
-        // Build orthographic projection matrix for 2D: [0, w] x [0, h]
-        float L = 0.0f, R = (float)w, T = 0.0f, B = (float)h;
-        orthoProj_[0] = 2.0f / (R - L);
-        orthoProj_[4] = -2.0f / (B - T);
-        orthoProj_[12] = -(R + L) / (R - L);
-        orthoProj_[13] = (B + T) / (B - T);
-        orthoProj_[10] = 1.0f;
-        orthoProj_[15] = 1.0f;
+    // Build orthographic projection matrix for 2D: [0, w] x [0, h]
+    float L = 0.0f, R = (float)w, T = 0.0f, B = (float)h;
+    orthoProj_[0] = 2.0f / (R - L);
+    orthoProj_[4] = -2.0f / (B - T);
+    orthoProj_[12] = -(R + L) / (R - L);
+    orthoProj_[13] = (B + T) / (B - T);
+    orthoProj_[10] = 1.0f;
+    orthoProj_[15] = 1.0f;
 
-        // Create device and swap chain
-        DXGI_SWAP_CHAIN_DESC scDesc = {};
-        scDesc.BufferCount = 2;
-        scDesc.BufferDesc.Width = w;
-        scDesc.BufferDesc.Height = h;
-        scDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        scDesc.BufferDesc.RefreshRate.Numerator = 60;
-        scDesc.BufferDesc.RefreshRate.Denominator = 1;
-        scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        scDesc.OutputWindow = hwnd;
-        scDesc.SampleDesc.Count = 1;
-        scDesc.Windowed = TRUE;
+    // Create device and swap chain
+    DXGI_SWAP_CHAIN_DESC scDesc = {};
+    scDesc.BufferCount = 2;
+    scDesc.BufferDesc.Width = w;
+    scDesc.BufferDesc.Height = h;
+    scDesc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    scDesc.BufferDesc.RefreshRate.Numerator = 60;
+    scDesc.BufferDesc.RefreshRate.Denominator = 1;
+    scDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+    scDesc.OutputWindow = hwnd;
+    scDesc.SampleDesc.Count = 1;
+    scDesc.Windowed = TRUE;
 
-        UINT flags = 0;
+    UINT flags = 0;
 #ifdef _DEBUG
-        flags |= D3D11_CREATE_DEVICE_DEBUG;
+    flags |= D3D11_CREATE_DEVICE_DEBUG;
 #endif
 
-        D3D_FEATURE_LEVEL featureLevel;
-        HRESULT hr = D3D11CreateDeviceAndSwapChain(
-            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags,
-            nullptr, 0, D3D11_SDK_VERSION,
-            &scDesc, &swapChain_, &device_, &featureLevel, &context_);
+    D3D_FEATURE_LEVEL featureLevel;
+    HRESULT hr = D3D11CreateDeviceAndSwapChain(
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, flags, nullptr, 0,
+        D3D11_SDK_VERSION, &scDesc, &swapChain_, &device_, &featureLevel,
+        &context_);
 
-        if (FAILED(hr)) {
-            // Try WARP (software) as fallback
-            hr = D3D11CreateDeviceAndSwapChain(
-                nullptr, D3D_DRIVER_TYPE_WARP, nullptr, flags,
-                nullptr, 0, D3D11_SDK_VERSION,
-                &scDesc, &swapChain_, &device_, &featureLevel, &context_);
-        }
+    if (FAILED(hr)) {
+      // Try WARP (software) as fallback
+      hr = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr,
+                                         flags, nullptr, 0, D3D11_SDK_VERSION,
+                                         &scDesc, &swapChain_, &device_,
+                                         &featureLevel, &context_);
+    }
 
-        if (FAILED(hr)) return false;
+    if (FAILED(hr))
+      return false;
 
-        // Compile shaders
-        if (!compileShaders()) return false;
+    // Compile shaders
+    if (!compileShaders())
+      return false;
 
-        // Create render target view
+    // Create render target view
+    createRenderTarget();
+
+    // Set up blend state
+    D3D11_BLEND_DESC blendDesc = {};
+    blendDesc.RenderTarget[0].BlendEnable = TRUE;
+    blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
+    blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
+    blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
+    blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
+    blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    blendDesc.RenderTarget[0].RenderTargetWriteMask =
+        D3D11_COLOR_WRITE_ENABLE_ALL;
+    device_->CreateBlendState(&blendDesc, &blendState_);
+
+    // Default sampler
+    D3D11_SAMPLER_DESC sampDesc = {};
+    sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    device_->CreateSamplerState(&sampDesc, &sampler_);
+
+    // Disable back-face culling — 2D rendering has no "back" faces.
+    // Rasterizer WITHOUT scissor (default for most draws)
+    D3D11_RASTERIZER_DESC rsDesc = {};
+    rsDesc.FillMode = D3D11_FILL_SOLID;
+    rsDesc.CullMode = D3D11_CULL_NONE;
+    rsDesc.ScissorEnable = FALSE;
+    device_->CreateRasterizerState(&rsDesc, &rasterizerState_);
+
+    // Rasterizer WITH scissor enabled — used when setScissor() is called
+    rsDesc.ScissorEnable = TRUE;
+    device_->CreateRasterizerState(&rsDesc, &rasterizerScissorState_);
+
+    return true;
+  }
+
+  void shutdown() override {
+    if (rtView_) {
+      rtView_->Release();
+      rtView_ = nullptr;
+    }
+    if (vertexBuffer_) {
+      vertexBuffer_->Release();
+      vertexBuffer_ = nullptr;
+      vertexBufferSize_ = 0;
+    }
+    if (blendState_) {
+      blendState_->Release();
+      blendState_ = nullptr;
+    }
+    if (rasterizerState_) {
+      rasterizerState_->Release();
+      rasterizerState_ = nullptr;
+    }
+    if (rasterizerScissorState_) {
+      rasterizerScissorState_->Release();
+      rasterizerScissorState_ = nullptr;
+    }
+    if (sampler_) {
+      sampler_->Release();
+      sampler_ = nullptr;
+    }
+    if (solidVS_) {
+      solidVS_->Release();
+      solidVS_ = nullptr;
+    }
+    if (solidPS_) {
+      solidPS_->Release();
+      solidPS_ = nullptr;
+    }
+    if (roundedVS_) {
+      roundedVS_->Release();
+      roundedVS_ = nullptr;
+    }
+    if (roundedPS_) {
+      roundedPS_->Release();
+      roundedPS_ = nullptr;
+    }
+    if (ellipseVS_) {
+      ellipseVS_->Release();
+      ellipseVS_ = nullptr;
+    }
+    if (ellipsePS_) {
+      ellipsePS_->Release();
+      ellipsePS_ = nullptr;
+    }
+    if (texVS_) {
+      texVS_->Release();
+      texVS_ = nullptr;
+    }
+    if (texPS_) {
+      texPS_->Release();
+      texPS_ = nullptr;
+    }
+    if (ilSolid_) {
+      ilSolid_->Release();
+      ilSolid_ = nullptr;
+    }
+    if (ilRounded_) {
+      ilRounded_->Release();
+      ilRounded_ = nullptr;
+    }
+    if (context_) {
+      context_->ClearState();
+      context_->Release();
+      context_ = nullptr;
+    }
+    if (swapChain_) {
+      swapChain_->Release();
+      swapChain_ = nullptr;
+    }
+    if (device_) {
+      device_->Release();
+      device_ = nullptr;
+    }
+  }
+
+  void resize(int w, int h) override {
+    width_ = w;
+    height_ = h;
+    if (rtView_) {
+      rtView_->Release();
+      rtView_ = nullptr;
+    }
+    if (swapChain_) {
+      HRESULT hr =
+          swapChain_->ResizeBuffers(2, w, h, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+      if (SUCCEEDED(hr)) {
         createRenderTarget();
-
-        // Set up blend state
-        D3D11_BLEND_DESC blendDesc = {};
-        blendDesc.RenderTarget[0].BlendEnable = TRUE;
-        blendDesc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
-        blendDesc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-        blendDesc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_INV_SRC_ALPHA;
-        blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-        blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-        device_->CreateBlendState(&blendDesc, &blendState_);
-
-        // Default sampler
-        D3D11_SAMPLER_DESC sampDesc = {};
-        sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-        sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-        sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-        sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-        device_->CreateSamplerState(&sampDesc, &sampler_);
-
-        // Disable back-face culling — 2D rendering has no "back" faces.
-        // Rasterizer WITHOUT scissor (default for most draws)
-        D3D11_RASTERIZER_DESC rsDesc = {};
-        rsDesc.FillMode = D3D11_FILL_SOLID;
-        rsDesc.CullMode = D3D11_CULL_NONE;
-        rsDesc.ScissorEnable = FALSE;
-        device_->CreateRasterizerState(&rsDesc, &rasterizerState_);
-
-        // Rasterizer WITH scissor enabled — used when setScissor() is called
-        rsDesc.ScissorEnable = TRUE;
-        device_->CreateRasterizerState(&rsDesc, &rasterizerScissorState_);
-
-        return true;
+      }
     }
 
-    void shutdown() override {
-        if (rtView_) { rtView_->Release(); rtView_ = nullptr; }
-        if (vertexBuffer_) { vertexBuffer_->Release(); vertexBuffer_ = nullptr; vertexBufferSize_ = 0; }
-        if (blendState_) { blendState_->Release(); blendState_ = nullptr; }
-        if (rasterizerState_) { rasterizerState_->Release(); rasterizerState_ = nullptr; }
-        if (rasterizerScissorState_) { rasterizerScissorState_->Release(); rasterizerScissorState_ = nullptr; }
-        if (sampler_) { sampler_->Release(); sampler_ = nullptr; }
-        if (solidVS_) { solidVS_->Release(); solidVS_ = nullptr; }
-        if (solidPS_) { solidPS_->Release(); solidPS_ = nullptr; }
-        if (roundedVS_) { roundedVS_->Release(); roundedVS_ = nullptr; }
-        if (roundedPS_) { roundedPS_->Release(); roundedPS_ = nullptr; }
-        if (ellipseVS_) { ellipseVS_->Release(); ellipseVS_ = nullptr; }
-        if (ellipsePS_) { ellipsePS_->Release(); ellipsePS_ = nullptr; }
-        if (texVS_) { texVS_->Release(); texVS_ = nullptr; }
-        if (texPS_) { texPS_->Release(); texPS_ = nullptr; }
-        if (ilSolid_) { ilSolid_->Release(); ilSolid_ = nullptr; }
-        if (ilRounded_) { ilRounded_->Release(); ilRounded_ = nullptr; }
-        if (context_) { context_->ClearState(); context_->Release(); context_ = nullptr; }
-        if (swapChain_) { swapChain_->Release(); swapChain_ = nullptr; }
-        if (device_) { device_->Release(); device_ = nullptr; }
+    float L = 0.0f, R = (float)w, T = 0.0f, B = (float)h;
+    orthoProj_[0] = 2.0f / (R - L);
+    orthoProj_[4] = -2.0f / (B - T);
+    orthoProj_[12] = -(R + L) / (R - L);
+    orthoProj_[13] = (B + T) / (B - T);
+  }
+
+  void beginFrame() override {
+    if (!rtView_)
+      return;
+    float clearColor[4] = {1.0f, 1.0f, 1.0f,
+                           1.0f}; // white — widget paint covers it
+    context_->ClearRenderTargetView(rtView_, clearColor);
+    context_->OMSetRenderTargets(1, &rtView_, nullptr);
+
+    D3D11_VIEWPORT vp = {0, 0, (float)width_, (float)height_, 0, 1};
+    context_->RSSetViewports(1, &vp);
+    context_->PSSetSamplers(0, 1, &sampler_);
+
+    float blendFactor[4] = {1, 1, 1, 1};
+    context_->OMSetBlendState(blendState_, blendFactor, 0xFFFFFFFF);
+    context_->RSSetState(rasterizerState_);
+  }
+
+  void endFrame() override { swapChain_->Present(1, 0); }
+
+  void drawTriangles(const Vertex2D *verts, int count) override {
+    mapVertices(verts, count, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  }
+
+  void drawTriangleStrip(const Vertex2D *verts, int count) override {
+    mapVertices(verts, count, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+  }
+
+  void drawLines(const Vertex2D *verts, int count) override {
+    mapVertices(verts, count, D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
+  }
+
+  void selectShader(int type) override {
+    switch (type) {
+    case 0:
+      useShader(ShaderType::Solid);
+      break;
+    case 1:
+      useShader(ShaderType::Rounded);
+      break;
+    case 2:
+      useShader(ShaderType::Ellipse);
+      break;
+    case 3:
+      useShader(ShaderType::Texture);
+      break;
+    default:
+      useShader(ShaderType::Solid);
+      break;
     }
+  }
 
-    void resize(int w, int h) override {
-        width_ = w; height_ = h;
-        if (rtView_) { rtView_->Release(); rtView_ = nullptr; }
-        if (swapChain_) {
-            HRESULT hr = swapChain_->ResizeBuffers(2, w, h, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
-            if (SUCCEEDED(hr)) {
-                createRenderTarget();
-            }
-        }
-
-        float L = 0.0f, R = (float)w, T = 0.0f, B = (float)h;
-        orthoProj_[0] = 2.0f / (R - L);
-        orthoProj_[4] = -2.0f / (B - T);
-        orthoProj_[12] = -(R + L) / (R - L);
-        orthoProj_[13] = (B + T) / (B - T);
+  void bindTexture(int slot, GpuTexture *tex) override {
+    if (tex) {
+      tex->bind(slot);
     }
+  }
 
-    void beginFrame() override {
-        if (!rtView_) return;
-        float clearColor[4] = { 1.0f, 1.0f, 1.0f, 1.0f }; // white — widget paint covers it
-        context_->ClearRenderTargetView(rtView_, clearColor);
-        context_->OMSetRenderTargets(1, &rtView_, nullptr);
+  GpuTexture *createTexture(int w, int h, const uint8_t *rgba) override {
+    return new D3D11Texture(device_, context_, w, h, rgba);
+  }
 
-        D3D11_VIEWPORT vp = { 0, 0, (float)width_, (float)height_, 0, 1 };
-        context_->RSSetViewports(1, &vp);
-        context_->PSSetSamplers(0, 1, &sampler_);
+  void destroyTexture(GpuTexture *tex) override {
+    delete static_cast<D3D11Texture *>(tex);
+  }
 
-        float blendFactor[4] = { 1, 1, 1, 1 };
-        context_->OMSetBlendState(blendState_, blendFactor, 0xFFFFFFFF);
-        context_->RSSetState(rasterizerState_);
-    }
+  void setBlend(bool enable) override {
+    float factor[4] = {1, 1, 1, 1};
+    context_->OMSetBlendState(enable ? blendState_ : nullptr, factor,
+                              0xFFFFFFFF);
+  }
 
-    void endFrame() override {
-        swapChain_->Present(1, 0);
-    }
+  void setScissor(int x, int y, int w, int h) override {
+    D3D11_RECT r = {(LONG)x, (LONG)y, (LONG)(x + w), (LONG)(y + h)};
+    context_->RSSetScissorRects(1, &r);
+    // Switch to the scissor-enabled rasterizer state
+    context_->RSSetState(rasterizerScissorState_);
+  }
 
-    void drawTriangles(const Vertex2D* verts, int count) override {
-        mapVertices(verts, count, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    }
-
-    void drawTriangleStrip(const Vertex2D* verts, int count) override {
-        mapVertices(verts, count, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-    }
-
-    void drawLines(const Vertex2D* verts, int count) override {
-        mapVertices(verts, count, D3D11_PRIMITIVE_TOPOLOGY_LINELIST);
-    }
-
-    void selectShader(int type) override {
-        switch (type) {
-        case 0: useShader(ShaderType::Solid); break;
-        case 1: useShader(ShaderType::Rounded); break;
-        case 2: useShader(ShaderType::Ellipse); break;
-        case 3: useShader(ShaderType::Texture); break;
-        default: useShader(ShaderType::Solid); break;
-        }
-    }
-
-    void bindTexture(int slot, GpuTexture* tex) override {
-        if (tex) {
-            tex->bind(slot);
-        }
-    }
-
-    GpuTexture* createTexture(int w, int h, const uint8_t* rgba) override {
-        return new D3D11Texture(device_, context_, w, h, rgba);
-    }
-
-    void destroyTexture(GpuTexture* tex) override {
-        delete static_cast<D3D11Texture*>(tex);
-    }
-
-    void setBlend(bool enable) override {
-        float factor[4] = { 1, 1, 1, 1 };
-        context_->OMSetBlendState(enable ? blendState_ : nullptr, factor, 0xFFFFFFFF);
-    }
-
-    void setScissor(int x, int y, int w, int h) override {
-        D3D11_RECT r = { (LONG)x, (LONG)y, (LONG)(x + w), (LONG)(y + h) };
-        context_->RSSetScissorRects(1, &r);
-        // Switch to the scissor-enabled rasterizer state
-        context_->RSSetState(rasterizerScissorState_);
-    }
-
-    void clearScissor() override {
-        context_->RSSetScissorRects(0, nullptr);
-        // Switch back to the default (no-scissor) rasterizer state
-        context_->RSSetState(rasterizerState_);
-    }
+  void clearScissor() override {
+    context_->RSSetScissorRects(0, nullptr);
+    // Switch back to the default (no-scissor) rasterizer state
+    context_->RSSetState(rasterizerState_);
+  }
 
 private:
-    enum class ShaderType { Solid, Rounded, Ellipse, Texture };
+  enum class ShaderType { Solid, Rounded, Ellipse, Texture };
 
-    bool compileShaders() {
-        // Helper: create shader from blob or return false
-        auto createFromBlob = [this](ID3DBlob* blob, bool isVS,
-                                     ID3D11VertexShader** vs, ID3D11PixelShader** ps) -> bool {
-            if (!blob) return false;
-            if (isVS) {
-                return SUCCEEDED(device_->CreateVertexShader(
-                    blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, vs));
-            } else {
-                return SUCCEEDED(device_->CreatePixelShader(
-                    blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, ps));
-            }
-        };
+  bool compileShaders() {
+    // Helper: create shader from blob or return false
+    auto createFromBlob = [this](ID3DBlob *blob, bool isVS,
+                                 ID3D11VertexShader **vs,
+                                 ID3D11PixelShader **ps) -> bool {
+      if (!blob)
+        return false;
+      if (isVS) {
+        return SUCCEEDED(device_->CreateVertexShader(
+            blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, vs));
+      } else {
+        return SUCCEEDED(device_->CreatePixelShader(
+            blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, ps));
+      }
+    };
 
-        // Helper: create shader from precompiled bytecode array
-        auto createFromBytecode = [this](const uint8_t* data, size_t len, bool isVS,
-                                         ID3D11VertexShader** vs, ID3D11PixelShader** ps) -> bool {
-            if (!data || len == 0) return false;
-            if (isVS) {
-                return SUCCEEDED(device_->CreateVertexShader(data, len, nullptr, vs));
-            } else {
-                return SUCCEEDED(device_->CreatePixelShader(data, len, nullptr, ps));
-            }
-        };
+    // Helper: create shader from precompiled bytecode array
+    auto createFromBytecode = [this](const uint8_t *data, size_t len, bool isVS,
+                                     ID3D11VertexShader **vs,
+                                     ID3D11PixelShader **ps) -> bool {
+      if (!data || len == 0)
+        return false;
+      if (isVS) {
+        return SUCCEEDED(device_->CreateVertexShader(data, len, nullptr, vs));
+      } else {
+        return SUCCEEDED(device_->CreatePixelShader(data, len, nullptr, ps));
+      }
+    };
 
-        // Helper: compile HLSL source at runtime (fallback)
-        auto compile = [](const char* src, const char* entry, const char* target,
-                          ID3DBlob** blob) -> bool {
-            ID3DBlob* err = nullptr;
-            HRESULT hr = D3DCompile(src, strlen(src), nullptr, nullptr, nullptr,
-                                    entry, target, 0, 0, blob, &err);
-            if (FAILED(hr) && err) {
-                LOG_ERROR("D3D11", "Shader compile error (%s): %s",
-                        entry, (const char*)err->GetBufferPointer());
-                err->Release();
-                return false;
-            }
-            return SUCCEEDED(hr);
-        };
+    // Helper: compile HLSL source at runtime (fallback)
+    auto compile = [](const char *src, const char *entry, const char *target,
+                      ID3DBlob **blob) -> bool {
+      ID3DBlob *err = nullptr;
+      HRESULT hr = D3DCompile(src, strlen(src), nullptr, nullptr, nullptr,
+                              entry, target, 0, 0, blob, &err);
+      if (FAILED(hr) && err) {
+        LOG_ERROR("D3D11", "Shader compile error (%s): %s", entry,
+                  (const char *)err->GetBufferPointer());
+        err->Release();
+        return false;
+      }
+      return SUCCEEDED(hr);
+    };
 
-        ID3DBlob *vsBlob = nullptr, *psBlob = nullptr;
-        bool precompiled = LTGUI_HAS_PRECOMPILED_SHADERS != 0;
+    ID3DBlob *vsBlob = nullptr, *psBlob = nullptr;
+    bool precompiled = LTGUI_HAS_PRECOMPILED_SHADERS != 0;
 
-        if (precompiled) {
-            LOG_INFO("D3D11", "Using precompiled shader bytecode");
-        }
-
-        // Helper to create input layout from bytecode or blob
-        auto createSolidIL = [this](const void* bytecode, size_t len) -> bool {
-            D3D11_INPUT_ELEMENT_DESC layout[] = {
-                { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-                { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-            };
-            HRESULT hr = device_->CreateInputLayout(layout, 2, bytecode, len, &ilSolid_);
-            if (FAILED(hr)) {
-                LOG_ERROR("D3D11", "CreateInputLayout failed for solid shader: 0x%08lx", hr);
-                ilSolid_ = nullptr;
-                return false;
-            }
-            return true;
-        };
-        auto createRoundedIL = [this](const void* bytecode, size_t len) -> bool {
-            D3D11_INPUT_ELEMENT_DESC layout[] = {
-                { "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-                { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-                { "COLOR",    0, DXGI_FORMAT_R8G8B8A8_UNORM,  0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-                { "TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-            };
-            HRESULT hr = device_->CreateInputLayout(layout, 4, bytecode, len, &ilRounded_);
-            if (FAILED(hr)) {
-                LOG_ERROR("D3D11", "CreateInputLayout failed for rounded shader: 0x%08lx", hr);
-                ilRounded_ = nullptr;
-                return false;
-            }
-            return true;
-        };
-
-        // --- Solid shader ---
-#if LTGUI_HAS_PRECOMPILED_SHADERS
-        if (precompiled) {
-            if (createFromBytecode(kSolid_vsBytecode, kSolid_vsBytecodeLen, true, &solidVS_, nullptr) &&
-                createFromBytecode(kSolid_psBytecode, kSolid_psBytecodeLen, false, nullptr, &solidPS_)) {
-                if (!createSolidIL(kSolid_vsBytecode, kSolid_vsBytecodeLen)) {
-                    solidVS_->Release(); solidVS_ = nullptr;
-                    solidPS_->Release(); solidPS_ = nullptr;
-                    precompiled = false; // fall through to runtime
-                }
-            } else {
-                precompiled = false; // fall through to runtime
-            }
-        }
-#endif
-        if (!precompiled) {
-            if (compile(kSolidShader, "VSMain", "vs_4_0", &vsBlob)) {
-                if (compile(kSolidShader, "PSMain", "ps_4_0", &psBlob)) {
-                    createFromBlob(vsBlob, true, &solidVS_, nullptr);
-                    createFromBlob(psBlob, false, nullptr, &solidPS_);
-                    if (!createSolidIL(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize())) {
-                        if (solidVS_) { solidVS_->Release(); solidVS_ = nullptr; }
-                        if (solidPS_) { solidPS_->Release(); solidPS_ = nullptr; }
-                        vsBlob->Release(); psBlob->Release();
-                        return false;
-                    }
-                    vsBlob->Release(); psBlob->Release();
-                } else {
-                    vsBlob->Release();
-                    return false;
-                }
-            } else { return false; }
-        }
-
-        // --- Rounded shader ---
-        bool precompiledRounded = false;
-#if LTGUI_HAS_PRECOMPILED_SHADERS
-        precompiledRounded = precompiled;
-        if (precompiledRounded) {
-            if (createFromBytecode(kRounded_vsBytecode, kRounded_vsBytecodeLen, true, &roundedVS_, nullptr) &&
-                createFromBytecode(kRounded_psBytecode, kRounded_psBytecodeLen, false, nullptr, &roundedPS_)) {
-                if (!createRoundedIL(kRounded_vsBytecode, kRounded_vsBytecodeLen)) {
-                    if (roundedVS_) { roundedVS_->Release(); roundedVS_ = nullptr; }
-                    if (roundedPS_) { roundedPS_->Release(); roundedPS_ = nullptr; }
-                    precompiledRounded = false;
-                }
-            } else {
-                precompiledRounded = false;
-            }
-        }
-#endif
-        if (!precompiledRounded) {
-            if (compile(kRoundedShader, "VSMain", "vs_4_0", &vsBlob)) {
-                if (compile(kRoundedShader, "PSMain", "ps_4_0", &psBlob)) {
-                    createFromBlob(vsBlob, true, &roundedVS_, nullptr);
-                    createFromBlob(psBlob, false, nullptr, &roundedPS_);
-                    if (ilRounded_ == nullptr) {
-                        if (!createRoundedIL(vsBlob->GetBufferPointer(), vsBlob->GetBufferSize())) {
-                            if (roundedVS_) { roundedVS_->Release(); roundedVS_ = nullptr; }
-                            if (roundedPS_) { roundedPS_->Release(); roundedPS_ = nullptr; }
-                            vsBlob->Release(); psBlob->Release();
-                            return false;
-                        }
-                    }
-                    vsBlob->Release(); psBlob->Release();
-                } else {
-                    vsBlob->Release();
-                    return false;
-                }
-            } else { return false; }
-        }
-
-        // --- Ellipse shader ---
-#if LTGUI_HAS_PRECOMPILED_SHADERS
-        if (precompiled) {
-            if (createFromBytecode(kEllipse_vsBytecode, kEllipse_vsBytecodeLen, true, &ellipseVS_, nullptr) &&
-                createFromBytecode(kEllipse_psBytecode, kEllipse_psBytecodeLen, false, nullptr, &ellipsePS_)) {
-                // OK, precompiled
-            } else {
-                goto compile_ellipse_runtime;
-            }
-        } else
-#endif
-        {
-#if LTGUI_HAS_PRECOMPILED_SHADERS
-        compile_ellipse_runtime:
-#endif
-            if (compile(kEllipseShader, "VSMain", "vs_4_0", &vsBlob)) {
-                if (compile(kEllipseShader, "PSMain", "ps_4_0", &psBlob)) {
-                    createFromBlob(vsBlob, true, &ellipseVS_, nullptr);
-                    createFromBlob(psBlob, false, nullptr, &ellipsePS_);
-                    vsBlob->Release(); psBlob->Release();
-                } else {
-                    vsBlob->Release();
-                    return false;
-                }
-            } else { return false; }
-        }
-
-        // --- Texture shader ---
-#if LTGUI_HAS_PRECOMPILED_SHADERS
-        if (precompiled) {
-            if (createFromBytecode(kTexture_vsBytecode, kTexture_vsBytecodeLen, true, &texVS_, nullptr) &&
-                createFromBytecode(kTexture_psBytecode, kTexture_psBytecodeLen, false, nullptr, &texPS_)) {
-                // OK, precompiled
-            } else {
-                goto compile_texture_runtime;
-            }
-        } else
-#endif
-        {
-#if LTGUI_HAS_PRECOMPILED_SHADERS
-        compile_texture_runtime:
-#endif
-            if (compile(kTextureShader, "VSMain", "vs_4_0", &vsBlob)) {
-                if (compile(kTextureShader, "PSMain", "ps_4_0", &psBlob)) {
-                    createFromBlob(vsBlob, true, &texVS_, nullptr);
-                    createFromBlob(psBlob, false, nullptr, &texPS_);
-                    vsBlob->Release(); psBlob->Release();
-                } else {
-                    vsBlob->Release();
-                    return false;
-                }
-            } else { return false; }
-        }
-
-        return true;
+    if (precompiled) {
+      LOG_INFO("D3D11", "Using precompiled shader bytecode");
     }
 
-    void createRenderTarget() {
-        ID3D11Texture2D* backBuffer = nullptr;
-        HRESULT hr = swapChain_->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&backBuffer);
-        if (FAILED(hr) || !backBuffer) {
-            LOG_ERROR("D3D11", "GetBuffer failed: 0x%08lx", hr);
-            return;
+    // Helper to create input layout from bytecode or blob
+    auto createSolidIL = [this](const void *bytecode, size_t len) -> bool {
+      D3D11_INPUT_ELEMENT_DESC layout[] = {
+          {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0,
+           D3D11_INPUT_PER_VERTEX_DATA, 0},
+          {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16,
+           D3D11_INPUT_PER_VERTEX_DATA, 0},
+      };
+      HRESULT hr =
+          device_->CreateInputLayout(layout, 2, bytecode, len, &ilSolid_);
+      if (FAILED(hr)) {
+        LOG_ERROR("D3D11", "CreateInputLayout failed for solid shader: 0x%08lx",
+                  hr);
+        ilSolid_ = nullptr;
+        return false;
+      }
+      return true;
+    };
+    auto createRoundedIL = [this](const void *bytecode, size_t len) -> bool {
+      D3D11_INPUT_ELEMENT_DESC layout[] = {
+          {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0,
+           D3D11_INPUT_PER_VERTEX_DATA, 0},
+          {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8,
+           D3D11_INPUT_PER_VERTEX_DATA, 0},
+          {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16,
+           D3D11_INPUT_PER_VERTEX_DATA, 0},
+          {"TEXCOORD", 1, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20,
+           D3D11_INPUT_PER_VERTEX_DATA, 0},
+      };
+      HRESULT hr =
+          device_->CreateInputLayout(layout, 4, bytecode, len, &ilRounded_);
+      if (FAILED(hr)) {
+        LOG_ERROR("D3D11",
+                  "CreateInputLayout failed for rounded shader: 0x%08lx", hr);
+        ilRounded_ = nullptr;
+        return false;
+      }
+      return true;
+    };
+
+    // --- Solid shader ---
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+    if (precompiled) {
+      if (createFromBytecode(kSolid_vsBytecode, kSolid_vsBytecodeLen, true,
+                             &solidVS_, nullptr) &&
+          createFromBytecode(kSolid_psBytecode, kSolid_psBytecodeLen, false,
+                             nullptr, &solidPS_)) {
+        if (!createSolidIL(kSolid_vsBytecode, kSolid_vsBytecodeLen)) {
+          solidVS_->Release();
+          solidVS_ = nullptr;
+          solidPS_->Release();
+          solidPS_ = nullptr;
+          precompiled = false; // fall through to runtime
         }
-        hr = device_->CreateRenderTargetView(backBuffer, nullptr, &rtView_);
-        backBuffer->Release();
-        if (FAILED(hr)) {
-            LOG_ERROR("D3D11", "CreateRenderTargetView failed: 0x%08lx", hr);
-            rtView_ = nullptr;
-        }
+      } else {
+        precompiled = false; // fall through to runtime
+      }
     }
-
-    void useShader(ShaderType type) {
-        switch (type) {
-        case ShaderType::Solid:
-            context_->VSSetShader(solidVS_, nullptr, 0);
-            context_->PSSetShader(solidPS_, nullptr, 0);
-            context_->IASetInputLayout(ilSolid_);
-            break;
-        case ShaderType::Rounded:
-            context_->VSSetShader(roundedVS_, nullptr, 0);
-            context_->PSSetShader(roundedPS_, nullptr, 0);
-            context_->IASetInputLayout(ilRounded_);
-            break;
-        case ShaderType::Ellipse:
-            context_->VSSetShader(ellipseVS_, nullptr, 0);
-            context_->PSSetShader(ellipsePS_, nullptr, 0);
-            context_->IASetInputLayout(ilRounded_);
-            break;
-        case ShaderType::Texture:
-            context_->VSSetShader(texVS_, nullptr, 0);
-            context_->PSSetShader(texPS_, nullptr, 0);
-            context_->IASetInputLayout(ilRounded_);
-            break;
-        }
-    }
-
-    void mapVertices(const Vertex2D* verts, int count, D3D11_PRIMITIVE_TOPOLOGY topology) {
-        UINT stride = sizeof(Vertex2D);
-        UINT byteSize = count * stride;
-
-        // Grow the reusable dynamic vertex buffer if needed
-        if (!vertexBuffer_ || vertexBufferSize_ < byteSize) {
-            if (vertexBuffer_) {
-                vertexBuffer_->Release();
-                vertexBuffer_ = nullptr;
+#endif
+    if (!precompiled) {
+      if (compile(kSolidShader, "VSMain", "vs_4_0", &vsBlob)) {
+        if (compile(kSolidShader, "PSMain", "ps_4_0", &psBlob)) {
+          createFromBlob(vsBlob, true, &solidVS_, nullptr);
+          createFromBlob(psBlob, false, nullptr, &solidPS_);
+          if (!createSolidIL(vsBlob->GetBufferPointer(),
+                             vsBlob->GetBufferSize())) {
+            if (solidVS_) {
+              solidVS_->Release();
+              solidVS_ = nullptr;
             }
-            vertexBufferSize_ = byteSize + byteSize / 2; // allocate 1.5x headroom
-
-            D3D11_BUFFER_DESC desc = {};
-            desc.Usage = D3D11_USAGE_DYNAMIC;
-            desc.ByteWidth = vertexBufferSize_;
-            desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-            device_->CreateBuffer(&desc, nullptr, &vertexBuffer_);
+            if (solidPS_) {
+              solidPS_->Release();
+              solidPS_ = nullptr;
+            }
+            vsBlob->Release();
+            psBlob->Release();
+            return false;
+          }
+          vsBlob->Release();
+          psBlob->Release();
+        } else {
+          vsBlob->Release();
+          return false;
         }
-
-        // Map and update
-        D3D11_MAPPED_SUBRESOURCE mapped = {};
-        context_->Map(vertexBuffer_, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
-        memcpy(mapped.pData, verts, byteSize);
-        context_->Unmap(vertexBuffer_, 0);
-
-        UINT offset = 0;
-        context_->IASetVertexBuffers(0, 1, &vertexBuffer_, &stride, &offset);
-        context_->IASetPrimitiveTopology(topology);
-        context_->Draw(count, 0);
+      } else {
+        return false;
+      }
     }
 
-    ID3D11Device* device_ = nullptr;
-    ID3D11DeviceContext* context_ = nullptr;
-    IDXGISwapChain* swapChain_ = nullptr;
-    ID3D11RenderTargetView* rtView_ = nullptr;
-    ID3D11BlendState* blendState_ = nullptr;
-    ID3D11RasterizerState* rasterizerState_ = nullptr;
-    ID3D11RasterizerState* rasterizerScissorState_ = nullptr;
-    ID3D11SamplerState* sampler_ = nullptr;
+    // --- Rounded shader ---
+    bool precompiledRounded = false;
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+    precompiledRounded = precompiled;
+    if (precompiledRounded) {
+      if (createFromBytecode(kRounded_vsBytecode, kRounded_vsBytecodeLen, true,
+                             &roundedVS_, nullptr) &&
+          createFromBytecode(kRounded_psBytecode, kRounded_psBytecodeLen, false,
+                             nullptr, &roundedPS_)) {
+        if (!createRoundedIL(kRounded_vsBytecode, kRounded_vsBytecodeLen)) {
+          if (roundedVS_) {
+            roundedVS_->Release();
+            roundedVS_ = nullptr;
+          }
+          if (roundedPS_) {
+            roundedPS_->Release();
+            roundedPS_ = nullptr;
+          }
+          precompiledRounded = false;
+        }
+      } else {
+        precompiledRounded = false;
+      }
+    }
+#endif
+    if (!precompiledRounded) {
+      if (compile(kRoundedShader, "VSMain", "vs_4_0", &vsBlob)) {
+        if (compile(kRoundedShader, "PSMain", "ps_4_0", &psBlob)) {
+          createFromBlob(vsBlob, true, &roundedVS_, nullptr);
+          createFromBlob(psBlob, false, nullptr, &roundedPS_);
+          if (ilRounded_ == nullptr) {
+            if (!createRoundedIL(vsBlob->GetBufferPointer(),
+                                 vsBlob->GetBufferSize())) {
+              if (roundedVS_) {
+                roundedVS_->Release();
+                roundedVS_ = nullptr;
+              }
+              if (roundedPS_) {
+                roundedPS_->Release();
+                roundedPS_ = nullptr;
+              }
+              vsBlob->Release();
+              psBlob->Release();
+              return false;
+            }
+          }
+          vsBlob->Release();
+          psBlob->Release();
+        } else {
+          vsBlob->Release();
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
 
-    // Dynamic vertex buffer (reused across frames)
-    ID3D11Buffer* vertexBuffer_ = nullptr;
-    UINT vertexBufferSize_ = 0;
+    // --- Ellipse shader ---
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+    if (precompiled) {
+      if (createFromBytecode(kEllipse_vsBytecode, kEllipse_vsBytecodeLen, true,
+                             &ellipseVS_, nullptr) &&
+          createFromBytecode(kEllipse_psBytecode, kEllipse_psBytecodeLen, false,
+                             nullptr, &ellipsePS_)) {
+        // OK, precompiled
+      } else {
+        goto compile_ellipse_runtime;
+      }
+    } else
+#endif
+    {
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+    compile_ellipse_runtime:
+#endif
+      if (compile(kEllipseShader, "VSMain", "vs_4_0", &vsBlob)) {
+        if (compile(kEllipseShader, "PSMain", "ps_4_0", &psBlob)) {
+          createFromBlob(vsBlob, true, &ellipseVS_, nullptr);
+          createFromBlob(psBlob, false, nullptr, &ellipsePS_);
+          vsBlob->Release();
+          psBlob->Release();
+        } else {
+          vsBlob->Release();
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
 
-    // Shaders
-    ID3D11VertexShader* solidVS_ = nullptr;
-    ID3D11PixelShader* solidPS_ = nullptr;
-    ID3D11VertexShader* roundedVS_ = nullptr;
-    ID3D11PixelShader* roundedPS_ = nullptr;
-    ID3D11VertexShader* ellipseVS_ = nullptr;
-    ID3D11PixelShader* ellipsePS_ = nullptr;
-    ID3D11VertexShader* texVS_ = nullptr;
-    ID3D11PixelShader* texPS_ = nullptr;
+    // --- Texture shader ---
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+    if (precompiled) {
+      if (createFromBytecode(kTexture_vsBytecode, kTexture_vsBytecodeLen, true,
+                             &texVS_, nullptr) &&
+          createFromBytecode(kTexture_psBytecode, kTexture_psBytecodeLen, false,
+                             nullptr, &texPS_)) {
+        // OK, precompiled
+      } else {
+        goto compile_texture_runtime;
+      }
+    } else
+#endif
+    {
+#if LTGUI_HAS_PRECOMPILED_SHADERS
+    compile_texture_runtime:
+#endif
+      if (compile(kTextureShader, "VSMain", "vs_4_0", &vsBlob)) {
+        if (compile(kTextureShader, "PSMain", "ps_4_0", &psBlob)) {
+          createFromBlob(vsBlob, true, &texVS_, nullptr);
+          createFromBlob(psBlob, false, nullptr, &texPS_);
+          vsBlob->Release();
+          psBlob->Release();
+        } else {
+          vsBlob->Release();
+          return false;
+        }
+      } else {
+        return false;
+      }
+    }
 
-    // Input layouts
-    ID3D11InputLayout* ilSolid_ = nullptr;
-    ID3D11InputLayout* ilRounded_ = nullptr;
+    return true;
+  }
 
-    float orthoProj_[16] = {};
-    int width_ = 0, height_ = 0;
+  void createRenderTarget() {
+    ID3D11Texture2D *backBuffer = nullptr;
+    HRESULT hr = swapChain_->GetBuffer(0, __uuidof(ID3D11Texture2D),
+                                       (void **)&backBuffer);
+    if (FAILED(hr) || !backBuffer) {
+      LOG_ERROR("D3D11", "GetBuffer failed: 0x%08lx", hr);
+      return;
+    }
+    hr = device_->CreateRenderTargetView(backBuffer, nullptr, &rtView_);
+    backBuffer->Release();
+    if (FAILED(hr)) {
+      LOG_ERROR("D3D11", "CreateRenderTargetView failed: 0x%08lx", hr);
+      rtView_ = nullptr;
+    }
+  }
+
+  void useShader(ShaderType type) {
+    switch (type) {
+    case ShaderType::Solid:
+      context_->VSSetShader(solidVS_, nullptr, 0);
+      context_->PSSetShader(solidPS_, nullptr, 0);
+      context_->IASetInputLayout(ilSolid_);
+      break;
+    case ShaderType::Rounded:
+      context_->VSSetShader(roundedVS_, nullptr, 0);
+      context_->PSSetShader(roundedPS_, nullptr, 0);
+      context_->IASetInputLayout(ilRounded_);
+      break;
+    case ShaderType::Ellipse:
+      context_->VSSetShader(ellipseVS_, nullptr, 0);
+      context_->PSSetShader(ellipsePS_, nullptr, 0);
+      context_->IASetInputLayout(ilRounded_);
+      break;
+    case ShaderType::Texture:
+      context_->VSSetShader(texVS_, nullptr, 0);
+      context_->PSSetShader(texPS_, nullptr, 0);
+      context_->IASetInputLayout(ilRounded_);
+      break;
+    }
+  }
+
+  void mapVertices(const Vertex2D *verts, int count,
+                   D3D11_PRIMITIVE_TOPOLOGY topology) {
+    UINT stride = sizeof(Vertex2D);
+    UINT byteSize = count * stride;
+
+    // Grow the reusable dynamic vertex buffer if needed
+    if (!vertexBuffer_ || vertexBufferSize_ < byteSize) {
+      if (vertexBuffer_) {
+        vertexBuffer_->Release();
+        vertexBuffer_ = nullptr;
+      }
+      vertexBufferSize_ = byteSize + byteSize / 2; // allocate 1.5x headroom
+
+      D3D11_BUFFER_DESC desc = {};
+      desc.Usage = D3D11_USAGE_DYNAMIC;
+      desc.ByteWidth = vertexBufferSize_;
+      desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+      desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+      device_->CreateBuffer(&desc, nullptr, &vertexBuffer_);
+    }
+
+    // Map and update
+    D3D11_MAPPED_SUBRESOURCE mapped = {};
+    context_->Map(vertexBuffer_, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+    memcpy(mapped.pData, verts, byteSize);
+    context_->Unmap(vertexBuffer_, 0);
+
+    UINT offset = 0;
+    context_->IASetVertexBuffers(0, 1, &vertexBuffer_, &stride, &offset);
+    context_->IASetPrimitiveTopology(topology);
+    context_->Draw(count, 0);
+  }
+
+  ID3D11Device *device_ = nullptr;
+  ID3D11DeviceContext *context_ = nullptr;
+  IDXGISwapChain *swapChain_ = nullptr;
+  ID3D11RenderTargetView *rtView_ = nullptr;
+  ID3D11BlendState *blendState_ = nullptr;
+  ID3D11RasterizerState *rasterizerState_ = nullptr;
+  ID3D11RasterizerState *rasterizerScissorState_ = nullptr;
+  ID3D11SamplerState *sampler_ = nullptr;
+
+  // Dynamic vertex buffer (reused across frames)
+  ID3D11Buffer *vertexBuffer_ = nullptr;
+  UINT vertexBufferSize_ = 0;
+
+  // Shaders
+  ID3D11VertexShader *solidVS_ = nullptr;
+  ID3D11PixelShader *solidPS_ = nullptr;
+  ID3D11VertexShader *roundedVS_ = nullptr;
+  ID3D11PixelShader *roundedPS_ = nullptr;
+  ID3D11VertexShader *ellipseVS_ = nullptr;
+  ID3D11PixelShader *ellipsePS_ = nullptr;
+  ID3D11VertexShader *texVS_ = nullptr;
+  ID3D11PixelShader *texPS_ = nullptr;
+
+  // Input layouts
+  ID3D11InputLayout *ilSolid_ = nullptr;
+  ID3D11InputLayout *ilRounded_ = nullptr;
+
+  float orthoProj_[16] = {};
+  int width_ = 0, height_ = 0;
 };
 
 // ---- Factory ----
 
-GpuDevice* CreateD3D11Device() {
-    auto* dev = new D3D11Device();
-    return dev;
+GpuDevice *CreateD3D11Device() {
+  auto *dev = new D3D11Device();
+  return dev;
 }
 
 } // namespace gpu
