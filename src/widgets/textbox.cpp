@@ -10,7 +10,7 @@
 namespace ltgui {
 
 TextBox::TextBox(const std::string& text, Widget* parent)
-    : Widget(parent), text_(text), cursorPos_(static_cast<int>(text.size())) {
+    : TextWidget(text, parent), cursorPos_(static_cast<int>(text.size())) {
     style().bgColor = currentTheme().bgSecondary;
     style().fgColor = currentTheme().textPrimary;
     style().borderWidth = 1;

@@ -6,25 +6,8 @@
 
 namespace ltgui {
 
-Slider::Slider(Widget* parent) : Widget(parent) {
+Slider::Slider(Widget* parent) : Range(parent) {
     style().bgColor = Color::Transparent;
-}
-
-void Slider::setValue(int value) {
-    value = std::max(min_, std::min(max_, value));
-    if (value_ != value) {
-        value_ = value;
-        update();
-        if (valueChangedCallback_) valueChangedCallback_(value_);
-    }
-}
-
-void Slider::setRange(int min, int max) {
-    min_ = min;
-    max_ = max;
-    if (value_ < min_) value_ = min_;
-    if (value_ > max_) value_ = max_;
-    update();
 }
 
 Size Slider::sizeHint() const {
@@ -34,12 +17,12 @@ Size Slider::sizeHint() const {
 }
 
 int Slider::thumbPos() const {
-    int range = max_ - min_;
+    int range = maximum() - minimum();
     if (range == 0) return 16;
     // Thumb center moves from 16 to width-16 (usable track = width - 32).
     // This keeps the 16px thumb fully within the widget bounds at both ends.
     int usableW = width() - 32;
-    return 16 + (usableW * (value_ - min_)) / range;
+    return 16 + (usableW * (value() - minimum())) / range;
 }
 
 void Slider::paintSelf(NativeCanvas* canvas) {
@@ -63,7 +46,7 @@ void Slider::paintSelf(NativeCanvas* canvas) {
     int tpos = thumbPos();
     int fillW = tpos - 8;
     if (fillW < 0) fillW = 0;
-    if (value_ == max_) fillW = trackW;
+    if (value() == maximum()) fillW = trackW;
 
     if (fillW > 0) {
         canvas->setColor(t.accent);
@@ -102,8 +85,8 @@ bool Slider::handleEvent(Event& event) {
     auto snapToTrack = [&]() {
         int trackW = width() - 16;
         int clickX = std::max(0, std::min(trackW, localX - 8));
-        int range = max_ - min_;
-        if (range > 0 && trackW > 0) setValue(min_ + (clickX * range) / trackW);
+        int range = maximum() - minimum();
+        if (range > 0 && trackW > 0) setValue(minimum() + (clickX * range) / trackW);
     };
 
     switch (event.type) {

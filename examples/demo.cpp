@@ -85,7 +85,7 @@ int main(int argc, char* argv[]) {
     slider->setRange(0, 100);
     slider->setValue(50);
     auto* slValue = sliderRow->makeChild<Label>(" 50");
-    slider->onValueChanged([&](int v) {
+    slider->onValueChanged.connect([&](int v) {
         // Fixed-width formatting so the label width never changes,
         // preventing the layout from resizing the slider track.
         if (v >= 100) slValue->setText(std::to_string(v));

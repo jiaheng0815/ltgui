@@ -1,19 +1,14 @@
 #pragma once
-#include "widget.h"
+#include "widgets/range.h"
 #include "animation.h"
 
 namespace ltgui {
 
-class ProgressBar : public Widget {
+class ProgressBar : public Range {
 public:
     explicit ProgressBar(Widget* parent = nullptr);
 
-    int value() const { return value_; }
-    void setValue(int value);
-
-    int minimum() const { return min_; }
-    int maximum() const { return max_; }
-    void setRange(int min, int max);
+    void setValue(int value) override;
 
     bool indeterminate() const { return indeterminate_; }
     void setIndeterminate(bool on);
@@ -25,9 +20,6 @@ protected:
     void paintSelf(NativeCanvas* canvas) override;
 
 private:
-    int min_ = 0;
-    int max_ = 100;
-    int value_ = 0;
     bool indeterminate_ = false;
     AnimatedFloat displayValue_{0.0f};
     AnimatedFloat indeterminatePhase_{0.0f};

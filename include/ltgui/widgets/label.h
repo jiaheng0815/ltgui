@@ -1,15 +1,11 @@
 #pragma once
-#include "widget.h"
-#include <string>
+#include "widgets/textwidget.h"
 
 namespace ltgui {
 
-class Label : public Widget {
+class Label : public TextWidget {
 public:
     explicit Label(const std::string& text = "", Widget* parent = nullptr);
-
-    std::string text() const { return text_; }
-    void setText(const std::string& text);
 
     WidgetType widgetType() const override { return WidgetType::Label; }
     bool canAcceptFocus() const override { return false; }
@@ -17,9 +13,6 @@ public:
 
 protected:
     void paintSelf(NativeCanvas* canvas) override;
-
-private:
-    std::string text_;
 };
 
 } // namespace ltgui

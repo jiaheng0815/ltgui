@@ -156,7 +156,7 @@ int main(int argc, char* argv[]) {
     auto* slValue = progSection->makeChild<Label>(" 60%");
     auto* progress = progSection->makeChild<ProgressBar>();
     progress->setValue(60);
-    slider->onValueChanged([&](int v) {
+    slider->onValueChanged.connect([&](int v) {
         // Fixed-width: "  0%", " 50%", "100%" so layout doesn't resize slider
         if (v >= 100) slValue->setText(std::to_string(v) + "%");
         else if (v >= 10) slValue->setText(" " + std::to_string(v) + "%");

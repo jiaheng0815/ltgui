@@ -6,27 +6,21 @@
 
 namespace ltgui {
 
-ProgressBar::ProgressBar(Widget* parent) : Widget(parent) {
+ProgressBar::ProgressBar(Widget* parent) : Range(parent) {
     style().bgColor = currentTheme().bgTertiary;
     style().borderRadius = 4;
 }
 
 void ProgressBar::setValue(int value) {
-    value = std::max(min_, std::min(max_, value));
+    value = std::max(minimum(), std::min(maximum(), value));
     if (value_ != value) {
         value_ = value;
-        float pct = (max_ > min_) ? static_cast<float>(value_ - min_) / static_cast<float>(max_ - min_) : 1.0f;
+        float pct = (maximum() > minimum())
+                        ? static_cast<float>(value_ - minimum()) / static_cast<float>(maximum() - minimum())
+                        : 1.0f;
         displayValue_.setTarget(pct, 300, Easing::EaseOut);
         update();
     }
-}
-
-void ProgressBar::setRange(int min, int max) {
-    min_ = min;
-    max_ = max;
-    if (value_ < min_) value_ = min_;
-    if (value_ > max_) value_ = max_;
-    update();
 }
 
 void ProgressBar::setIndeterminate(bool on) {

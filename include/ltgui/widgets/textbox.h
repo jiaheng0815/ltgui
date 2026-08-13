@@ -1,17 +1,15 @@
 #pragma once
-#include "widget.h"
-#include <string>
+#include "widgets/textwidget.h"
 #include <vector>
 #include <functional>
 
 namespace ltgui {
 
-class TextBox : public Widget {
+class TextBox : public TextWidget {
 public:
     explicit TextBox(const std::string& text = "", Widget* parent = nullptr);
 
-    std::string text() const { return text_; }
-    void setText(const std::string& text);
+    void setText(const std::string& text) override;
 
     WidgetType widgetType() const override { return WidgetType::TextBox; }
     bool canAcceptFocus() const override { return true; }
@@ -41,7 +39,6 @@ protected:
     bool handleEvent(Event& event) override;
 
 private:
-    std::string text_;
     int cursorPos_ = 0;
     int selectionStart_ = -1; // -1 = no selection
     int scrollOffset_ = 0;
