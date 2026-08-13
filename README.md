@@ -228,15 +228,60 @@ ThemeManager::instance().onThemeChanged.connect([](const Theme& t) {
     LOG_INFO("UI", "Theme changed to: %s", t.name.c_str());
 });
 
-// Per-widget style
+// Per-widget style. Colors default to transparent ("unset") — anything
+// unset falls back to the CURRENT theme, so theme switches are picked up
+// automatically without re-styling widgets.
 Style s;
-s.bgColor = Color::White;
+s.bgColor = Color::White;      // explicit color wins
 s.borderWidth = 1;
 s.borderRadius = 4;
 s.setPadding(8, 4);
-s.setMargin(4);
+s.accent = Color(0, 120, 215); // semantic accent (hover/pressed states)
 widget->setStyle(s);
 ```
+
+### State styles (hover / pressed / focused / disabled)
+
+Each widget resolves its effective style from the state it is in:
+`state patch > style > theme default`. Override per-state colors:
+
+```cpp
+Style s = widget->style();
+s.hovered.bgColor = Color(220, 230, 250);   // on hover
+s.pressed.accent  = Color(0, 90, 175);      // while pressed
+s.disabled.fgColor = Color(180, 180, 180);  // when disabled
+widget->setStyle(s);
+```
+
+Hover transitions are animated by default (150ms ease-out) — Button
+backgrounds and Slider thumbs ease between states automatically.
+
+### Gradients
+
+```cpp
+Style s = widget->style();
+s.gradient = Gradient{Color(0, 120, 215), Color(0, 200, 255), /*vertical=*/true};
+widget->setStyle(s);
+```
+
+### Migrating from the legacy callback API
+
+All widget callbacks are now `Signal<T>` members — connect instead of assign:
+
+| Before                          | After                                  |
+|---------------------------------|----------------------------------------|
+| `btn.onClick([&]{ ... });`      | `btn.onClicked.connect([&]{ ... });`   |
+| `slider.onValueChanged(cb);`    | `slider.onValueChanged.connect(cb);`   |
+| `cb.onToggled(cb);`             | `cb.onToggled.connect(cb);`            |
+| `box.onSelectionChanged(cb);`   | `box.onSelectionChanged.connect(cb);`  |
+| `txt.onTextChanged(cb);`        | `txt.onTextChanged.connect(cb);`       |
+| `tv.onRowSelected(cb);`         | `tv.onRowSelected.connect(cb);`        |
+| `dlg.onFinished(cb);`           | `dlg.onFinished.connect(cb);`          |
+
+Other renames: `selectedIndex()/setSelected()` → `currentIndex()/setCurrentIndex()`,
+`TableView::selectedRow()/selectRow()` → `currentIndex()/setCurrentIndex()`,
+`Window::getSize()` → `size()`, `Image::setFitMode(char)` → `setFitMode(FitMode)`,
+`Style::setMargin()` removed. Legacy names are kept as `[[deprecated]]` aliases.
 
 ## Animation
 

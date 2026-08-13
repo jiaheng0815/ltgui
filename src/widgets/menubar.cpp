@@ -250,6 +250,26 @@ void MenuBar::paintSelf(NativeCanvas* canvas) {
         Rect ir(dropX + 4, iy, dropW - 8, itemHeight_);
         paintItem(canvas, ir, items[j], j == hoveredItem_, 0);
     }
+
+    // Open submenu: panel to the right of the parent item.
+    if (openSubmenu_ >= 0 && openSubmenu_ < (int)items.size()) {
+        auto& sub = items[openSubmenu_].submenu;
+        if (!sub.empty()) {
+            int subW = dropWidth(sub, 1) + 20;
+            int subH = static_cast<int>(sub.size()) * itemHeight_ + 4;
+            int subX = dropX + dropW - 4;
+            int subY = dropY + 2 + openSubmenu_ * itemHeight_;
+            canvas->setColor(st.bgColor);
+            canvas->fillRoundedRect(Rect(subX, subY, subW, subH), 4);
+            canvas->setColor(st.borderColor);
+            canvas->strokeRoundedRect(Rect(subX, subY, subW, subH), 4);
+            canvas->setFont(st.font);
+            for (int k = 0; k < (int)sub.size(); k++) {
+                Rect sr(subX + 4, subY + 2 + k * itemHeight_, subW - 8, itemHeight_);
+                paintItem(canvas, sr, sub[k], k == hoveredSub_, 1);
+            }
+        }
+    }
 }
 
 // --- Events ---
@@ -257,53 +277,81 @@ void MenuBar::paintSelf(NativeCanvas* canvas) {
 bool MenuBar::handleEvent(Event& event) {
     if (!isEnabled()) return false;
 
+    if (event.type == EventType::KeyDown && openMenu_ < 0) {
+        // Down/Enter/Space opens the first menu (or the mouse-hovered one).
+        if (event.key == Key::Down || event.key == Key::Enter || event.key == Key::Space) {
+            int idx = hoveredMenu_ >= 0 ? hoveredMenu_ : 0;
+            if (idx < (int)menus_.size()) {
+                openMenu_ = idx;
+                hoveredItem_ = 0;
+                keyboardNav_ = true;
+                update();
+                return true;
+            }
+        }
+        return false;
+    }
+
     if (event.type == EventType::KeyDown && openMenu_ >= 0) {
         keyboardNav_ = true;
         event.accepted = true;
 
         auto& items = menus_[openMenu_].items;
+        auto& sub = (openSubmenu_ >= 0 && openSubmenu_ < (int)items.size())
+                        ? items[openSubmenu_].submenu : items; // sub or top-level
+        auto moveHover = [&](int delta) {
+            int limit = (int)sub.size();
+            int& hovered = (openSubmenu_ >= 0) ? hoveredSub_ : hoveredItem_;
+            int next = hovered + delta;
+            while (next >= 0 && next < limit && sub[next].separator) next += delta;
+            if (next >= 0 && next < limit && !sub[next].separator) hovered = next;
+            update();
+        };
+
         switch (event.key) {
         case Key::Escape:
-            closeMenu();
+            if (openSubmenu_ >= 0) {
+                openSubmenu_ = -1;
+                hoveredSub_ = -1;
+            } else {
+                closeMenu();
+            }
             return true;
         case Key::Down:
-            if (hoveredItem_ < (int)items.size() - 1) {
-                int orig = hoveredItem_;
-                do { hoveredItem_++; } while (hoveredItem_ < (int)items.size() && items[hoveredItem_].separator);
-                if (hoveredItem_ >= (int)items.size()) hoveredItem_ = (int)items.size() - 1;
-                if (items[hoveredItem_].separator) hoveredItem_ = orig;
-            }
-            update();
+            moveHover(1);
             return true;
         case Key::Up:
-            if (hoveredItem_ > 0) {
-                int orig = hoveredItem_;
-                do { hoveredItem_--; } while (hoveredItem_ > 0 && items[hoveredItem_].separator);
-                if (hoveredItem_ < 0) hoveredItem_ = 0;
-                if (items[hoveredItem_].separator) hoveredItem_ = orig;
-            }
-            update();
+            moveHover(-1);
             return true;
         case Key::Right:
-            if (hoveredItem_ >= 0 && hoveredItem_ < (int)items.size() &&
+            if (openSubmenu_ < 0 && hoveredItem_ >= 0 && hoveredItem_ < (int)items.size() &&
                 !items[hoveredItem_].submenu.empty()) {
-                // TODO: proper submenu navigation — needs a separate
-                // submenu tracking variable; openMenu_ is a top-level
-                // menu index, not an items index, so assigning
-                // openMenu_ = hoveredItem_ would be an out-of-bounds bug.
-            } else if (openMenu_ < (int)menus_.size() - 1) {
+                // Open the submenu of the hovered item.
+                openSubmenu_ = hoveredItem_;
+                hoveredSub_ = 0;
+            } else if (openSubmenu_ < 0 && openMenu_ < (int)menus_.size() - 1) {
                 openMenu_++;
                 hoveredItem_ = 0;
             }
             update();
             return true;
         case Key::Left:
-            if (openMenu_ > 0) { openMenu_--; hoveredItem_ = 0; }
+            if (openSubmenu_ >= 0) {
+                openSubmenu_ = -1;
+                hoveredSub_ = -1;
+            } else if (openMenu_ > 0) {
+                openMenu_--;
+                hoveredItem_ = 0;
+            }
             update();
             return true;
         case Key::Enter:
         case Key::Space:
-            if (hoveredItem_ >= 0 && hoveredItem_ < (int)items.size() && !items[hoveredItem_].separator) {
+            if (openSubmenu_ >= 0 && hoveredSub_ >= 0 && hoveredSub_ < (int)sub.size() &&
+                !sub[hoveredSub_].separator) {
+                activateSubItem(openMenu_, openSubmenu_, hoveredSub_);
+            } else if (hoveredItem_ >= 0 && hoveredItem_ < (int)items.size() &&
+                       !items[hoveredItem_].separator) {
                 activateItem(openMenu_, hoveredItem_);
             }
             return true;
@@ -342,25 +390,42 @@ bool MenuBar::handleEvent(Event& event) {
     return false;
 }
 
-void MenuBar::activateItem(int menuIdx, int itemIdx) {
-    if (menuIdx < 0 || menuIdx >= (int)menus_.size()) return;
-    auto& items = menus_[menuIdx].items;
-    if (itemIdx < 0 || itemIdx >= (int)items.size()) return;
-    auto& item = items[itemIdx];
+// Shared activation logic for a menu entry. `group` is the sibling list
+// used for radio exclusivity (the entry's own submenu list for submenu
+// entries).
+void MenuBar::activateMenuEntry(MenuItem& item, std::vector<MenuItem>* group) {
     if (item.separator) return;
-
     if (item.checkable) {
         item.checked = !item.checked;
         if (item.callback) item.callback();
     } else if (item.radio) {
-        for (auto& mi : items) {
-            if (mi.radio && mi.radioGroup == item.radioGroup) mi.checked = false;
+        if (group) {
+            for (auto& mi : *group) {
+                if (mi.radio && mi.radioGroup == item.radioGroup) mi.checked = false;
+            }
         }
         item.checked = true;
         if (item.callback) item.callback();
     } else if (item.callback) {
         item.callback();
     }
+}
+
+void MenuBar::activateItem(int menuIdx, int itemIdx) {
+    if (menuIdx < 0 || menuIdx >= (int)menus_.size()) return;
+    auto& items = menus_[menuIdx].items;
+    if (itemIdx < 0 || itemIdx >= (int)items.size()) return;
+    activateMenuEntry(items[itemIdx], &items);
+    closeMenu();
+}
+
+void MenuBar::activateSubItem(int menuIdx, int itemIdx, int subIdx) {
+    if (menuIdx < 0 || menuIdx >= (int)menus_.size()) return;
+    auto& items = menus_[menuIdx].items;
+    if (itemIdx < 0 || itemIdx >= (int)items.size()) return;
+    auto& sub = items[itemIdx].submenu;
+    if (subIdx < 0 || subIdx >= (int)sub.size()) return;
+    activateMenuEntry(sub[subIdx], &sub);
     closeMenu();
 }
 
@@ -387,6 +452,8 @@ bool MenuBar::handleMouseDown(int menuIdx, int itemIdx) {
 void MenuBar::closeMenu() {
     openMenu_ = -1;
     hoveredItem_ = -1;
+    openSubmenu_ = -1;
+    hoveredSub_ = -1;
     keyboardNav_ = false;
     update();
 }

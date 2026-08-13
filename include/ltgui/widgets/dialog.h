@@ -4,6 +4,12 @@
 #include "signal.h"
 #include <string>
 
+// Windows headers define MessageBox -> MessageBoxW/A via a macro, which
+// would rename our MessageBox class on Windows. Undefine it.
+#ifdef MessageBox
+#undef MessageBox
+#endif
+
 namespace ltgui {
 
 class TextBox;

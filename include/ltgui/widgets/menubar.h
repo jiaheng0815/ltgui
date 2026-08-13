@@ -16,6 +16,11 @@ public:
     int addItem(int menuIdx, const std::string& text, ItemCallback cb = nullptr);
     void addSeparator(int menuIdx);
 
+    // State queries
+    int count() const { return static_cast<int>(menus_.size()); }
+    int currentIndex() const { return openMenu_; }   // open menu, -1 = none
+    int hoveredItem() const { return hoveredItem_; } // hovered item in open menu
+
     // Per-item attributes (call after addItem)
     void setItemShortcut(int menuIdx, int itemIdx, const std::string& shortcut);
     void setItemCheckable(int menuIdx, int itemIdx, bool checkable);
@@ -56,7 +61,8 @@ private:
     int hoveredMenu_ = -1;
     int openMenu_ = -1;
     int hoveredItem_ = -1;
-    int openSubmenu_ = -1;  // submenu index on openMenu_'s item
+    int openSubmenu_ = -1;  // submenu index on openMenu_'s item; -1 = closed
+    int hoveredSub_ = -1;   // hovered item inside the open submenu
     int itemHeight_ = 26;
     int menuBarHeight_ = 30;
     bool keyboardNav_ = false;
@@ -67,7 +73,9 @@ private:
     int hitTestItem(int localY) const;
     bool handleMouseDown(int menuIdx, int itemIdx);
     void activateItem(int menuIdx, int itemIdx);
+    void activateSubItem(int menuIdx, int itemIdx, int subIdx);
     void closeMenu();
+    static void activateMenuEntry(MenuItem& item, std::vector<MenuItem>* group);
     void paintItem(NativeCanvas* canvas, const Rect& r, const MenuItem& item,
                    bool hovered, int depth);
     int dropWidth(const std::vector<MenuItem>& items, int depth) const;

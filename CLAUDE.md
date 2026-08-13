@@ -62,10 +62,25 @@ Tests use [doctest](https://github.com/doctest/doctest) (vendored at `vendor/doc
 - Has a header in `include/ltgui/widgets/` and implementation in `src/widgets/`
 - Overrides `paintSelf(NativeCanvas*)` for custom drawing
 - Overrides `handleEvent(Event&)` for input handling
-- Overrides `widgetType()` returning its `WidgetType` enum value
+- Declares `LTGUI_DECLARE_WIDGET_TYPE(Name)` (one line) for type checks
 - Calls `invalidateSizeHint()` when content changes
 - Calls `update()` when its visual state changes
-- Uses `currentTheme()` colors for theme-aware appearance
+- Paints through `resolvedStyle()` (never `currentTheme()` directly, except
+  for component-specific theme fields like scrollbar/table colors)
+
+**Base class layer.** Text-bearing widgets derive `TextWidget` (text_ +
+setText + textSizeHint helper); Slider/ProgressBar derive `Range` (value +
+clamp + Signal); CheckBox/RadioButton add the `Checkable` mixin; ComboBox/
+ListBox add the `ListItems` mixin; ListBox/TreeView add the `ScrollState`
+mixin. Mixins are NOT Widget subclasses — combine via multiple inheritance
+(`class CheckBox : public TextWidget, public Checkable`).
+
+**Style system.** `Style` holds base colors (transparent = "unset") plus
+per-state patches (`style().hovered.bgColor = ...`). `resolvedStyle()`
+resolves `state patch > style > current theme` (hover/pressed get the
+theme's accentHover/accentPressed automatically). Theme switches are picked
+up on the next paint — no re-styling needed. `style().gradient` enables a
+linear gradient background. Hover transitions animate via `AnimatedColor`.
 
 **Ownership.** Widgets are heap-allocated. Children are owned by their parent via `std::vector<std::unique_ptr<Widget>>`. `Window` owns the central widget via `unique_ptr`. The destructor of `Widget` automatically clears the window's focus pointer if it was the focused widget.
 
@@ -74,7 +89,8 @@ Tests use [doctest](https://github.com/doctest/doctest) (vendored at `vendor/doc
 - **Event delivery**: override `handleEvent(Event&)` and return `true` if consumed, `false` for default dispatch (bubble to parent). MouseDown is targeted (only the child under cursor). MouseUp/MouseMove are broadcast so widgets can clear hover states.
 - **Hit testing**: override `hitTest(Point)` to return the deepest child at a given coordinate, or `this` if no child matches.
 - **Focus**: call `claimFocus()` to request keyboard focus. `Window` tracks one `focusWidget_`. Before dereferencing the focus pointer, `validateFocusWidget()` checks it's still in this window's tree.
-- **Theme global**: `ThemeManager::instance().currentTheme()` returns the active `Theme` struct; `setTheme()` / `ThemeManager::instance().setTheme()` sets it, emits `onThemeChanged` signal, and repaints all windows. Six presets: Light, Dark, DarkBlue, HighContrast, Solarized, Nord. Theme struct has 28 color fields.
+- **Theme global**: `ThemeManager::instance().currentTheme()` returns the active `Theme` struct; `setTheme()` / `ThemeManager::instance().setTheme()` sets it, emits `onThemeChanged` signal, and repaints all windows. Six presets: Light, Dark, DarkBlue, HighContrast, Solarized, Nord. Theme struct has 28 color fields. Every Widget subscribes to `onThemeChanged` and repaints, so theme switches are fresh even for transparent-style widgets.
+- **Callbacks**: all widget callbacks are public `Signal<T>` members — `connect(cb)` to listen (multiple slots allowed, ScopedConnection auto-disconnects). Single-shot command APIs (Timer, Shortcut) keep std::function; `DropTarget::onDragOver` keeps std::function because it returns bool.
 - **Widget type check**: use `widget->widgetType() == WidgetType::RadioButton` (or any other type) instead of `dynamic_cast` or ad-hoc virtual methods like the old `isRadioButton()`.
 - **Logging**: use `LOG_INFO("category", "format", ...)`, `LOG_ERROR("category", "format", ...)`, etc. from `log.h`. Categories include `"Window"`, `"GPU"`, `"D3D11"`, `"GL"`. In release builds (`-DNDEBUG`), only `Warn` and `Error` levels print.
 - **Layout relayout**: after content changes (setText, etc.), call `scheduleRelayout()` to walk up to the nearest layout-bearing ancestor and re-lay it out. This ensures widgets resize when text changes.

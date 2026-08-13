@@ -27,7 +27,7 @@ public:
 
     DialogResult exec() override;
 
-    LTGUI_DECLARE_WIDGET_TYPE(Dialog)
+    LTGUI_DECLARE_WIDGET_TYPE(FileDialog)
 
 private:
     FileDialogMode mode_ = FileDialogMode::OpenFile;

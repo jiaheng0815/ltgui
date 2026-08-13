@@ -6,6 +6,12 @@
 #include <vector>
 #include <memory>
 
+// Windows headers define MessageBox -> MessageBoxW/A via a macro, which
+// would rename our WidgetType::MessageBox enumerator on Windows. Undefine.
+#ifdef MessageBox
+#undef MessageBox
+#endif
+
 namespace ltgui {
 
 class Window;
