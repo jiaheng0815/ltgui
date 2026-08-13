@@ -23,6 +23,7 @@
 #include "widgets/range.h"
 #include "widgets/checkable.h"
 #include "widgets/listitems.h"
+#include "widgets/scrollstate.h"
 #include "widgets/button.h"
 #include "widgets/label.h"
 #include "widgets/textbox.h"

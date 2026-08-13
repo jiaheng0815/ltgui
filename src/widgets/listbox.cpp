@@ -20,10 +20,6 @@ int ListBox::visibleItems() const {
     return std::max(1, (height() - 2) / itemHeight_);
 }
 
-int ListBox::currentScrollOffset() {
-    return static_cast<int>(scrollAnim_.value());
-}
-
 void ListBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
     ResolvedStyle st = resolvedStyle();
@@ -69,10 +65,8 @@ bool ListBox::handleEvent(Event& event) {
     }
 
     if (event.type == EventType::MouseWheel) {
-        int visible = visibleItems();
-        int maxOffset = std::max(0, static_cast<int>(items_.size()) - visible);
-        scrollTarget_ = std::max(0, std::min(maxOffset, scrollTarget_ - event.wheelDelta));
-        scrollAnim_.setTarget(static_cast<float>(scrollTarget_), 200, Easing::EaseOut);
+        int maxOffset = std::max(0, static_cast<int>(items_.size()) - visibleItems());
+        handleWheel(event.wheelDelta, maxOffset, 1);
         update();
         event.accepted = true;
         return true;
@@ -84,10 +78,9 @@ bool ListBox::handleEvent(Event& event) {
                 setCurrentIndex(selected_ + 1);
                 // Ensure selection is visible
                 int visible = visibleItems();
-                int current = currentScrollOffset();
-                if (selected_ >= current + visible) {
-                    scrollTarget_ = selected_ - visible + 1;
-                    scrollAnim_.setTarget(static_cast<float>(scrollTarget_), 150, Easing::EaseOut);
+                int maxOffset = std::max(0, static_cast<int>(items_.size()) - visible);
+                if (selected_ >= currentScrollOffset() + visible) {
+                    setScrollTarget(selected_ - visible + 1, maxOffset);
                 }
             }
             event.accepted = true;
@@ -96,10 +89,8 @@ bool ListBox::handleEvent(Event& event) {
         if (event.key == Key::Up) {
             if (selected_ > 0) {
                 setCurrentIndex(selected_ - 1);
-                int current = currentScrollOffset();
-                if (selected_ < current) {
-                    scrollTarget_ = selected_;
-                    scrollAnim_.setTarget(static_cast<float>(scrollTarget_), 150, Easing::EaseOut);
+                if (selected_ < currentScrollOffset()) {
+                    setScrollTarget(selected_, std::max(0, static_cast<int>(items_.size()) - visibleItems()));
                 }
             }
             event.accepted = true;

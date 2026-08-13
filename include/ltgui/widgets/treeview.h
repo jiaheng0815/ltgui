@@ -1,6 +1,6 @@
 #pragma once
 #include "widget.h"
-#include "animation.h"
+#include "widgets/scrollstate.h"
 #include "signal.h"
 #include <string>
 #include <vector>
@@ -40,7 +40,7 @@ private:
     int depth_ = 0;
 };
 
-class TreeView : public Widget {
+class TreeView : public Widget, public ScrollState {
 public:
     explicit TreeView(Widget* parent = nullptr);
     ~TreeView() override;
@@ -63,8 +63,6 @@ protected:
 private:
     std::unique_ptr<TreeViewItem> root_;
     TreeViewItem* selected_ = nullptr;
-    AnimatedFloat scrollAnim_{0.0f};
-    int scrollTarget_ = 0;
     int itemHeight_ = 26;
     int indentWidth_ = 20;
 

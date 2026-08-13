@@ -1,11 +1,11 @@
 #pragma once
 #include "widget.h"
 #include "widgets/listitems.h"
-#include "animation.h"
+#include "widgets/scrollstate.h"
 
 namespace ltgui {
 
-class ListBox : public Widget, public ListItems {
+class ListBox : public Widget, public ListItems, public ScrollState {
 public:
     explicit ListBox(Widget* parent = nullptr);
 
@@ -18,11 +18,9 @@ protected:
     bool handleEvent(Event& event) override;
 
 private:
-    AnimatedFloat scrollAnim_{0.0f};
-    int scrollTarget_ = 0;
     int itemHeight_ = 26;
 
-    int currentScrollOffset();
+    int currentScrollOffset() { return scrollOffset(); }
     int visibleItems() const;
 };
 

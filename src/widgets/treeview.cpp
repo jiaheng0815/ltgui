@@ -100,16 +100,16 @@ void TreeView::paintSelf(NativeCanvas* canvas) {
 
     canvas->setFont(st.font);
     int visible = visibleItems();
-    int scrollOffset = static_cast<int>(scrollAnim_.value());
+    int scrollOff = scrollOffset();
     int total = totalRows();
     int maxScroll = std::max(0, total - visible);
-    if (scrollOffset > maxScroll) scrollOffset = maxScroll;
+    if (scrollOff > maxScroll) scrollOff = maxScroll;
 
     // Recursively draw visible tree items
     int rowCounter = 0;
     std::function<void(TreeViewItem*, int)> drawItem;
     drawItem = [&](TreeViewItem* item, int depth) {
-        int relRow = rowCounter - scrollOffset;
+        int relRow = rowCounter - scrollOff;
         rowCounter++;
 
         if (relRow < 0 || relRow >= visible) {
@@ -167,10 +167,10 @@ bool TreeView::handleEvent(Event& event) {
 
     int localY = event.pos.y - y() - 1;
     int visible = visibleItems();
-    int scrollOffset = static_cast<int>(scrollAnim_.value());
+    int scrollOff = scrollOffset();
 
     if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
-        int targetRow = scrollOffset + localY / itemHeight_;
+        int targetRow = scrollOff + localY / itemHeight_;
 
         int currentRow = 0;
         TreeViewItem* clicked = nullptr;
@@ -208,8 +208,7 @@ bool TreeView::handleEvent(Event& event) {
     if (event.type == EventType::MouseWheel) {
         int total = totalRows();
         int maxScroll = std::max(0, total - visible);
-        scrollTarget_ = std::max(0, std::min(maxScroll, scrollTarget_ - event.wheelDelta));
-        scrollAnim_.setTarget(static_cast<float>(scrollTarget_), 200, Easing::EaseOut);
+        handleWheel(event.wheelDelta, maxScroll, 1);
         update();
         event.accepted = true;
         return true;
