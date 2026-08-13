@@ -6,8 +6,12 @@
 namespace ltgui {
 
 Tooltip::Tooltip(Widget* parent) : TextWidget("", parent) {
-    style().bgColor = Color(40, 40, 40);
-    style().fgColor = Color::White;
+    // Theme-provided tooltip colors (tooltipBg/tooltipBorder) — resolved
+    // through the style system so they follow theme switches.
+    const Theme& t = currentTheme();
+    style().bgColor = t.tooltipBg;
+    style().fgColor = t.textPrimary;
+    style().borderColor = t.tooltipBorder;
     style().borderRadius = 4;
     style().setPadding(8, 4);
     style().font = Font::systemDefault(11);

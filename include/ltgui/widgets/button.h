@@ -18,10 +18,6 @@ public:
 protected:
     void paintSelf(NativeCanvas* canvas) override;
     bool handleEvent(Event& event) override;
-
-private:
-    bool pressed_ = false;
-    bool hovered_ = false;
 };
 
 } // namespace ltgui

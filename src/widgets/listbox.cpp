@@ -7,10 +7,6 @@
 namespace ltgui {
 
 ListBox::ListBox(Widget* parent) : Widget(parent), ListItems(this) {
-    style().bgColor = currentTheme().bgSecondary;
-    style().fgColor = currentTheme().textPrimary;
-    style().borderWidth = 1;
-    style().borderColor = currentTheme().border;
     style().borderRadius = 4;
 }
 
@@ -30,11 +26,11 @@ int ListBox::currentScrollOffset() {
 
 void ListBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    const Theme& t = currentTheme();
+    ResolvedStyle st = resolvedStyle();
 
     paintBackground(canvas);
 
-    canvas->setFont(style().font);
+    canvas->setFont(st.font);
     int visible = visibleItems();
     int maxOffset = std::max(0, static_cast<int>(items_.size()) - visible);
     int scrollOffset = currentScrollOffset();
@@ -46,11 +42,11 @@ void ListBox::paintSelf(NativeCanvas* canvas) {
         Rect itemRect(r.x + 1, itemY, r.width - 2, itemHeight_);
 
         if (i == selected_) {
-            canvas->setColor(t.accent);
+            canvas->setColor(st.accent);
             canvas->fillRoundedRect(itemRect.adjusted(2, 1, -2, -1), 3);
             canvas->setColor(Color::White);
         } else {
-            canvas->setColor(style().fgColor);
+            canvas->setColor(st.fgColor);
         }
 
         canvas->drawText(items_[i], itemRect.adjusted(6, 0, -4, 0),

@@ -7,7 +7,6 @@
 namespace ltgui {
 
 ProgressBar::ProgressBar(Widget* parent) : Range(parent) {
-    style().bgColor = currentTheme().bgTertiary;
     style().borderRadius = 4;
 }
 
@@ -41,11 +40,12 @@ Size ProgressBar::sizeHint() const {
 
 void ProgressBar::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
 
-    // Track
-    canvas->setColor(style().bgColor);
-    canvas->fillRoundedRect(r, style().borderRadius);
+    // Track — uses the theme's dedicated progressBarTrack color.
+    canvas->setColor(t.progressBarTrack);
+    canvas->fillRoundedRect(r, st.borderRadius);
 
     if (indeterminate_) {
         // Indeterminate: sliding bar
@@ -67,28 +67,29 @@ void ProgressBar::paintSelf(NativeCanvas* canvas) {
             barRect.width = r.right() - barRect.x;
         }
 
-        canvas->setColor(t.accent);
-        canvas->fillRoundedRect(barRect, style().borderRadius);
+        // Fill — theme's dedicated progressBarFill color.
+        canvas->setColor(t.progressBarFill);
+        canvas->fillRoundedRect(barRect, st.borderRadius);
     } else {
         // Determinate: filled portion
         float pct = displayValue_.value();
         int fillW = static_cast<int>(r.width * pct);
         if (fillW > 0) {
             Rect fillRect(r.x, r.y, fillW, r.height);
-            canvas->setColor(t.accent);
-            canvas->fillRoundedRect(fillRect, style().borderRadius);
+            canvas->setColor(t.progressBarFill);
+            canvas->fillRoundedRect(fillRect, st.borderRadius);
 
             // If not full, cover the right rounded corner on the fill end
-            if (fillW < r.width - style().borderRadius) {
-                canvas->fillRect(Rect(r.x + fillW - style().borderRadius, r.y,
-                                      style().borderRadius, r.height));
+            if (fillW < r.width - st.borderRadius) {
+                canvas->fillRect(Rect(r.x + fillW - st.borderRadius, r.y,
+                                      st.borderRadius, r.height));
             }
         }
 
         // Percentage text
         if (r.width > 60) {
             canvas->setColor(t.textPrimary);
-            canvas->setFont(style().font);
+            canvas->setFont(st.font);
             int pctInt = static_cast<int>(pct * 100.0f + 0.5f);
             std::string pctText = std::to_string(pctInt) + "%";
             canvas->drawText(pctText, r,

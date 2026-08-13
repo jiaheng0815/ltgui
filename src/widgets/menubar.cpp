@@ -7,8 +7,6 @@
 namespace ltgui {
 
 MenuBar::MenuBar(Widget* parent) : Widget(parent) {
-    style().bgColor = currentTheme().bgTertiary;
-    style().fgColor = currentTheme().textPrimary;
 }
 
 int MenuBar::addMenu(const std::string& label) {
@@ -172,24 +170,25 @@ static void drawHighlight(NativeCanvas* canvas, const Rect& r, const Color& acce
 
 void MenuBar::paintItem(NativeCanvas* canvas, const Rect& r, const MenuItem& item,
                          bool hovered, int depth) {
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
     int indent = depth * 12;
 
     if (hovered && !item.separator)
-        drawHighlight(canvas, r, t.accent);
+        drawHighlight(canvas, r, t.menuItemSelected);
     else
-        canvas->setColor(hovered ? Color::White : style().fgColor);
+        canvas->setColor(hovered ? Color::White : st.fgColor);
 
     if (item.separator) {
-        canvas->setColor(t.border);
+        canvas->setColor(st.borderColor);
         canvas->drawLine({r.x + 8, r.y + r.height / 2},
                          {r.x + r.width - 8, r.y + r.height / 2}, 1);
         return;
     }
 
     int checkWidth = 0;
-    if (item.checkable) { checkWidth = 16; drawCheck(canvas, Rect(r.x, r.y, 16, r.height), hovered ? Color::White : t.accent); }
-    if (item.radio)     { checkWidth = 16; drawRadio(canvas, Rect(r.x, r.y, 16, r.height), hovered ? Color::White : t.accent, item.checked); }
+    if (item.checkable) { checkWidth = 16; drawCheck(canvas, Rect(r.x, r.y, 16, r.height), hovered ? Color::White : t.menuItemSelected); }
+    if (item.radio)     { checkWidth = 16; drawRadio(canvas, Rect(r.x, r.y, 16, r.height), hovered ? Color::White : t.menuItemSelected, item.checked); }
 
     if (item.checked && !item.checkable && !item.radio) {
         checkWidth = 16;
@@ -212,9 +211,12 @@ void MenuBar::paintItem(NativeCanvas* canvas, const Rect& r, const MenuItem& ite
 
 void MenuBar::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
-    paintBackground(canvas);
-    canvas->setFont(Font(style().font.family, 13, style().font.weight, style().font.style));
+    // Menu bar uses the theme's dedicated menuBarBg color.
+    canvas->setColor(t.menuBarBg);
+    canvas->fillRect(r);
+    canvas->setFont(Font(st.font.family, 13, st.font.weight, st.font.style));
 
     // Top-level menus
     int x = r.x + 4;
@@ -222,8 +224,8 @@ void MenuBar::paintSelf(NativeCanvas* canvas) {
         int w = menuWidth(i);
         Rect itemRect(x, r.y, w, r.height);
         if (i == hoveredMenu_ || i == openMenu_)
-            drawHighlight(canvas, itemRect, t.accent);
-        else canvas->setColor(style().fgColor);
+            drawHighlight(canvas, itemRect, t.menuItemSelected);
+        else canvas->setColor(st.fgColor);
         canvas->drawText(menus_[i].label, itemRect.adjusted(8, 0, -8, 0),
                          NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter);
         x += w + 2;
@@ -237,11 +239,11 @@ void MenuBar::paintSelf(NativeCanvas* canvas) {
     int dropX = r.x + menuX(openMenu_);
     int dropY = r.bottom();
 
-    canvas->setColor(t.bgSecondary);
+    canvas->setColor(st.bgColor);
     canvas->fillRoundedRect(Rect(dropX, dropY, dropW, dropH), 4);
-    canvas->setColor(t.border);
+    canvas->setColor(st.borderColor);
     canvas->strokeRoundedRect(Rect(dropX, dropY, dropW, dropH), 4);
-    canvas->setFont(style().font);
+    canvas->setFont(st.font);
 
     for (int j = 0; j < (int)items.size(); j++) {
         int iy = dropY + 2 + j * itemHeight_;

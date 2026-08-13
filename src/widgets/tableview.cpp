@@ -52,9 +52,6 @@ void SimpleTableModel::sort(int column, bool ascending) {
 // --- TableView ---
 
 TableView::TableView(Widget* parent) : Widget(parent) {
-    style().bgColor = currentTheme().bgSecondary;
-    style().borderWidth = 1;
-    style().borderColor = currentTheme().border;
 }
 
 void TableView::setModel(std::shared_ptr<TableModel> model) {
@@ -139,6 +136,7 @@ int TableView::hitTestRow(int localY) const {
 
 void TableView::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
     paintBackground(canvas);
 
@@ -153,7 +151,7 @@ void TableView::paintSelf(NativeCanvas* canvas) {
     canvas->setColor(t.tableHeaderBg);
     canvas->fillRoundedRect(Rect(r.x, headerY, totalWidth(), headerHeight_), 4);
     canvas->setColor(t.textPrimary);
-    canvas->setFont(style().font);
+    canvas->setFont(st.font);
 
     for (int c = 0; c < numCols; c++) {
         int cx = r.x + colX(c);
@@ -190,7 +188,7 @@ void TableView::paintSelf(NativeCanvas* canvas) {
             }
             canvas->setColor(t.textPrimary);
         }
-        canvas->setFont(style().font);
+        canvas->setFont(st.font);
 
         for (int c = 0; c < numCols; c++) {
             int cx = r.x + colX(c);

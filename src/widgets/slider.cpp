@@ -27,6 +27,7 @@ int Slider::thumbPos() const {
 
 void Slider::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
 
     // Track spans from x+8 to x+width-8 (= width-16 wide)
@@ -49,7 +50,7 @@ void Slider::paintSelf(NativeCanvas* canvas) {
     if (value() == maximum()) fillW = trackW;
 
     if (fillW > 0) {
-        canvas->setColor(t.accent);
+        canvas->setColor(st.accent);
         canvas->fillRect(Rect(trackX, trackY, fillW, 6));
     }
 
@@ -59,9 +60,9 @@ void Slider::paintSelf(NativeCanvas* canvas) {
     int thumbY = r.y + (r.height - thumbSize) / 2;
     Rect thumbRect(thumbAbsX, thumbY, thumbSize, thumbSize);
 
-    canvas->setColor(t.bgSecondary);
+    canvas->setColor(st.bgColor);
     canvas->fillEllipse(thumbRect);
-    canvas->setColor(hovered_ || dragging_ ? t.accent : t.border);
+    canvas->setColor(hovered_ || dragging_ ? st.accent : st.borderColor);
     canvas->strokeEllipse(thumbRect, 2);
 }
 

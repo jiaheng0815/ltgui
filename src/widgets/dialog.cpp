@@ -29,7 +29,6 @@ void Dialog::addButton(const std::string& text, DialogResult res, bool isDefault
     btn->onClicked.connect([this, res]() { done(res); });
     if (isDefault) {
         btn->style().borderWidth = 2;
-        btn->style().borderColor = currentTheme().accent;
     }
 }
 
@@ -112,6 +111,7 @@ void Dialog::paintSelf(NativeCanvas* canvas) {
     int py = (wh - panelH_) / 2;
     Rect panelRect(px, py, panelW_, panelH_);
 
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
     canvas->setColor(t.dialogBg);
     canvas->fillRoundedRect(panelRect, 8);
@@ -124,7 +124,7 @@ void Dialog::paintSelf(NativeCanvas* canvas) {
         canvas->setColor(t.dialogTitleBg);
         canvas->fillRect(Rect(px, py + 24, panelW_, 8));
         canvas->setColor(t.textPrimary);
-        canvas->setFont(style().font);
+        canvas->setFont(st.font);
         canvas->drawText(title_, Rect(px + 12, py, panelW_ - 24, 32),
                          NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter);
     }
@@ -158,7 +158,6 @@ void MessageBox::rebuild() {
     panel_->setLayout(std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12));
 
     auto* msg = panel_->makeChild<Label>(message_);
-    msg->style().fgColor = currentTheme().textSecondary;
     msg->style().setPadding(8, 8);
 
     auto* btnRow = panel_->makeChild<Widget>();
@@ -227,7 +226,6 @@ void InputDialog::rebuild() {
     panel_->setLayout(std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12));
 
     auto* lbl = panel_->makeChild<Label>(label_);
-    lbl->style().fgColor = currentTheme().textPrimary;
 
     input_ = panel_->makeChild<TextBox>("");
     input_->setMultiLine(false);

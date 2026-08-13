@@ -17,7 +17,6 @@ protected:
 
 private:
     bool dragging_ = false;
-    bool hovered_ = false;
 
     int thumbPos() const;
 };

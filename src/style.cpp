@@ -5,10 +5,10 @@ namespace ltgui {
 
 Style Style::fromTheme(const Theme& theme) {
     Style s;
-    s.bgColor = theme.bgSecondary;
-    s.fgColor = theme.textPrimary;
-    s.borderColor = theme.border;
-    s.accent = theme.accent;
+    // All colors intentionally left Transparent — resolve() falls back to
+    // the CURRENT theme on every call, so theme switches are picked up
+    // without re-styling widgets. Only structural defaults live here.
+    (void)theme;
     s.borderWidth = 1;
     s.borderRadius = 4;
     s.font = Font::systemDefault(12);
@@ -29,10 +29,23 @@ ResolvedStyle Style::resolve(WidgetState state, const Theme& theme) const {
         return value == Color::Transparent ? fallback : value;
     };
     ResolvedStyle out;
-    out.bgColor     = pick(bgColor, theme.bgSecondary);
-    out.fgColor     = pick(fgColor, theme.textPrimary);
+    // Disabled gets theme's tertiary bg / disabled text when not overridden.
+    out.bgColor     = pick(bgColor, state == WidgetState::Disabled ? theme.bgTertiary
+                                                                   : theme.bgSecondary);
+    out.fgColor     = pick(fgColor, state == WidgetState::Disabled ? theme.textDisabled
+                                                                   : theme.textPrimary);
     out.borderColor = pick(borderColor, theme.border);
-    out.accent      = pick(accent, theme.accent);
+    // State-specific theme accent fallback: hovered/pressed get their own
+    // colors from the theme when no explicit style accent is set.
+    if (accent != Color::Transparent) {
+        out.accent = accent;
+    } else {
+        switch (state) {
+        case WidgetState::Hovered:  out.accent = theme.accentHover;  break;
+        case WidgetState::Pressed:  out.accent = theme.accentPressed; break;
+        default:                    out.accent = theme.accent;       break;
+        }
+    }
     out.borderWidth  = borderWidth;
     out.borderRadius = borderRadius;
     out.font = font;

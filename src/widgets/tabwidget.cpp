@@ -7,14 +7,12 @@
 namespace ltgui {
 
 TabWidget::TabWidget(Widget* parent) : Widget(parent) {
-    style().bgColor = currentTheme().bgPrimary;
 }
 
 int TabWidget::addTab(const std::string& label) {
     Tab tab;
     tab.label = label;
     tab.content = addChild(std::make_unique<Widget>());
-    tab.content->style().bgColor = currentTheme().bgSecondary;
     tab.content->style().borderRadius = 4;
     tab.content->setVisible(false);
 
@@ -127,6 +125,7 @@ Rect TabWidget::tabRect(int index) const {
 
 void TabWidget::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
 
     paintBackground(canvas);
@@ -143,17 +142,17 @@ void TabWidget::paintSelf(NativeCanvas* canvas) {
         Rect tr(x, r.y + 2, tw, tabBarHeight_ - 2);
 
         if (i == current_) {
-            canvas->setColor(t.bgSecondary);
+            canvas->setColor(st.bgColor);
             canvas->fillRoundedRect(tr, 4);
-            canvas->setColor(t.accent);
+            canvas->setColor(st.accent);
             canvas->fillRect(Rect(tr.x, tr.bottom() - 2, tr.width, 2));
-        } else if (i == hovered_) {
-            canvas->setColor(Color(t.bgSecondary.r, t.bgSecondary.g, t.bgSecondary.b, 180));
+        } else if (i == hoveredTab_) {
+            canvas->setColor(Color(st.bgColor.r, st.bgColor.g, st.bgColor.b, 180));
             canvas->fillRoundedRect(tr, 4);
         }
 
-        canvas->setColor(i == current_ ? t.accent : t.textSecondary);
-        canvas->setFont(style().font);
+        canvas->setColor(i == current_ ? st.accent : t.textSecondary);
+        canvas->setFont(st.font);
         canvas->drawText(tabs_[i].label, tr,
                          NativeCanvas::AlignCenter | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);
 
@@ -163,7 +162,7 @@ void TabWidget::paintSelf(NativeCanvas* canvas) {
     // Content area border
     if (current_ >= 0) {
         Rect contentArea(r.x + 1, r.y + tabBarHeight_ + 1, r.width - 2, r.height - tabBarHeight_ - 2);
-        canvas->setColor(t.border);
+        canvas->setColor(st.borderColor);
         canvas->strokeRoundedRect(contentArea, 4);
     }
 }
@@ -181,7 +180,7 @@ bool TabWidget::handleEvent(Event& event) {
             int tw = cachedTabWidths_[i] - 2;
             if (localX >= xcursor && localX < xcursor + tw) {
                 if (event.type == EventType::MouseMove) {
-                    hovered_ = i;
+                    hoveredTab_ = i;
                     update();
                     event.accepted = true;
                     return true;
@@ -194,8 +193,8 @@ bool TabWidget::handleEvent(Event& event) {
             }
             xcursor += cachedTabWidths_[i];
         }
-        if (event.type == EventType::MouseMove && hovered_ >= 0) {
-            hovered_ = -1;
+        if (event.type == EventType::MouseMove && hoveredTab_ >= 0) {
+            hoveredTab_ = -1;
             update();
         }
         return false;

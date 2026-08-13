@@ -7,10 +7,6 @@
 namespace ltgui {
 
 ContextMenu::ContextMenu(Widget* parent) : Widget(parent) {
-    style().bgColor = currentTheme().bgSecondary;
-    style().fgColor = currentTheme().textPrimary;
-    style().borderWidth = 1;
-    style().borderColor = currentTheme().border;
     style().borderRadius = 6;
     style().setPadding(4, 2);
     setVisible(false);
@@ -77,17 +73,18 @@ int ContextMenu::bestWidth() const {
 
 void ContextMenu::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
 
     paintBackground(canvas);
 
-    canvas->setFont(style().font);
-    int pad = style().paddingTop;
+    canvas->setFont(st.font);
+    int pad = st.paddingTop;
     int y = r.y + pad;
 
     for (int i = 0; i < static_cast<int>(items_.size()); i++) {
         if (items_[i].separator) {
-            canvas->setColor(t.border);
+            canvas->setColor(st.borderColor);
             canvas->drawLine({r.x + 8, y + 3}, {r.right() - 8, y + 3}, 1);
             y += 8;
             continue;
@@ -96,11 +93,11 @@ void ContextMenu::paintSelf(NativeCanvas* canvas) {
         Rect itemRect(r.x + 2, y, r.width - 4, itemHeight_);
 
         if (i == hovered_) {
-            canvas->setColor(t.accent);
+            canvas->setColor(t.menuItemSelected);
             canvas->fillRoundedRect(itemRect.adjusted(2, 1, -2, -1), 3);
             canvas->setColor(Color::White);
         } else {
-            canvas->setColor(style().fgColor);
+            canvas->setColor(st.fgColor);
         }
 
         canvas->drawText(items_[i].text, itemRect.adjusted(12, 0, -8, 0),

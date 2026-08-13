@@ -9,7 +9,6 @@ RadioButton::RadioButton(const std::string& text, Widget* parent)
     : TextWidget(text, parent), Checkable(this) {
     style().bgColor = Color::Transparent;
     style().borderWidth = 0;
-    style().fgColor = currentTheme().textPrimary;
 }
 
 void RadioButton::setChecked(bool checked) {
@@ -52,25 +51,25 @@ Size RadioButton::sizeHint() const {
 
 void RadioButton::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    const Theme& t = currentTheme();
+    ResolvedStyle st = resolvedStyle();
 
     int circleSize = 14;
     int circleY = r.y + (r.height - circleSize) / 2;
     Rect circleRect(r.x + 2, circleY, circleSize, circleSize);
 
-    canvas->setColor(t.bgSecondary);
+    canvas->setColor(st.bgColor);
     canvas->fillEllipse(circleRect);
-    canvas->setColor(checked_ ? t.accent : t.border);
+    canvas->setColor(checked_ ? st.accent : st.borderColor);
     canvas->strokeEllipse(circleRect, checked_ ? 2 : 1);
 
     if (checked_) {
         Rect dotRect(r.x + 5, circleY + 3, circleSize - 6, circleSize - 6);
-        canvas->setColor(t.accent);
+        canvas->setColor(st.accent);
         canvas->fillEllipse(dotRect);
     }
 
-    canvas->setColor(isEnabled() ? style().fgColor : t.textDisabled);
-    canvas->setFont(style().font);
+    canvas->setColor(st.fgColor);
+    canvas->setFont(st.font);
     Rect textRect(r.x + circleSize + 6, r.y, r.width - circleSize - 6, r.height);
     canvas->drawText(text_, textRect,
                      NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);

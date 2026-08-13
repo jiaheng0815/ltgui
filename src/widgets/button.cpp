@@ -7,10 +7,6 @@ namespace ltgui {
 
 Button::Button(const std::string& text, Widget* parent)
     : TextWidget(text, parent) {
-    style().bgColor = currentTheme().bgSecondary;
-    style().fgColor = currentTheme().textPrimary;
-    style().borderColor = currentTheme().border;
-    style().borderWidth = 1;
     style().borderRadius = 4;
 }
 
@@ -24,40 +20,32 @@ Size Button::sizeHint() const {
 
 void Button::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    const Theme& t = currentTheme();
+    ResolvedStyle st = resolvedStyle();
 
-    // Fill background: accent when interactive, base bg otherwise
-    Color fillColor;
-    if (pressed_) {
-        fillColor = t.accentPressed;
-    } else if (hovered_) {
-        fillColor = t.accentHover;
-    } else {
-        fillColor = style().bgColor;
-    }
+    // Fill background: accent when interactive (hover/pressed get the
+    // theme's state-specific accent automatically), base bg otherwise.
+    Color fillColor = (pressed_ || hovered_) ? st.accent : st.bgColor;
     canvas->setColor(fillColor);
-
-    if (style().borderRadius > 0) {
-        canvas->fillRoundedRect(r, style().borderRadius);
+    if (st.borderRadius > 0) {
+        canvas->fillRoundedRect(r, st.borderRadius);
     } else {
         canvas->fillRect(r);
     }
 
     // Border
-    if (style().borderWidth > 0) {
-        Color borderColor = pressed_ ? t.accentPressed
-                           : (hovered_ ? t.accentHover : style().borderColor);
+    if (st.borderWidth > 0) {
+        Color borderColor = (pressed_ || hovered_) ? st.accent : st.borderColor;
         canvas->setColor(borderColor);
-        if (style().borderRadius > 0) {
-            canvas->strokeRoundedRect(r, style().borderRadius, style().borderWidth);
+        if (st.borderRadius > 0) {
+            canvas->strokeRoundedRect(r, st.borderRadius, st.borderWidth);
         } else {
-            canvas->strokeRect(r, style().borderWidth);
+            canvas->strokeRect(r, st.borderWidth);
         }
     }
 
     // Text
-    canvas->setColor(hovered_ || pressed_ ? Color::White : style().fgColor);
-    canvas->setFont(style().font);
+    canvas->setColor(hovered_ || pressed_ ? Color::White : st.fgColor);
+    canvas->setFont(st.font);
     int flags = NativeCanvas::AlignCenter | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine;
     canvas->drawText(text_, r, flags);
 }

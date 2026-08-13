@@ -11,12 +11,6 @@ namespace ltgui {
 
 TextBox::TextBox(const std::string& text, Widget* parent)
     : TextWidget(text, parent), cursorPos_(static_cast<int>(text.size())) {
-    style().bgColor = currentTheme().bgSecondary;
-    style().fgColor = currentTheme().textPrimary;
-    style().borderWidth = 1;
-    style().borderColor = currentTheme().border;
-    style().borderRadius = 4;
-    style().setPadding(8, 4);
 }
 
 void TextBox::setText(const std::string& text) {
@@ -270,19 +264,21 @@ void TextBox::selectAll() {
 
 void TextBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
 
-    canvas->setColor(style().bgColor);
-    canvas->fillRoundedRect(r, style().borderRadius);
+    canvas->setColor(st.bgColor);
+    canvas->fillRoundedRect(r, st.borderRadius);
 
-    Color borderColor = focused_ ? t.accent : style().borderColor;
+    // Focus border uses the theme's dedicated borderFocus color.
+    Color borderColor = focused_ ? t.borderFocus : st.borderColor;
     canvas->setColor(borderColor);
-    canvas->strokeRoundedRect(r, style().borderRadius, focused_ ? 2 : style().borderWidth);
+    canvas->strokeRoundedRect(r, st.borderRadius, focused_ ? 2 : st.borderWidth);
 
     // Set font early — required before any measureText() call
-    canvas->setFont(style().font);
+    canvas->setFont(st.font);
 
-    int pad = style().paddingLeft;
+    int pad = st.paddingLeft;
     Rect textRect(r.x + pad, r.y, r.width - pad * 2, r.height);
 
     // Build display text: combine IME preedit with actual text
@@ -302,7 +298,7 @@ void TextBox::paintSelf(NativeCanvas* canvas) {
         std::string sel    = displayText.substr(selStart, selEnd - selStart);
         int selX = r.x + pad + canvas->measureText(before).width;
         int selW = canvas->measureText(sel).width;
-        canvas->setColor(t.accent);
+        canvas->setColor(st.accent);
         canvas->fillRect(Rect(selX, r.y + 2, selW, r.height - 4));
     }
 
@@ -314,11 +310,11 @@ void TextBox::paintSelf(NativeCanvas* canvas) {
         int preeditW = canvas->measureText(preedit).width;
         // Draw underline for preedit text
         int underlineY = r.bottom() - 4;
-        canvas->setColor(t.accent);
+        canvas->setColor(st.accent);
         canvas->drawLine({preeditX, underlineY}, {preeditX + preeditW, underlineY}, 1);
     }
 
-    canvas->setColor(isEnabled() ? style().fgColor : t.textDisabled);
+    canvas->setColor(st.fgColor);
 
     int flags = NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter;
     if (!multiLine_) flags |= NativeCanvas::SingleLine;
@@ -333,7 +329,7 @@ void TextBox::paintSelf(NativeCanvas* canvas) {
         Size textBefore = canvas->measureText(before);
         int cursorX = r.x + pad + textBefore.width;
 
-        canvas->setColor(t.accent);
+        canvas->setColor(st.accent);
         canvas->drawLine({cursorX, r.y + 5}, {cursorX, r.bottom() - 5}, 2);
     }
 }

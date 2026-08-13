@@ -7,9 +7,6 @@
 namespace ltgui {
 
 ScrollArea::ScrollArea(Widget* parent) : Widget(parent) {
-    style().bgColor = currentTheme().bgSecondary;
-    style().borderWidth = 1;
-    style().borderColor = currentTheme().border;
     style().borderRadius = 4;
 }
 
@@ -105,7 +102,9 @@ void ScrollArea::paintSelf(NativeCanvas* canvas) {
         canvas->setColor(t.scrollbarTrack);
         canvas->fillRoundedRect(Rect(r.right() - sbWidth, r.y, sbWidth, r.height), 4);
 
-        canvas->setColor(t.scrollbarThumb);
+        // Theme provides hover/active scrollbar colors (wired up here).
+        Color thumbColor = draggingScrollbar_ ? t.scrollbarActive : t.scrollbarThumb;
+        canvas->setColor(thumbColor);
         canvas->fillRoundedRect(Rect(r.right() - sbWidth + 2, thumbY + 1, sbWidth - 4, thumbH - 2), 3);
     }
 }

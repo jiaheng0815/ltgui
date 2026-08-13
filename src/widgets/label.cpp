@@ -9,7 +9,6 @@ Label::Label(const std::string& text, Widget* parent)
     : TextWidget(text, parent) {
     style().bgColor = Color::Transparent;
     style().borderWidth = 0;
-    style().fgColor = currentTheme().textPrimary;
 }
 
 Size Label::sizeHint() const {
@@ -22,8 +21,9 @@ Size Label::sizeHint() const {
 
 void Label::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    canvas->setColor(isEnabled() ? style().fgColor : currentTheme().textDisabled);
-    canvas->setFont(style().font);
+    ResolvedStyle st = resolvedStyle();
+    canvas->setColor(st.fgColor);
+    canvas->setFont(st.font);
     int flags = NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine;
     canvas->drawText(text_, r, flags);
 }

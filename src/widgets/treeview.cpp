@@ -48,11 +48,6 @@ void TreeViewItem::removeChild(int index) {
 // --- TreeView ---
 
 TreeView::TreeView(Widget* parent) : Widget(parent) {
-    style().bgColor = currentTheme().bgSecondary;
-    style().fgColor = currentTheme().textPrimary;
-    style().borderWidth = 1;
-    style().borderColor = currentTheme().border;
-    style().borderRadius = 4;
     root_ = std::make_unique<TreeViewItem>("");
     root_->expanded_ = true;
     root_->treeView_ = this;
@@ -90,19 +85,20 @@ int TreeView::totalRows() const {
 
 void TreeView::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
 
-    canvas->setColor(style().bgColor);
-    canvas->fillRoundedRect(r, style().borderRadius);
+    canvas->setColor(st.bgColor);
+    canvas->fillRoundedRect(r, st.borderRadius);
 
-    if (style().borderWidth > 0) {
-        canvas->setColor(style().borderColor);
-        canvas->strokeRoundedRect(r, style().borderRadius, style().borderWidth);
+    if (st.borderWidth > 0) {
+        canvas->setColor(st.borderColor);
+        canvas->strokeRoundedRect(r, st.borderRadius, st.borderWidth);
     }
 
     if (!root_) return;
 
-    canvas->setFont(style().font);
+    canvas->setFont(st.font);
     int visible = visibleItems();
     int scrollOffset = static_cast<int>(scrollAnim_.value());
     int total = totalRows();
@@ -127,7 +123,7 @@ void TreeView::paintSelf(NativeCanvas* canvas) {
         Rect itemRect(r.x + 1, y, r.width - 2, itemHeight_);
 
         if (item == selected_) {
-            canvas->setColor(t.accent);
+            canvas->setColor(st.accent);
             canvas->fillRoundedRect(itemRect.adjusted(1, 1, -1, -1), 3);
             canvas->setColor(Color::White);
         }
@@ -153,7 +149,7 @@ void TreeView::paintSelf(NativeCanvas* canvas) {
             x += 14;
         }
 
-        canvas->setColor(item == selected_ ? Color::White : style().fgColor);
+        canvas->setColor(item == selected_ ? Color::White : st.fgColor);
         Rect textRect(x, y, r.right() - x - 2, itemHeight_);
         canvas->drawText(item->text_, textRect,
                          NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);

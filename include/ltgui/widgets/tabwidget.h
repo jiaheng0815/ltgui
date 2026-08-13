@@ -34,7 +34,7 @@ private:
     };
     std::vector<Tab> tabs_;
     int current_ = -1;
-    int hovered_ = -1;
+    int hoveredTab_ = -1;
     int tabBarHeight_ = 32;
 
     mutable std::vector<int> cachedTabWidths_;

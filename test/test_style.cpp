@@ -12,10 +12,12 @@ TEST_CASE("Style default") {
         CHECK_FALSE(s.font.family.empty());
     }
     SUBCASE("has sensible defaults") {
-        CHECK(s.borderWidth >= 0);
-        CHECK(s.borderRadius >= 0);
-        CHECK(s.bgColor.a > 0);
-        CHECK(s.fgColor.a > 0);
+        CHECK(s.borderWidth > 0);
+        CHECK(s.borderRadius > 0);
+        // Colors are left transparent so resolve() falls back to the
+        // current theme (theme switches are picked up automatically).
+        CHECK(s.bgColor == Color::Transparent);
+        CHECK(s.fgColor == Color::Transparent);
     }
 }
 
@@ -101,10 +103,14 @@ TEST_CASE("Style resolve priority") {
 TEST_CASE("Style fromTheme") {
     Theme dark = Theme::Dark();
     Style s = Style::fromTheme(dark);
-    CHECK(s.bgColor == dark.bgSecondary);
-    CHECK(s.fgColor == dark.textPrimary);
-    CHECK(s.accent == dark.accent);
+    // Colors are left transparent so resolve() falls back to the current
+    // theme (theme switches are picked up automatically).
+    CHECK(s.bgColor == Color::Transparent);
+    CHECK(s.fgColor == Color::Transparent);
+    CHECK(s.accent == Color::Transparent);
     CHECK(s.borderWidth > 0);
+    CHECK(s.borderRadius > 0);
+    CHECK_FALSE(s.font.family.empty());
 }
 
 TEST_CASE("Color lerp") {

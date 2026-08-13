@@ -7,10 +7,6 @@
 namespace ltgui {
 
 ComboBox::ComboBox(Widget* parent) : Widget(parent), ListItems(this) {
-    style().bgColor = currentTheme().bgSecondary;
-    style().fgColor = currentTheme().textPrimary;
-    style().borderWidth = 1;
-    style().borderColor = currentTheme().border;
     style().borderRadius = 4;
     style().setPadding(8, 4);
 }
@@ -55,23 +51,24 @@ Rect ComboBox::effectiveGeometry() const {
 
 void ComboBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
+    ResolvedStyle st = resolvedStyle();
     const Theme& t = currentTheme();
 
-    canvas->setColor(style().bgColor);
-    canvas->fillRoundedRect(r, style().borderRadius);
+    canvas->setColor(st.bgColor);
+    canvas->fillRoundedRect(r, st.borderRadius);
 
-    if (style().borderWidth > 0) {
-        canvas->setColor(dropdownOpen_ ? t.accent : style().borderColor);
-        canvas->strokeRoundedRect(r, style().borderRadius, dropdownOpen_ ? 2 : style().borderWidth);
+    if (st.borderWidth > 0) {
+        canvas->setColor(dropdownOpen_ ? st.accent : st.borderColor);
+        canvas->strokeRoundedRect(r, st.borderRadius, dropdownOpen_ ? 2 : st.borderWidth);
     }
 
     // Selected text
-    canvas->setColor(style().fgColor);
-    canvas->setFont(style().font);
+    canvas->setColor(st.fgColor);
+    canvas->setFont(st.font);
 
     std::string displayText = currentText();
-    Rect textRect(r.x + style().paddingLeft, r.y,
-                  r.width - style().paddingHorz() - 20, r.height);
+    Rect textRect(r.x + st.paddingLeft, r.y,
+                  r.width - st.paddingHorz() - 20, r.height);
     canvas->drawText(displayText, textRect,
                      NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);
 
@@ -93,9 +90,9 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
             dropRect = Rect(r.x, dropY, r.width, dropHeight_);
         }
 
-        canvas->setColor(t.bgSecondary);
+        canvas->setColor(st.bgColor);
         canvas->fillRoundedRect(dropRect, 4);
-        canvas->setColor(t.border);
+        canvas->setColor(st.borderColor);
         canvas->strokeRoundedRect(dropRect, 4);
 
         for (size_t i = 0; i < items_.size(); i++) {
@@ -103,11 +100,11 @@ void ComboBox::paintSelf(NativeCanvas* canvas) {
             Rect itemRect(dropRect.x + 2, itemY, dropRect.width - 4, 26);
 
             if (static_cast<int>(i) == selected_) {
-                canvas->setColor(t.accent);
+                canvas->setColor(st.accent);
                 canvas->fillRoundedRect(itemRect.adjusted(2, 1, -2, -1), 3);
                 canvas->setColor(Color::White);
             } else {
-                canvas->setColor(style().fgColor);
+                canvas->setColor(st.fgColor);
             }
 
             canvas->drawText(items_[i], itemRect.adjusted(6, 0, -4, 0),

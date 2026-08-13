@@ -35,15 +35,18 @@ struct ResolvedStyle {
     int16_t paddingRight = 0;
     int16_t paddingBottom = 0;
     std::optional<Gradient> gradient;
+
+    int paddingHorz() const { return paddingLeft + paddingRight; }
+    int paddingVert() const { return paddingTop + paddingBottom; }
 };
 
-// Per-widget style. Fields default to transparent/zero so that
-// resolve() can fall back to theme colors for anything unset.
+// Per-widget style. Colors default to Transparent (unset) so that
+// resolve() can fall back to theme colors for anything not explicitly set.
 struct Style {
-    Color bgColor;
-    Color fgColor;
-    Color borderColor;
-    Color accent;                      // semantic accent (fills the theme accent role)
+    Color bgColor = Color::Transparent;
+    Color fgColor = Color::Transparent;
+    Color borderColor = Color::Transparent;
+    Color accent = Color::Transparent; // semantic accent (fills the theme accent role)
     int borderWidth = 0;
     int borderRadius = 0;
     Font font;
