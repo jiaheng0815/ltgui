@@ -2,6 +2,7 @@
 #include "geometry.h"
 #include "event.h"
 #include "style.h"
+#include "signal.h"
 #include <vector>
 #include <memory>
 
@@ -10,6 +11,7 @@ namespace ltgui {
 class Window;
 class Layout;
 class NativeCanvas;
+class Theme;
 
 // Widget type identifiers — use widgetType() instead of dynamic_cast
 // when you need to check the concrete type of a widget at runtime.
@@ -89,9 +91,14 @@ public:
     [[nodiscard]] Layout* layout() const { return layout_.get(); }
 
     // Style
-    void setStyle(const Style& style) { style_ = style; }
+    void setStyle(const Style& style) { style_ = style; update(); }
     [[nodiscard]] const Style& style() const { return style_; }
     Style& style() { return style_; }
+
+    // Effective style for the current widget state (hovered/pressed/focused/
+    // enabled): state patch > style > theme defaults. Re-evaluated on every
+    // call, so theme switches are picked up automatically on the next paint.
+    [[nodiscard]] ResolvedStyle resolvedStyle() const;
 
     // State
     [[nodiscard]] bool isEnabled() const { return (flags_ & kFlagEnabled) != 0; }
@@ -152,6 +159,11 @@ protected:
 
     void propagateWindow(Window* window);
 
+    // Mouse state bits — subclasses maintain these in handleEvent() and the
+    // resolved style reflects them automatically (hovered/pressed states).
+    bool hovered_ = false;
+    bool pressed_ = false;
+
     // DPI-aware size helper: multiplies (w, h) by the window's DPI scale.
     // Returns the base size if no window is attached.
     [[nodiscard]] Size dpiScaleSize(int w, int h) const;
@@ -191,6 +203,10 @@ private:
     // Reusable buffer for safe child iteration during event dispatch.
     // Pre-allocated capacity avoids heap allocation on every mouse event.
     mutable std::vector<Widget*> dispatchSnapshot_;
+
+    // Repaints this widget when the theme switches — resolvedStyle() is
+    // re-evaluated lazily on paint, so only a repaint is needed.
+    ScopedConnection<const Theme&> themeConn_;
 };
 
 } // namespace ltgui

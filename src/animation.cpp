@@ -556,4 +556,20 @@ void AnimationManager::onAnimStopped() {
     if (activeCount_ > 0) activeCount_--;
 }
 
+// --- AnimatedColor ---
+
+void AnimatedColor::setTarget(const Color& to, int durationMs, Easing e) {
+    start_ = current_;
+    end_ = to;
+    anim_.setStartValue(0.0f);
+    anim_.setEndValue(1.0f);
+    anim_.setDuration(durationMs);
+    anim_.setEasing(e);
+    anim_.setValueCallback([this](float t) {
+        current_ = Color::lerp(start_, end_, t);
+        if (onValue_) onValue_(current_);
+    });
+    anim_.play();
+}
+
 } // namespace ltgui

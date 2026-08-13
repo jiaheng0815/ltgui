@@ -1,6 +1,7 @@
 #include "widget.h"
 #include "window.h"
 #include "layout.h"
+#include "theme.h"
 #include "platform/native_canvas.h"
 #include <algorithm>
 
@@ -8,6 +9,25 @@ namespace ltgui {
 
 Widget::Widget(Widget* parent) : parent_(parent) {
     style_ = Style::defaultStyle();
+    // Repaint when the theme changes so resolvedStyle() reflects the new
+    // theme on the next paint pass. ScopedConnection keeps this safe if the
+    // widget outlives or dies before the ThemeManager singleton.
+    themeConn_ = ScopedConnection(&ThemeManager::instance().onThemeChanged,
+                                  [this](const Theme&) { update(); });
+}
+
+ResolvedStyle Widget::resolvedStyle() const {
+    WidgetState state = WidgetState::Normal;
+    if (!isEnabled()) {
+        state = WidgetState::Disabled;
+    } else if (pressed_) {
+        state = WidgetState::Pressed;
+    } else if (hovered_) {
+        state = WidgetState::Hovered;
+    } else if (hasFocus()) {
+        state = WidgetState::Focused;
+    }
+    return style_.resolve(state, currentTheme());
 }
 
 Widget::~Widget() {

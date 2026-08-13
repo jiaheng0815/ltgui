@@ -20,6 +20,15 @@ struct Color {
 
     uint32_t toARGB() const { return (a << 24) | (r << 16) | (g << 8) | b; }
 
+    // Linear interpolation per channel (alpha included). t=0 -> a, t=1 -> b.
+    static Color lerp(const Color& a, const Color& b, float t) {
+        t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+        auto mix = [t](uint8_t x, uint8_t y) {
+            return static_cast<uint8_t>(x + static_cast<int>((y - x) * t));
+        };
+        return {mix(a.r, b.r), mix(a.g, b.g), mix(a.b, b.b), mix(a.a, b.a)};
+    }
+
     // GPU vertex color: little-endian RGBA byte order.
     // DXGI_FORMAT_R8G8B8A8_UNORM and GL_RGBA+GL_UNSIGNED_BYTE both
     // read bytes at increasing offsets as [R][G][B][A], which in LE

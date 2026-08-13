@@ -1,5 +1,6 @@
 #pragma once
 #include "signal.h"
+#include "color.h"
 #include <cstdint>
 #include <vector>
 #include <functional>
@@ -105,6 +106,40 @@ private:
     float endVal_ = 1.0f;
     ValueCallback onValue_;
     bool delayPhase_ = false;
+};
+
+// Animates a color toward a target over time (hover transitions, etc.).
+// Backed by WidgetAnimation, so it is driven by the AnimationManager tick.
+class AnimatedColor {
+public:
+    AnimatedColor() = default;
+    ~AnimatedColor() = default;
+
+    // Non-copyable (wraps WidgetAnimation, which AnimationManager tracks
+    // by raw pointer).
+    AnimatedColor(const AnimatedColor&) = delete;
+    AnimatedColor& operator=(const AnimatedColor&) = delete;
+    AnimatedColor(AnimatedColor&&) = delete;
+    AnimatedColor& operator=(AnimatedColor&&) = delete;
+
+    // Animate from the current value to `to` over durationMs.
+    void setTarget(const Color& to, int durationMs = 200, Easing e = Easing::EaseOut);
+
+    // Jump immediately to a value (no animation).
+    void setImmediate(const Color& value) { current_ = value; if (onValue_) onValue_(current_); }
+
+    Color current() const { return current_; }
+    bool isAnimating() const { return anim_.isPlaying(); }
+
+    // Invoked on every animation tick with the interpolated color.
+    void setValueCallback(std::function<void(const Color&)> cb) { onValue_ = std::move(cb); }
+
+private:
+    WidgetAnimation anim_;
+    Color current_ = Color::Black;
+    Color start_ = Color::Black;
+    Color end_ = Color::Black;
+    std::function<void(const Color&)> onValue_;
 };
 
 struct Keyframe {

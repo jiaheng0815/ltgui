@@ -240,6 +240,9 @@ public:
         : signal_(sig),
           generation_(sig ? sig->generationWeak() : std::weak_ptr<int>()),
           id_(id) {}
+    // Convenience: connect immediately; disconnects automatically on destruction.
+    ScopedConnection(Signal<Args...>* sig, typename Signal<Args...>::Callback cb)
+        : ScopedConnection(sig, sig ? sig->connect(std::move(cb)) : -1) {}
     ~ScopedConnection() { disconnect(); }
 
     ScopedConnection(const ScopedConnection&) = delete;
