@@ -2,6 +2,8 @@
 #include "doctest/doctest.h"
 #include "ltgui.h"
 #include "mock_canvas.h"
+#include <thread>
+#include <chrono>
 
 using namespace ltgui;
 
@@ -32,6 +34,16 @@ bool dispatch(Widget& w, EventType type, int x, int y, MouseButton button = Mous
     return static_cast<Widget&>(w).handleEvent(e);
 }
 
+// Drives the AnimationManager with real time so 150ms hover transitions
+// complete before the paint assertions.
+void advanceAnimations(int ms) {
+    auto& mgr = AnimationManager::instance();
+    for (int elapsed = 0; elapsed < ms; elapsed += 10) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        mgr.tick();
+    }
+}
+
 } // namespace
 
 TEST_CASE("Button paint states use resolved colors") {
@@ -46,6 +58,7 @@ TEST_CASE("Button paint states use resolved colors") {
 
     SUBCASE("hovered state paints theme accentHover") {
         dispatch(btn, EventType::MouseMove, 20, 20); // inside bounds
+        advanceAnimations(250); // let the 150ms hover transition finish
         paintWidget(btn, g_canvas);
         CHECK(g_canvas.fillCountWithColor(light.accentHover) >= 1);
     }
@@ -53,6 +66,7 @@ TEST_CASE("Button paint states use resolved colors") {
     SUBCASE("pressed state paints theme accentPressed") {
         dispatch(btn, EventType::MouseMove, 20, 20);
         dispatch(btn, EventType::MouseDown, 20, 20);
+        advanceAnimations(250);
         paintWidget(btn, g_canvas);
         CHECK(g_canvas.fillCountWithColor(light.accentPressed) >= 1);
     }
@@ -66,6 +80,7 @@ TEST_CASE("Button paint states use resolved colors") {
     SUBCASE("custom style accent overrides theme accent") {
         btn.style().accent = Color(200, 10, 10);
         dispatch(btn, EventType::MouseMove, 20, 20);
+        advanceAnimations(250);
         paintWidget(btn, g_canvas);
         CHECK(g_canvas.fillCountWithColor(Color(200, 10, 10)) >= 1);
     }
@@ -108,6 +123,7 @@ TEST_CASE("Slider thumb uses accent when hovered") {
     // Hover over the thumb (value 0 -> thumb center at x=16, y=14).
     // The state-aware accent fallback gives hovered state accentHover.
     dispatch(s, EventType::MouseMove, 16, 14);
+    advanceAnimations(250);
     paintWidget(s, g_canvas);
     bool accentStroke = false;
     for (auto& e : g_canvas.ellipses) {

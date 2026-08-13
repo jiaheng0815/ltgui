@@ -8,6 +8,7 @@ namespace ltgui {
 
 Slider::Slider(Widget* parent) : Range(parent) {
     style().bgColor = Color::Transparent;
+    thumbAnim_.setImmediate(resolvedStyle().borderColor);
 }
 
 Size Slider::sizeHint() const {
@@ -62,8 +63,20 @@ void Slider::paintSelf(NativeCanvas* canvas) {
 
     canvas->setColor(st.bgColor);
     canvas->fillEllipse(thumbRect);
-    canvas->setColor(hovered_ || dragging_ ? st.accent : st.borderColor);
+    // Animated while transitioning between normal/hover/active; falls back
+    // to the resolved style once settled (theme-fresh).
+    Color thumbColor = thumbAnim_.isAnimating()
+                           ? thumbAnim_.current()
+                           : (hovered_ || dragging_ ? st.accent : st.borderColor);
+    canvas->setColor(thumbColor);
     canvas->strokeEllipse(thumbRect, 2);
+}
+
+void Slider::animateThumb() {
+    ResolvedStyle st = resolvedStyle();
+    Color target = (hovered_ || dragging_) ? st.accent : st.borderColor;
+    thumbAnim_.setTarget(target, 150, Easing::EaseOut);
+    update();
 }
 
 bool Slider::handleEvent(Event& event) {
@@ -95,7 +108,7 @@ bool Slider::handleEvent(Event& event) {
         bool over = isOverThumb();
         if (over != hovered_) {
             hovered_ = over;
-            update();
+            animateThumb();
         }
         if (dragging_) {
             snapToTrack();
@@ -114,6 +127,7 @@ bool Slider::handleEvent(Event& event) {
             claimFocus();
             if (isOverThumb()) {
                 dragging_ = true;
+                animateThumb();
                 event.accepted = true;
                 return true;
             }
@@ -126,7 +140,7 @@ bool Slider::handleEvent(Event& event) {
     case EventType::MouseUp:
         if (dragging_) {
             dragging_ = false;
-            update();
+            animateThumb();
             event.accepted = true;
             return true;
         }

@@ -1,5 +1,6 @@
 #pragma once
 #include "widgets/range.h"
+#include "animation.h"
 
 namespace ltgui {
 
@@ -16,7 +17,11 @@ protected:
     bool handleEvent(Event& event) override;
 
 private:
+    // Smoothly transitions the thumb outline between normal/hover/active.
+    void animateThumb();
+
     bool dragging_ = false;
+    AnimatedColor thumbAnim_;
 
     int thumbPos() const;
 };

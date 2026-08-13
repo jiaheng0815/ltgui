@@ -1,6 +1,7 @@
 #pragma once
 #include "widgets/textwidget.h"
 #include "signal.h"
+#include "animation.h"
 
 namespace ltgui {
 
@@ -18,6 +19,12 @@ public:
 protected:
     void paintSelf(NativeCanvas* canvas) override;
     bool handleEvent(Event& event) override;
+
+private:
+    // Smoothly transitions the background between normal/hover/pressed.
+    void animateBg();
+
+    AnimatedColor bgAnim_;
 };
 
 } // namespace ltgui

@@ -1,6 +1,5 @@
 #include "widgets/button.h"
 #include "window.h"
-#include "theme.h"
 #include "platform/native_canvas.h"
 
 namespace ltgui {
@@ -8,6 +7,9 @@ namespace ltgui {
 Button::Button(const std::string& text, Widget* parent)
     : TextWidget(text, parent) {
     style().borderRadius = 4;
+    // Seed the background animation with the normal-state color so the
+    // first paint doesn't start from black.
+    bgAnim_.setImmediate(resolvedStyle().bgColor);
 }
 
 Size Button::sizeHint() const {
@@ -24,7 +26,12 @@ void Button::paintSelf(NativeCanvas* canvas) {
 
     // Fill background: accent when interactive (hover/pressed get the
     // theme's state-specific accent automatically), base bg otherwise.
-    Color fillColor = (pressed_ || hovered_) ? st.accent : st.bgColor;
+    // While a state transition is animating, use the eased color; once it
+    // settles, resolvedStyle() is authoritative again (keeps theme switches
+    // fresh without re-styling).
+    Color fillColor = bgAnim_.isAnimating()
+                          ? bgAnim_.current()
+                          : ((pressed_ || hovered_) ? st.accent : st.bgColor);
     canvas->setColor(fillColor);
     if (st.borderRadius > 0) {
         canvas->fillRoundedRect(r, st.borderRadius);
@@ -50,6 +57,13 @@ void Button::paintSelf(NativeCanvas* canvas) {
     canvas->drawText(text_, r, flags);
 }
 
+void Button::animateBg() {
+    ResolvedStyle st = resolvedStyle();
+    Color target = (pressed_ || hovered_) ? st.accent : st.bgColor;
+    bgAnim_.setTarget(target, 150, Easing::EaseOut);
+    update();
+}
+
 bool Button::handleEvent(Event& event) {
     if (!isEnabled()) return false;
 
@@ -58,13 +72,13 @@ bool Button::handleEvent(Event& event) {
         bool inBounds = geometry().contains(event.pos);
         if (inBounds && !hovered_) {
             hovered_ = true;
-            update();
+            animateBg();
         } else if (!inBounds && hovered_) {
             hovered_ = false;
             if (pressed_) {
                 pressed_ = false;
             }
-            update();
+            animateBg();
         }
         if (inBounds) event.accepted = true;
         return inBounds;
@@ -73,7 +87,7 @@ bool Button::handleEvent(Event& event) {
         if (event.button == MouseButton::Left) {
             pressed_ = true;
             claimFocus();
-            update();
+            animateBg();
             event.accepted = true;
             return true;
         }
@@ -81,7 +95,7 @@ bool Button::handleEvent(Event& event) {
     case EventType::MouseUp:
         if (event.button == MouseButton::Left && pressed_) {
             pressed_ = false;
-            update();
+            animateBg();
             if (hovered_) onClicked.emit();
             event.accepted = true;
             return true;
@@ -90,7 +104,7 @@ bool Button::handleEvent(Event& event) {
     case EventType::KeyDown:
         if (event.key == Key::Enter || event.key == Key::Space) {
             pressed_ = true;
-            update();
+            animateBg();
             event.accepted = true;
             return true;
         }
@@ -98,7 +112,7 @@ bool Button::handleEvent(Event& event) {
     case EventType::KeyUp:
         if (event.key == Key::Enter || event.key == Key::Space) {
             pressed_ = false;
-            update();
+            animateBg();
             onClicked.emit();
             event.accepted = true;
             return true;
