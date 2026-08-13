@@ -64,8 +64,7 @@ void ComboBox::setCurrentIndex(int index) {
 
 Size ComboBox::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    float dpi = window() ? window()->dpiScale() : 1.0f;
-    setCachedSizeHint({static_cast<int>(150 * dpi), static_cast<int>(30 * dpi)});
+    setCachedSizeHint(dpiScaleSize(150, 30));
     return cachedSizeHint();
 }
 
@@ -85,7 +84,7 @@ Rect ComboBox::effectiveGeometry() const {
 
 void ComboBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
     canvas->setColor(style().bgColor);
     canvas->fillRoundedRect(r, style().borderRadius);

@@ -118,15 +118,19 @@ void Widget::scheduleRelayout() {
 }
 
 Size Widget::sizeHint() const {
-    if (!(flags_ & kFlagSizeHintDirty)) return cachedSizeHint_;
+    if (!sizeHintCache_.dirty) return sizeHintCache_.value;
     if (layout_) {
-        cachedSizeHint_ = layout_->preferredSize(this);
+        sizeHintCache_.value = layout_->preferredSize(this);
     } else {
-        float dpi = window_ ? window_->dpiScale() : 1.0f;
-        cachedSizeHint_ = {static_cast<int>(100 * dpi), static_cast<int>(24 * dpi)};
+        sizeHintCache_.value = dpiScaleSize(100, 24);
     }
-    flags_ &= ~kFlagSizeHintDirty;
-    return cachedSizeHint_;
+    sizeHintCache_.dirty = false;
+    return sizeHintCache_.value;
+}
+
+Size Widget::dpiScaleSize(int w, int h) const {
+    float dpi = window_ ? window_->dpiScale() : 1.0f;
+    return {static_cast<int>(w * dpi), static_cast<int>(h * dpi)};
 }
 
 void Widget::setLayout(std::unique_ptr<Layout> layout) {
@@ -184,7 +188,7 @@ void Widget::raiseToTop() {
 
 void Widget::propagateWindow(Window* window) {
     window_ = window;
-    flags_ |= kFlagSizeHintDirty;  // canvas availability changed — recompute next time
+    sizeHintCache_.dirty = true;  // canvas availability changed — recompute next time
     for (auto& child : children_) {
         child->propagateWindow(window);
     }
@@ -225,6 +229,28 @@ void Widget::paintBorder(NativeCanvas* canvas) {
         for (int i = 0; i < style_.borderWidth; i++) {
             Rect r = abs.adjusted(i, i, -i, -i);
             canvas->strokeRect(r);
+        }
+    }
+}
+
+void Widget::paintBackground(NativeCanvas* canvas) {
+    Rect r = absoluteRect();
+    canvas->setColor(style_.bgColor);
+    if (style_.borderRadius > 0) {
+        canvas->fillRoundedRect(r, style_.borderRadius);
+    } else {
+        canvas->fillRect(r);
+    }
+    if (style_.borderWidth > 0) {
+        canvas->setColor(style_.borderColor);
+        int bw = style_.borderWidth;
+        int br = style_.borderRadius;
+        if (br > 0) {
+            canvas->strokeRoundedRect(r.adjusted(0, 0, -1, -1), br, bw);
+        } else {
+            for (int i = 0; i < bw; i++) {
+                canvas->strokeRect(r.adjusted(i, i, -i, -i));
+            }
         }
     }
 }
@@ -314,73 +340,61 @@ Widget* Widget::lastFocusableDescendant() {
     return nullptr;
 }
 
+bool Widget::dispatchToChildren(Event& event, bool targeted) {
+    // Snapshot raw pointers — a child handler may mutate children_ via
+    // addChild/removeChild, invalidating iterators into the live vector.
+    auto& snapshot = dispatchSnapshot_;
+    snapshot.clear();
+    snapshot.reserve(children_.size());
+    for (auto& c : children_) snapshot.push_back(c.get());
+
+    Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
+    bool handledAny = false;
+
+    for (auto it = snapshot.rbegin(); it != snapshot.rend(); ++it) {
+        Widget* child = *it;
+        // Verify child still in tree (may have been removed by prior handler)
+        if (std::none_of(children_.begin(), children_.end(),
+                [child](const auto& ptr) { return ptr.get() == child; }))
+            continue;
+        if (!child->isVisible() || !child->isEnabled()) continue;
+
+        if (targeted) {
+            // Only the child under cursor gets the event (MouseDown, MouseWheel)
+            Rect childEff = child->effectiveGeometry().translated(
+                child->geometry_.x, child->geometry_.y);
+            if (!childEff.contains(localPos)) continue;
+        }
+
+        Point savedPos = event.pos;
+        event.pos = localPos;
+        bool handled = child->handleEvent(event);
+        event.pos = savedPos;
+
+        if (targeted && handled) {
+            event.accepted = true;
+            return true;
+        }
+        if (handled) handledAny = true;
+    }
+
+    if (!targeted && handledAny) {
+        event.accepted = true;
+        return true;
+    }
+    return false;
+}
+
 bool Widget::handleEvent(Event& event) {
     if (!isEnabled() || !isVisible()) return false;
 
     switch (event.type) {
     case EventType::MouseDown:
-    case EventType::MouseWheel: {
-        // Targeted dispatch — only the child under the cursor gets the event.
-        // Snapshot raw pointers to guard against children_ mutation during
-        // dispatch (a child's handler may call addChild/removeChild, which
-        // invalidates iterators into the live vector).
-        Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
-        std::vector<Widget*> snapshot;
-        snapshot.reserve(children_.size());
-        for (auto& c : children_) snapshot.push_back(c.get());
-        for (auto it = snapshot.rbegin(); it != snapshot.rend(); ++it) {
-            Widget* child = *it;
-            // Verify the child is still in the tree (it may have been removed
-            // by a handler dispatched earlier in this loop).
-            if (std::none_of(children_.begin(), children_.end(),
-                    [child](const auto& ptr) { return ptr.get() == child; }))
-                continue;
-            if (child->isVisible() && child->isEnabled()) {
-                Rect childEff = child->effectiveGeometry().translated(
-                    child->geometry_.x, child->geometry_.y);
-                if (childEff.contains(localPos)) {
-                    Point savedPos = event.pos;
-                    event.pos = localPos;
-                    bool handled = child->handleEvent(event);
-                    event.pos = savedPos;
-                    if (handled) {
-                        event.accepted = true;
-                        return true;
-                    }
-                }
-            }
-        }
-        break;
-    }
+    case EventType::MouseWheel:
+        return dispatchToChildren(event, /*targeted=*/true);
     case EventType::MouseUp:
-    case EventType::MouseMove: {
-        // Broadcast — every child gets the event so hover/pressed state
-        // can be cleared when the cursor leaves the widget bounds.
-        // Snapshot raw pointers (same rationale as MouseDown/MouseWheel above).
-        Point localPos = {event.pos.x - geometry_.x, event.pos.y - geometry_.y};
-        bool handledAny = false;
-        std::vector<Widget*> snapshot;
-        snapshot.reserve(children_.size());
-        for (auto& c : children_) snapshot.push_back(c.get());
-        for (auto it = snapshot.rbegin(); it != snapshot.rend(); ++it) {
-            Widget* child = *it;
-            if (std::none_of(children_.begin(), children_.end(),
-                    [child](const auto& ptr) { return ptr.get() == child; }))
-                continue;
-            if (child->isVisible() && child->isEnabled()) {
-                Point savedPos = event.pos;
-                event.pos = localPos;
-                if (child->handleEvent(event))
-                    handledAny = true;
-                event.pos = savedPos;
-            }
-        }
-        if (handledAny) {
-            event.accepted = true;
-            return true;
-        }
-        break;
-    }
+    case EventType::MouseMove:
+        return dispatchToChildren(event, /*targeted=*/false);
     default:
         break;
     }

@@ -29,8 +29,7 @@ void Slider::setRange(int min, int max) {
 
 Size Slider::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    float dpi = window() ? window()->dpiScale() : 1.0f;
-    setCachedSizeHint({static_cast<int>(150 * dpi), static_cast<int>(28 * dpi)});
+    setCachedSizeHint(dpiScaleSize(150, 28));
     return cachedSizeHint();
 }
 
@@ -45,7 +44,7 @@ int Slider::thumbPos() const {
 
 void Slider::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
     // Track spans from x+8 to x+width-8 (= width-16 wide)
     int trackW = r.width - 16;

@@ -44,7 +44,7 @@ Size CheckBox::sizeHint() const {
 
 void CheckBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
     int boxSize = 14;
     int boxY = r.y + (r.height - boxSize) / 2;

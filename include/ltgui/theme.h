@@ -68,7 +68,7 @@ public:
 
     void setTheme(const Theme& theme);
     void setThemeByName(const std::string& name);
-    Theme currentTheme() const { return currentTheme_; }
+    const Theme& currentTheme() const { return currentTheme_; }
     std::string currentThemeName() const { return currentTheme_.name; }
 
     void registerTheme(const std::string& name, const Theme& theme);
@@ -86,8 +86,9 @@ private:
     std::unordered_map<std::string, Theme> customThemes_;
 };
 
-// Convenience — delegates to ThemeManager
-inline Theme currentTheme() { return ThemeManager::instance().currentTheme(); }
+// Convenience — delegates to ThemeManager. Returns const ref to avoid
+// copying the entire Theme struct (28 Colors + string) on every call.
+inline const Theme& currentTheme() { return ThemeManager::instance().currentTheme(); }
 void setTheme(const Theme& theme);
 
 } // namespace ltgui

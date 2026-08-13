@@ -38,6 +38,13 @@ public:
     void quit();
     void processEvents();
 
+    // Pump platform-native events (Win32 MSG, X11 events, Cocoa NSEvent).
+    // Blocks for up to timeoutMs milliseconds.  Pass timeoutMs=-1 to block
+    // until an event arrives (WM_QUIT on Win32 unblocks and returns false).
+    // Returns false if the application should exit, true otherwise.
+    // Used internally by run(), tick(), and Dialog::exec().
+    bool pumpPlatformEvents(int timeoutMs = 0);
+
     // Single-frame tick for embedding into external event loops.
     // Pumps pending platform events, ticks timers, and drives animations.
     // Pass timeoutMs=0 to poll without blocking; pass >0 to block up to

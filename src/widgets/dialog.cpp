@@ -8,21 +8,6 @@
 #include "app.h"
 #include "animation.h"
 #include "platform/native_canvas.h"
-#include "platform/platform.h"
-
-#ifdef LTGUI_PLATFORM_WINDOWS
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#undef MessageBox
-#elif defined(LTGUI_PLATFORM_LINUX)
-#include "platform/x11/x11_window.h"
-#include <X11/Xlib.h>
-#include <unistd.h>
-#elif defined(LTGUI_PLATFORM_MACOS)
-#import <Cocoa/Cocoa.h>
-#endif
 
 namespace ltgui {
 
@@ -63,79 +48,25 @@ DialogResult Dialog::exec() {
         return DialogResult::None;
     }
 
-    // Cross-platform inner event loop. We pump platform events AND call
-    // processEvents() so animations, timers, and deferred work progress.
-    // This prevents the rest of the app from freezing during modal dialogs
-    // and works identically on Win32, X11, and Cocoa.
+    // Position the content panel once before entering the event loop,
+    // instead of re-computing it every frame inside paintSelf().
+    positionPanel();
+
+    // Inner event loop: pump platform events and drive animations/timers.
+    // Uses Application::pumpPlatformEvents() shared with run() and tick().
     while (running_) {
         Application::instance().processEvents();
 
-#ifdef LTGUI_PLATFORM_WINDOWS
-        // Win32: pump Windows messages so the dialog remains responsive.
-        // Drain all queued messages first, then WaitMessage() to block
-        // efficiently until the next message arrives.
-        {
-            MSG msg;
-            bool hadMessages = false;
-            while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-                hadMessages = true;
-                if (msg.message == WM_QUIT) {
-                    running_ = false;
-                    Application::instance().quit();
-                    break;
-                }
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
-            // Block only if the queue was empty — avoids busy-waiting
-            if (!hadMessages && running_) {
-                WaitMessage();
-            }
+        // Block with adaptive timeout: ~16ms during animations, 500ms idle.
+        bool hasAnim = AnimationManager::instance().hasActive();
+        int wakeMs = hasAnim ? 16 : 500;
+        if (!Application::instance().pumpPlatformEvents(wakeMs)) {
+            running_ = false;
+            break;
         }
-#elif defined(LTGUI_PLATFORM_LINUX)
-        // X11: block on the display fd to avoid 100% CPU busy-spin.
-        // Use an adaptive timeout: 16ms when animations are active
-        // (for 60 FPS), 500ms when idle — matching Application::run().
-        {
-            int x11Fd = X11Window::displayFd();
-            bool hasAnim = AnimationManager::instance().hasActive();
-            int wakeMs = hasAnim ? 16 : 500;
 
-            if (x11Fd >= 0) {
-                fd_set fds;
-                FD_ZERO(&fds);
-                FD_SET(x11Fd, &fds);
-                struct timeval tv;
-                tv.tv_sec  = wakeMs / 1000;
-                tv.tv_usec = (wakeMs % 1000) * 1000;
-                int ret;
-                do { ret = select(x11Fd + 1, &fds, nullptr, nullptr, &tv); }
-                while (ret < 0 && errno == EINTR);
-            } else {
-                usleep(wakeMs * 1000);
-            }
-        }
-        X11Window::processAllPending();
-#elif defined(LTGUI_PLATFORM_MACOS)
-        // Cocoa: pump one event from the main run loop.
-        // @autoreleasepool prevents autoreleased temporaries (NSEvent,
-        // NSDate, NSString, etc.) from accumulating over the dialog lifetime.
-        @autoreleasepool {
-            NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                                untilDate:[NSDate dateWithTimeIntervalSinceNow:0.001]
-                                   inMode:NSDefaultRunLoopMode
-                                  dequeue:YES];
-            if (event) {
-                [NSApp sendEvent:event];
-            }
-        }
-#endif
         // Drive the fade-in animation so the overlay appears immediately.
-        // (The returned value updates the internal state; the next paint
-        //  pass reads it via fadeAnim_.value() in paintSelf.)
         fadeAnim_.value();
-
-        if (!running_) break;
     }
 
     setVisible(false);
@@ -147,6 +78,20 @@ void Dialog::done(DialogResult result) {
     running_ = false;
     if (resultCallback_) resultCallback_(result);
     update();
+}
+
+void Dialog::positionPanel() {
+    int ww = 640, wh = 480;
+    if (auto* win = window()) {
+        Size sz = win->getSize();
+        ww = sz.width; wh = sz.height;
+    }
+    if (panel_) {
+        int px = (ww - panelW_) / 2;
+        int py = (wh - panelH_) / 2;
+        panel_->setGeometry(Rect(px + 12, py + (title_.empty() ? 12 : 36),
+                                 panelW_ - 24, panelH_ - (title_.empty() ? 24 : 48)));
+    }
 }
 
 void Dialog::paintSelf(NativeCanvas* canvas) {
@@ -167,12 +112,7 @@ void Dialog::paintSelf(NativeCanvas* canvas) {
     int py = (wh - panelH_) / 2;
     Rect panelRect(px, py, panelW_, panelH_);
 
-    if (panel_) {
-        panel_->setGeometry(Rect(px + 12, py + (title_.empty() ? 12 : 36),
-                                 panelW_ - 24, panelH_ - (title_.empty() ? 24 : 48)));
-    }
-
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
     canvas->setColor(t.dialogBg);
     canvas->fillRoundedRect(panelRect, 8);
     canvas->setColor(t.dialogBorder);
@@ -184,7 +124,7 @@ void Dialog::paintSelf(NativeCanvas* canvas) {
         canvas->setColor(t.dialogTitleBg);
         canvas->fillRect(Rect(px, py + 24, panelW_, 8));
         canvas->setColor(t.textPrimary);
-        canvas->setFont(Font::systemDefault(12));
+        canvas->setFont(style().font);
         canvas->drawText(title_, Rect(px + 12, py, panelW_ - 24, 32),
                          NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter);
     }

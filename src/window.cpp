@@ -3,6 +3,7 @@
 #include "widget.h"
 #include "widgets/combobox.h"
 #include "log.h"
+#include "platform/gpu/gpu_canvas.h"
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 #include "platform/win32/win32_window.h"
@@ -161,42 +162,41 @@ void* Window::nativeHandle() const {
     return nullptr;
 }
 
-void Window::handleEvent(Event& event) {
-    switch (event.type) {
-    case EventType::Paint:
-        if (canvas_) {
-            canvas_->beginPaint();
-            // GPU clears the entire backbuffer each frame, so we must
-            // paint the full window regardless of accumulated dirty rects.
-            if (!dirtyValid_ || useGpu_) {
-                Size sz = getSize();
-                accumulatedDirty_ = Rect(0, 0, sz.width, sz.height);
-            }
-            onPaint(canvas_, accumulatedDirty_);
-            canvas_->endPaint();
-            dirtyValid_ = false;
-            event.accepted = true;
-        }
-        break;
-    case EventType::Resize:
-        if (canvas_) {
-            canvas_->resize(event.width, event.height);
-        }
-        if (centralWidget_) {
-            centralWidget_->setGeometry(Rect(0, 0, event.width, event.height));
-        }
-        event.accepted = true;
-        break;
-    case EventType::Close:
-        // Close this window. If it's the last window, quit the application.
-        // Multi-window apps can close individual windows without exiting.
-        LOG_DEBUG("Window", "Close event received, calling closeWindow");
-        Application::instance().closeWindow(this);
-        LOG_DEBUG("Window", "closeWindow returned");
-        event.accepted = true;
-        break;
-    case EventType::KeyDown:
-        // Check registered shortcuts first (before widget dispatch)
+void Window::handlePaintEvent(Event& event) {
+    if (!canvas_) return;
+    canvas_->beginPaint();
+    // GPU clears the entire backbuffer each frame, so we must
+    // paint the full window regardless of accumulated dirty rects.
+    if (!dirtyValid_ || useGpu_) {
+        Size sz = getSize();
+        accumulatedDirty_ = Rect(0, 0, sz.width, sz.height);
+    }
+    onPaint(canvas_, accumulatedDirty_);
+    canvas_->endPaint();
+    dirtyValid_ = false;
+    event.accepted = true;
+}
+
+void Window::handleResizeEvent(Event& event) {
+    if (canvas_) {
+        canvas_->resize(event.width, event.height);
+    }
+    if (centralWidget_) {
+        centralWidget_->setGeometry(Rect(0, 0, event.width, event.height));
+    }
+    event.accepted = true;
+}
+
+void Window::handleCloseEvent(Event& event) {
+    LOG_DEBUG("Window", "Close event received, calling closeWindow");
+    Application::instance().closeWindow(this);
+    LOG_DEBUG("Window", "closeWindow returned");
+    event.accepted = true;
+}
+
+void Window::handleKeyEvent(Event& event) {
+    // KeyDown: check shortcuts first, then tab navigation, then focus widget
+    if (event.type == EventType::KeyDown) {
         for (auto& entry : shortcuts_) {
             if (entry.shortcut.matches(event.key,
                     static_cast<KeyModifier>(event.modifiers))) {
@@ -226,56 +226,50 @@ void Window::handleEvent(Event& event) {
             event.accepted = true;
             return;
         }
-        // Fall through to focus widget
-        if (validateFocusWidget()) {
-            focusWidget_->handleEvent(event);
-        }
-        break;
-    case EventType::KeyUp:
-        if (validateFocusWidget()) {
-            focusWidget_->handleEvent(event);
-        }
-        break;
-    case EventType::MouseDown: {
-        // Close open ComboBox dropdown if click is outside it.
-        // Copy the pointer locally — closeIfClickOutside() may call
-        // closeDropdown() which sets openCombo_ = nullptr, but the
-        // ComboBox itself still exists; using a local copy lets us
-        // safely call the method without re-reading the member.
-        if (auto* combo = openCombo_) {
-            combo->closeIfClickOutside(event.pos);
-        }
-        // If an open ComboBox survived closeIfClickOutside (meaning
-        // the click was inside its effective area), route the event
-        // directly to the ComboBox.  This prevents a sibling widget
-        // that overlaps the dropdown area (e.g. a Slider) from
-        // stealing the click via normal hit-testing z-order.
-        if (openCombo_) {
-            Widget* combo = openCombo_;
-            Point savedPos = event.pos;
-            // ComboBox::handleEvent expects coordinates relative to
-            // the combo's parent widget.  Convert from window-absolute.
-            Widget* p = combo->parent();
-            if (p) {
-                Rect pabs = p->absoluteRect();
-                event.pos = {savedPos.x - pabs.x, savedPos.y - pabs.y};
-            }
-            combo->handleEvent(event);
-            event.pos = savedPos;
-            if (event.accepted) break;
-        }
-        if (centralWidget_) {
-            Widget* prevFocus = focusWidget_;
-            bool handled = centralWidget_->handleEvent(event);
-            // Clear focus only if no widget handled the click — a focused
-            // widget that claims focus again (setFocusWidget no-ops when
-            // same) must not lose focus here.
-            if (focusWidget_ == prevFocus && !handled) {
-                setFocusWidget(nullptr);
-            }
-        }
-        break;
     }
+    // Dispatch to focus widget (both KeyDown and KeyUp)
+    if (validateFocusWidget()) {
+        focusWidget_->handleEvent(event);
+    }
+}
+
+void Window::handleMouseEvent(Event& event) {
+    // Close open ComboBox dropdown if click is outside it.
+    if (auto* combo = openCombo_) {
+        combo->closeIfClickOutside(event.pos);
+    }
+    // If an open ComboBox survived closeIfClickOutside, route the event
+    // directly to the ComboBox to prevent sibling widget click stealing.
+    if (openCombo_) {
+        Widget* combo = openCombo_;
+        Point savedPos = event.pos;
+        Widget* p = combo->parent();
+        if (p) {
+            Rect pabs = p->absoluteRect();
+            event.pos = {savedPos.x - pabs.x, savedPos.y - pabs.y};
+        }
+        combo->handleEvent(event);
+        event.pos = savedPos;
+        if (event.accepted) return;
+    }
+    if (centralWidget_) {
+        Widget* prevFocus = focusWidget_;
+        bool handled = centralWidget_->handleEvent(event);
+        // Clear focus only if no widget handled the click
+        if (focusWidget_ == prevFocus && !handled) {
+            setFocusWidget(nullptr);
+        }
+    }
+}
+
+void Window::handleEvent(Event& event) {
+    switch (event.type) {
+    case EventType::Paint:      handlePaintEvent(event);   break;
+    case EventType::Resize:     handleResizeEvent(event);  break;
+    case EventType::Close:      handleCloseEvent(event);   break;
+    case EventType::KeyDown:
+    case EventType::KeyUp:      handleKeyEvent(event);     break;
+    case EventType::MouseDown:  handleMouseEvent(event);   break;
     default:
         if (centralWidget_) {
             centralWidget_->handleEvent(event);

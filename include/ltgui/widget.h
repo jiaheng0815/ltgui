@@ -3,7 +3,6 @@
 #include "event.h"
 #include "style.h"
 #include <vector>
-#include <string>
 #include <memory>
 
 namespace ltgui {
@@ -43,11 +42,11 @@ public:
     virtual ~Widget();
 
     // Tree
-    Widget* parent() const { return parent_; }
+    [[nodiscard]] Widget* parent() const { return parent_; }
     Widget* addChild(std::unique_ptr<Widget> child);
     std::unique_ptr<Widget> removeChild(Widget* child);
-    const std::vector<std::unique_ptr<Widget>>& children() const { return children_; }
-    Widget* childAt(int index) const;
+    [[nodiscard]] const std::vector<std::unique_ptr<Widget>>& children() const { return children_; }
+    [[nodiscard]] Widget* childAt(int index) const;
 
     template<typename T, typename... Args>
     T* makeChild(Args&&... args) {
@@ -58,10 +57,10 @@ public:
     }
 
     // Geometry
-    Rect geometry() const { return geometry_; }
+    [[nodiscard]] Rect geometry() const { return geometry_; }
     virtual void setGeometry(const Rect& rect);
-    virtual Size sizeHint() const;
-    Rect absoluteRect() const;
+    [[nodiscard]] virtual Size sizeHint() const;
+    [[nodiscard]] Rect absoluteRect() const;
 
     int x() const { return geometry_.x; }
     int y() const { return geometry_.y; }
@@ -71,7 +70,7 @@ public:
     // Hit test area — returns rect in this widget's local coordinates
     // (origin at 0,0). Callers must translate by the widget's position
     // within its parent when comparing against parent-space coordinates.
-    virtual Rect effectiveGeometry() const {
+    [[nodiscard]] virtual Rect effectiveGeometry() const {
         Rect r = {0, 0, geometry_.width, geometry_.height};
         for (auto& child : children_) {
             if (child->isVisible()) {
@@ -85,24 +84,24 @@ public:
 
     // Layout
     void setLayout(std::unique_ptr<Layout> layout);
-    Layout* layout() const { return layout_.get(); }
+    [[nodiscard]] Layout* layout() const { return layout_.get(); }
 
     // Style
     void setStyle(const Style& style) { style_ = style; }
-    const Style& style() const { return style_; }
+    [[nodiscard]] const Style& style() const { return style_; }
     Style& style() { return style_; }
 
     // State
-    bool isEnabled() const { return (flags_ & kFlagEnabled) != 0; }
+    [[nodiscard]] bool isEnabled() const { return (flags_ & kFlagEnabled) != 0; }
     void setEnabled(bool enabled);
-    bool isVisible() const { return (flags_ & kFlagVisible) != 0; }
+    [[nodiscard]] bool isVisible() const { return (flags_ & kFlagVisible) != 0; }
     void setVisible(bool visible);
-    bool hasFocus() const { return (flags_ & kFlagFocused) != 0; }
+    [[nodiscard]] bool hasFocus() const { return (flags_ & kFlagFocused) != 0; }
     void raiseToTop();
 
-    void invalidateSizeHint() { flags_ |= kFlagSizeHintDirty; if (parent_) parent_->invalidateSizeHint(); }
+    void invalidateSizeHint() { sizeHintCache_.dirty = true; if (parent_) parent_->invalidateSizeHint(); }
     void scheduleRelayout();
-    Window* window() const { return window_; }
+    [[nodiscard]] Window* window() const { return window_; }
     void setWindow(Window* window);
     void claimFocus();
 
@@ -115,49 +114,73 @@ public:
     virtual bool handleEvent(Event& event);
 
     // Hit testing — returns the deepest child at pos (or this)
-    virtual Widget* hitTest(const Point& pos);
+    [[nodiscard]] virtual Widget* hitTest(const Point& pos);
 
     // Fast type check — avoids RTTI/dynamic_cast for sibling iteration.
     // Subclasses override this to return their WidgetType enum value.
-    virtual WidgetType widgetType() const { return WidgetType::Base; }
+    [[nodiscard]] virtual WidgetType widgetType() const { return WidgetType::Base; }
 
     // Whether this widget can receive keyboard focus via Tab navigation.
     // Default is false — only interactive widgets override to return true.
-    virtual bool canAcceptFocus() const { return false; }
+    [[nodiscard]] virtual bool canAcceptFocus() const { return false; }
 
     // Focus chain: returns the next/previous focusable widget in tree order.
     // Override to customize tab navigation. Window uses these for Tab/Shift+Tab.
-    virtual Widget* nextFocusWidget();
-    virtual Widget* previousFocusWidget();
-    Widget* lastFocusableDescendant();
+    [[nodiscard]] virtual Widget* nextFocusWidget();
+    [[nodiscard]] virtual Widget* previousFocusWidget();
+    [[nodiscard]] Widget* lastFocusableDescendant();
 
 protected:
     virtual void paintSelf(NativeCanvas* canvas);
     virtual void paintChildren(NativeCanvas* canvas, const Rect& dirtyRect);
     virtual void paintBorder(NativeCanvas* canvas);
 
+    // Paint background fill (using style().bgColor) and optional border
+    // (using style().borderColor + style().borderWidth). Most widgets
+    // call this at the start of paintSelf() for consistent appearance.
+    void paintBackground(NativeCanvas* canvas);
+
     void propagateWindow(Window* window);
 
-    // sizeHint cache support for subclasses
-    bool sizeHintDirty() const { return (flags_ & kFlagSizeHintDirty) != 0; }
-    Size cachedSizeHint() const { return cachedSizeHint_; }
-    void setCachedSizeHint(const Size& s) const { cachedSizeHint_ = s; flags_ &= ~kFlagSizeHintDirty; }
+    // DPI-aware size helper: multiplies (w, h) by the window's DPI scale.
+    // Returns the base size if no window is attached.
+    [[nodiscard]] Size dpiScaleSize(int w, int h) const;
+
+    // sizeHint cache support for subclasses — the cache is the ONLY mutable
+    // state; all other flags are only modified through non-const paths.
+    [[nodiscard]] bool sizeHintDirty() const { return sizeHintCache_.dirty; }
+    [[nodiscard]] Size cachedSizeHint() const { return sizeHintCache_.value; }
+    void setCachedSizeHint(const Size& s) const { sizeHintCache_.value = s; sizeHintCache_.dirty = false; }
 
 private:
+    // Dispatch an event to children. When `targeted` is true, only the child
+    // under the cursor receives the event (MouseDown, MouseWheel). When false,
+    // every child receives it (MouseUp, MouseMove).
+    bool dispatchToChildren(Event& event, bool targeted);
     Widget* parent_ = nullptr;
     std::vector<std::unique_ptr<Widget>> children_;
     Rect geometry_;
     std::unique_ptr<Layout> layout_;
     Style style_;
-    mutable uint8_t flags_ = kFlagEnabled | kFlagVisible | kFlagNeedsLayout | kFlagSizeHintDirty;
-    static constexpr uint8_t kFlagEnabled       = 1 << 0;
-    static constexpr uint8_t kFlagVisible       = 1 << 1;
-    static constexpr uint8_t kFlagFocused       = 1 << 2;
-    static constexpr uint8_t kFlagNeedsLayout   = 1 << 3;
-    static constexpr uint8_t kFlagSizeHintDirty = 1 << 4;
+    uint8_t flags_ = kFlagEnabled | kFlagVisible | kFlagNeedsLayout;
+    static constexpr uint8_t kFlagEnabled     = 1 << 0;
+    static constexpr uint8_t kFlagVisible     = 1 << 1;
+    static constexpr uint8_t kFlagFocused     = 1 << 2;
+    static constexpr uint8_t kFlagNeedsLayout = 1 << 3;
     Window* window_ = nullptr;
 
-    mutable Size cachedSizeHint_;
+    // Only the sizeHint cache is mutable — it's updated lazily in the
+    // const-qualified sizeHint() method.  All other state is guarded by
+    // non-mutable flags_ above.
+    struct SizeHintCache {
+        Size value;
+        bool dirty = true;
+    };
+    mutable SizeHintCache sizeHintCache_;
+
+    // Reusable buffer for safe child iteration during event dispatch.
+    // Pre-allocated capacity avoids heap allocation on every mouse event.
+    mutable std::vector<Widget*> dispatchSnapshot_;
 };
 
 } // namespace ltgui

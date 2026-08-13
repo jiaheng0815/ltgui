@@ -66,7 +66,7 @@ Size RadioButton::sizeHint() const {
 
 void RadioButton::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
     int circleSize = 14;
     int circleY = r.y + (r.height - circleSize) / 2;

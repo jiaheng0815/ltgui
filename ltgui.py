@@ -118,7 +118,7 @@ def resolve_compiler(compiler_arg):
 
 # --- Flag parsing ---
 def parse_flags(args):
-    """Parse --key value and -k value flags from args.
+    """Parse --key value, --key=value, and -k value flags from args.
     Returns (positional_args, flags_dict).
     Boolean flags (no value) get the value True.
     """
@@ -127,12 +127,16 @@ def parse_flags(args):
     i = 0
     while i < len(args):
         if args[i].startswith("--"):
-            key = args[i][2:]
-            if i + 1 < len(args) and not args[i + 1].startswith("-"):
-                flags[key] = args[i + 1]
+            # Support --key=value syntax
+            if "=" in args[i]:
+                key, _, value = args[i][2:].partition("=")
+                flags[key] = value
+                i += 1
+            elif i + 1 < len(args) and not args[i + 1].startswith("-"):
+                flags[args[i][2:]] = args[i + 1]
                 i += 2
             else:
-                flags[key] = True
+                flags[args[i][2:]] = True
                 i += 1
         elif args[i].startswith("-") and len(args[i]) > 2 and args[i][1].isalpha() and args[i][2:].isdigit():
             # Combined short flag: -j4, -O2 (letter + digits)
@@ -438,13 +442,15 @@ def build_lib(platform, is_release, compiler, is_msvc):
     cprint(f"  Created {lib_path}", Color.GREEN)
     return lib_path
 
-def build_example(name, platform, is_release, lib_path, compiler, is_msvc):
-    src = os.path.join(EXAMPLES_DIR, name + ".cpp")
+def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_msvc):
+    """Build a single executable from src_dir/<name>.cpp. Returns True on success."""
+    src = os.path.join(src_dir, name + ".cpp")
     if not os.path.exists(src):
-        cprint(f"Example '{name}' not found at {src}", Color.RED)
+        cprint(f"Program '{name}' not found at {src}", Color.RED)
         return False
 
-    exe_path = os.path.join(BUILD_DIR, name + (".exe" if platform == "windows" else ""))
+    exe_ext = ".exe" if platform == "windows" else ""
+    exe_path = os.path.join(BUILD_DIR, name + exe_ext)
 
     if is_msvc:
         flags = [compiler, "/nologo", "/std:c++17", "/EHsc"]
@@ -471,7 +477,7 @@ def build_example(name, platform, is_release, lib_path, compiler, is_msvc):
         flags += get_platform_libs(platform)
         flags += ["-o", exe_path]
 
-    cprint(f"  Building example: {name}...", Color.CYAN)
+    cprint(f"  Building: {name}...", Color.CYAN)
     result = subprocess.run(flags, capture_output=True, text=True)
     if result.returncode != 0:
         cprint(f"  Error building {name}:", Color.RED, bold=True)
@@ -480,49 +486,12 @@ def build_example(name, platform, is_release, lib_path, compiler, is_msvc):
 
     cprint(f"  Created {exe_path}", Color.GREEN)
     return True
+
+def build_example(name, platform, is_release, lib_path, compiler, is_msvc):
+    return build_program(name, EXAMPLES_DIR, platform, is_release, lib_path, compiler, is_msvc)
 
 def build_app(name, platform, is_release, lib_path, compiler, is_msvc):
-    src = os.path.join(APP_DIR, name + ".cpp")
-    if not os.path.exists(src):
-        cprint(f"App '{name}' not found at {src}", Color.RED)
-        return False
-
-    exe_path = os.path.join(BUILD_DIR, name + (".exe" if platform == "windows" else ""))
-
-    if is_msvc:
-        flags = [compiler, "/nologo", "/std:c++17", "/EHsc"]
-        if is_release:
-            flags += ["/O2", "/DNDEBUG"]
-        else:
-            flags += ["/Zi", "/Od"]
-        flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
-        flags += get_platform_flags(platform, is_msvc=True)
-        flags += [f"/Fe:{exe_path}"]
-        flags += [src]
-        flags += ["/link", lib_path]
-        flags += get_platform_libs(platform, is_msvc=True)
-        flags += ["/SUBSYSTEM:CONSOLE"]
-    else:
-        flags = [compiler, "-std=c++17", "-fexec-charset=UTF-8"]
-        if is_release:
-            flags += ["-O2", "-DNDEBUG"]
-        else:
-            flags += ["-g", "-O0"]
-        flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
-        flags += get_platform_flags(platform)
-        flags += [src, lib_path]
-        flags += get_platform_libs(platform)
-        flags += ["-o", exe_path]
-
-    cprint(f"  Building app: {name}...", Color.CYAN)
-    result = subprocess.run(flags, capture_output=True, text=True)
-    if result.returncode != 0:
-        cprint(f"  Error building {name}:", Color.RED, bold=True)
-        cprint(result.stderr or result.stdout or "(no output)", Color.RED)
-        return False
-
-    cprint(f"  Created {exe_path}", Color.GREEN)
-    return True
+    return build_program(name, APP_DIR, platform, is_release, lib_path, compiler, is_msvc)
 
 # --- SDK export ---
 
@@ -1008,6 +977,42 @@ def cmd_run(positional, flags):
     cprint(f"\nRunning {exe_name}...\n", Color.MAGENTA, bold=True)
     subprocess.run([exe_path])
 
+def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
+    """Build a single test executable. Returns the exe path or None on failure."""
+    src = os.path.join(TEST_DIR, tf)
+    exe_name = tf[:-4] + (".exe" if platform == "windows" else "")
+    exe_path = os.path.join(BUILD_DIR, exe_name)
+
+    vendor_include = os.path.join(SCRIPT_DIR, "vendor")
+
+    if is_msvc:
+        flags = [compiler, "/nologo", "/std:c++17", "/EHsc", "/Zi", "/Od"]
+        flags += ["/I", INCLUDE_DIR, "/I", vendor_include]
+        flags += get_platform_flags(platform, is_msvc=True)
+        flags += [f"/Fe:{exe_path}"]
+        flags += [src]
+        flags += ["/link", lib_path]
+        flags += get_platform_libs(platform, is_msvc=True)
+        flags += ["/SUBSYSTEM:CONSOLE"]
+    else:
+        flags = [compiler, "-std=c++17", "-g", "-O0", "-fexec-charset=UTF-8"]
+        if platform == "windows":
+            flags.append("-mconsole")
+        flags += ["-I", INCLUDE_DIR, "-I", vendor_include]
+        flags += get_platform_flags(platform)
+        flags += [src, lib_path]
+        flags += get_platform_libs(platform)
+        flags += ["-o", exe_path]
+
+    result = subprocess.run(flags, capture_output=True, text=True)
+    if result.returncode != 0:
+        cprint(f"  {tf}... ", Color.CYAN, end="")
+        cprint("COMPILE ERROR", Color.RED)
+        for line in result.stderr.strip().split('\n')[-4:]:
+            cprint(f"    {line.strip()}", Color.RED)
+        return None
+    return exe_path
+
 def cmd_test(positional, flags):
     """Build and run all tests in test/."""
     compiler, is_msvc = resolve_compiler(flags.get("compiler"))
@@ -1031,39 +1036,12 @@ def cmd_test(positional, flags):
     failed = 0
 
     for tf in test_files:
-        src = os.path.join(TEST_DIR, tf)
-        exe_name = tf[:-4] + (".exe" if platform == "windows" else "")
-        exe_path = os.path.join(BUILD_DIR, exe_name)
-
-        if is_msvc:
-            flags_list = [compiler, "/nologo", "/std:c++17", "/EHsc",
-                          "/Zi", "/Od"]
-            flags_list += ["/I", INCLUDE_DIR, "/I", os.path.join(SCRIPT_DIR, "vendor")]
-            flags_list += get_platform_flags(platform, is_msvc=True)
-            flags_list += [f"/Fe:{exe_path}"]
-            flags_list += [src]
-            flags_list += ["/link", lib_path]
-            flags_list += get_platform_libs(platform, is_msvc=True)
-            flags_list += ["/SUBSYSTEM:CONSOLE"]
-        else:
-            flags_list = [compiler, "-std=c++17", "-g", "-O0"]
-            if platform == "windows":
-                flags_list.append("-mconsole")
-            flags_list += ["-I", INCLUDE_DIR, "-I", os.path.join(SCRIPT_DIR, "vendor")]
-            flags_list += get_platform_flags(platform)
-            flags_list += [src, lib_path]
-            flags_list += get_platform_libs(platform)
-            flags_list += ["-o", exe_path]
-
-        cprint(f"  {tf}... ", Color.CYAN, end="")
-        result = subprocess.run(flags_list, capture_output=True, text=True)
-        if result.returncode != 0:
-            cprint("COMPILE ERROR", Color.RED)
-            for line in result.stderr.strip().split('\n')[-4:]:
-                cprint(f"    {line.strip()}", Color.RED)
+        exe_path = build_test_exe(tf, platform, lib_path, compiler, is_msvc)
+        if not exe_path:
             failed += 1
             continue
 
+        cprint(f"  {tf}... ", Color.CYAN, end="")
         result = subprocess.run([exe_path], capture_output=True, text=True)
         if result.returncode == 0:
             cprint("PASS", Color.GREEN)
@@ -1101,11 +1079,8 @@ def cmd_info(positional, flags):
     apps = sorted([f[:-4] for f in os.listdir(APP_DIR) if f.endswith(".cpp")]) if os.path.exists(APP_DIR) else []
     tests = sorted([f[:-4] for f in os.listdir(TEST_DIR) if f.endswith(".cpp")]) if os.path.exists(TEST_DIR) else []
 
-    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
-
     cprint("ltgui Project Info", Color.BLUE, bold=True)
     print(f"  Platform:      {platform} ({sys.platform})")
-    print(f"  Compiler:      {compiler}")
     print(f"  Python:        {sys.version.split()[0]}")
     print(f"  CPU cores:     {os.cpu_count() or 'unknown'}")
     print()

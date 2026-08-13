@@ -1,230 +1,174 @@
 #include "theme.h"
 #include "app.h"
 #include "window.h"
+#include <cstring>
+#include <unordered_map>
 
 namespace ltgui {
 
-// --- Theme presets ---
+// --- Theme preset color data (table-driven) ---
+// Each preset is a flat array of 28 RGBA tuples matching the field order:
+//   bgPrimary, bgSecondary, bgTertiary, textPrimary, textSecondary,
+//   textDisabled, accent, accentHover, accentPressed, border, borderFocus,
+//   scrollbarTrack, scrollbarThumb, selectionBg, dialogBg, dialogTitleBg,
+//   dialogBorder, tableHeaderBg, tableRowAlt, tableBorder, menuBarBg,
+//   menuItemSelected, tooltipBg, tooltipBorder, scrollbarHover,
+//   scrollbarActive, progressBarFill, progressBarTrack
 
-Theme Theme::Light() {
+namespace {
+
+// Each theme preset is 28 packed ARGB colors (A in high byte, R/G/B in low bytes).
+// Field order must match the Color member declaration order in Theme.
+struct PresetDef {
+    const char* name;
+    uint32_t c[28];
+};
+
+// Helper to decode ARGB uint32_t → Color (matches Color::toARGB layout)
+inline Color decodeARGB(uint32_t v) {
+    return Color((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF, (v >> 24) & 0xFF);
+}
+
+// Macros only for compact color literals: ARGB(a,r,g,b) packs to 0xAARRGGBB
+#define C(r,g,b)    0xFF000000u | ((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(b)
+#define CA(r,g,b,a) ((uint32_t)(a) << 24)  | ((uint32_t)(r) << 16) | ((uint32_t)(g) << 8) | (uint32_t)(b)
+
+// Note: single braces for the array, not double. PresetDef = {name, {c0,c1,...,c27}}
+constexpr PresetDef kPresets[] = {
+  {"Light", {
+    C(248,248,248), C(255,255,255), C(238,238,238),
+    C( 30, 30, 30), C(120,120,120), C(180,180,180),
+    C(  0,120,215), C(  0,140,235), C(  0, 90,175),
+    C(200,200,200), C(  0,120,215), C(240,240,240),
+    C(190,190,190), C(  0,120,215), C(255,255,255),
+    C(240,240,240), C(200,200,200), C(240,240,240),
+    C(248,248,248), C(220,220,220), C(248,248,248),
+    C(  0,120,215), C(255,255,225), C(200,200,180),
+    C(160,160,160), C(120,120,120), C(  0,120,215),
+    C(230,230,230),
+  }},
+  {"Dark", {
+    C( 30, 30, 30), C( 45, 45, 45), C( 55, 55, 55),
+    C(220,220,220), C(150,150,150), C( 90, 90, 90),
+    C(  0,140,235), C(  0,160,255), C(  0,110,205),
+    C( 80, 80, 80), C(  0,140,235), C( 50, 50, 50),
+    C(100,100,100), C(  0,100,190), C( 45, 45, 45),
+    C( 35, 35, 35), C( 80, 80, 80), C( 50, 50, 50),
+    C( 40, 40, 40), C( 70, 70, 70), C( 35, 35, 35),
+    C(  0,140,235), C( 60, 60, 40), C(100,100, 80),
+    C(130,130,130), C(160,160,160), C(  0,140,235),
+    C( 60, 60, 60),
+  }},
+  {"DarkBlue", {
+    C( 20, 25, 35), C( 28, 34, 46), C( 36, 43, 58),
+    C(210,218,235), C(140,150,170), C( 80, 85, 95),
+    C( 70,140,220), C( 90,160,240), C( 50,110,190),
+    C( 55, 65, 85), C( 70,140,220), C( 30, 36, 50),
+    C( 60, 70, 95), C( 60,100,180), C( 28, 34, 46),
+    C( 22, 28, 38), C( 55, 65, 85), C( 32, 40, 54),
+    C( 26, 32, 42), C( 50, 60, 78), C( 22, 28, 38),
+    C( 70,140,220), C( 40, 45, 58), C( 65, 75, 95),
+    C( 80, 92,118), C(100,112,138), C( 70,140,220),
+    C( 36, 43, 58),
+  }},
+  {"HighContrast", {
+    C(  0,  0,  0), C( 15, 15, 15), C( 30, 30, 30),
+    C(255,255,255), C(200,255,  0), C(100,100,100),
+    C(  0,255,255), C( 80,255,255), C(  0,200,200),
+    C(255,255,255), C(  0,255,255), C( 30, 30, 30),
+    C(200,200,200), C(  0,100,200), C( 15, 15, 15),
+    C(  0,  0,  0), C(255,255,255), C( 30, 30, 30),
+    C( 20, 20, 20), C(255,255,255), C(  0,  0,  0),
+    C(  0,255,255), C( 40, 40,  0), C(200,255,  0),
+    C(230,230,230), C(255,255,255), C(  0,255,255),
+    C( 30, 30, 30),
+  }},
+  {"Solarized", {
+    C(  0, 43, 54), C(  7, 54, 66), C(  0, 43, 54),
+    C(131,148,150), C( 88,110,117), C( 50, 65, 70),
+    C( 38,139,210), C( 60,160,230), C( 20,110,180),
+    C( 55, 78, 85), C( 38,139,210), C(  0, 43, 54),
+    C( 55, 78, 85), C( 38,139,210), C(  7, 54, 66),
+    C(  0, 43, 54), C( 55, 78, 85), C(  0, 43, 54),
+    C(  5, 48, 60), C( 55, 78, 85), C(  0, 43, 54),
+    C( 38,139,210), C(  7, 54, 66), C( 55, 78, 85),
+    C( 80,105,112), C(100,125,132), C( 38,139,210),
+    C(  0, 43, 54),
+  }},
+  {"Nord", {
+    C( 46, 52, 64), C( 59, 66, 82), C( 67, 76, 94),
+    C(236,239,244), C(129,142,165), C( 76, 86,106),
+    C(136,192,208), C(158,212,228), C(114,172,188),
+    C( 67, 76, 94), C(136,192,208), C( 46, 52, 64),
+    C( 76, 86,106), C( 94,129,172), C( 59, 66, 82),
+    C( 46, 52, 64), C( 67, 76, 94), C( 46, 52, 64),
+    C( 56, 62, 78), C( 67, 76, 94), C( 46, 52, 64),
+    C(136,192,208), C( 59, 66, 82), C( 76, 86,106),
+    C( 94,104,124), C(112,122,142), C(136,192,208),
+    C( 46, 52, 64),
+  }},
+};
+
+#undef C
+#undef CA
+
+// Pointer-to-member table: maps field index → Color member in Theme.
+// The order MUST match the kPresets color array order.
+using ColorMemberPtr = Color Theme::*;
+constexpr ColorMemberPtr kColorFields[28] = {
+    &Theme::bgPrimary,       &Theme::bgSecondary,    &Theme::bgTertiary,
+    &Theme::textPrimary,     &Theme::textSecondary,  &Theme::textDisabled,
+    &Theme::accent,          &Theme::accentHover,    &Theme::accentPressed,
+    &Theme::border,          &Theme::borderFocus,    &Theme::scrollbarTrack,
+    &Theme::scrollbarThumb,  &Theme::selectionBg,    &Theme::dialogBg,
+    &Theme::dialogTitleBg,   &Theme::dialogBorder,   &Theme::tableHeaderBg,
+    &Theme::tableRowAlt,     &Theme::tableBorder,    &Theme::menuBarBg,
+    &Theme::menuItemSelected,&Theme::tooltipBg,      &Theme::tooltipBorder,
+    &Theme::scrollbarHover,  &Theme::scrollbarActive,&Theme::progressBarFill,
+    &Theme::progressBarTrack,
+};
+
+Theme makeTheme(const PresetDef& p) {
     Theme t;
-    t.name = "Light";
-    t.bgPrimary         = Color(248, 248, 248);
-    t.bgSecondary       = Color(255, 255, 255);
-    t.bgTertiary        = Color(238, 238, 238);
-    t.textPrimary       = Color(30, 30, 30);
-    t.textSecondary     = Color(120, 120, 120);
-    t.textDisabled      = Color(180, 180, 180);
-    t.accent            = Color(0, 120, 215);
-    t.accentHover       = Color(0, 140, 235);
-    t.accentPressed     = Color(0, 90, 175);
-    t.border            = Color(200, 200, 200);
-    t.borderFocus       = Color(0, 120, 215);
-    t.scrollbarTrack    = Color(240, 240, 240);
-    t.scrollbarThumb    = Color(190, 190, 190);
-    t.selectionBg       = Color(0, 120, 215);
-    t.dialogBg          = Color(255, 255, 255);
-    t.dialogTitleBg     = Color(240, 240, 240);
-    t.dialogBorder      = Color(200, 200, 200);
-    t.tableHeaderBg     = Color(240, 240, 240);
-    t.tableRowAlt       = Color(248, 248, 248);
-    t.tableBorder       = Color(220, 220, 220);
-    t.menuBarBg         = Color(248, 248, 248);
-    t.menuItemSelected  = Color(0, 120, 215);
-    t.tooltipBg         = Color(255, 255, 225);
-    t.tooltipBorder     = Color(200, 200, 180);
-    t.scrollbarHover    = Color(160, 160, 160);
-    t.scrollbarActive   = Color(120, 120, 120);
-    t.progressBarFill   = Color(0, 120, 215);
-    t.progressBarTrack  = Color(230, 230, 230);
+    t.name = p.name;
+    for (int i = 0; i < 28; ++i) {
+        t.*(kColorFields[i]) = decodeARGB(p.c[i]);
+    }
     return t;
 }
 
-Theme Theme::Dark() {
-    Theme t;
-    t.name = "Dark";
-    t.bgPrimary         = Color(30, 30, 30);
-    t.bgSecondary       = Color(45, 45, 45);
-    t.bgTertiary        = Color(55, 55, 55);
-    t.textPrimary       = Color(220, 220, 220);
-    t.textSecondary     = Color(150, 150, 150);
-    t.textDisabled      = Color(90, 90, 90);
-    t.accent            = Color(0, 140, 235);
-    t.accentHover       = Color(0, 160, 255);
-    t.accentPressed     = Color(0, 110, 205);
-    t.border            = Color(80, 80, 80);
-    t.borderFocus       = Color(0, 140, 235);
-    t.scrollbarTrack    = Color(50, 50, 50);
-    t.scrollbarThumb    = Color(100, 100, 100);
-    t.selectionBg       = Color(0, 100, 190);
-    t.dialogBg          = Color(45, 45, 45);
-    t.dialogTitleBg     = Color(35, 35, 35);
-    t.dialogBorder      = Color(80, 80, 80);
-    t.tableHeaderBg     = Color(50, 50, 50);
-    t.tableRowAlt       = Color(40, 40, 40);
-    t.tableBorder       = Color(70, 70, 70);
-    t.menuBarBg         = Color(35, 35, 35);
-    t.menuItemSelected  = Color(0, 140, 235);
-    t.tooltipBg         = Color(60, 60, 40);
-    t.tooltipBorder     = Color(100, 100, 80);
-    t.scrollbarHover    = Color(130, 130, 130);
-    t.scrollbarActive   = Color(160, 160, 160);
-    t.progressBarFill   = Color(0, 140, 235);
-    t.progressBarTrack  = Color(60, 60, 60);
-    return t;
+// Preset factory map: name → index into kPresets
+const std::unordered_map<std::string, int>& presetMap() {
+    static const std::unordered_map<std::string, int> m = {
+        {"Light",        0},
+        {"Dark",         1},
+        {"DarkBlue",     2},
+        {"HighContrast", 3},
+        {"Solarized",    4},
+        {"Nord",         5},
+    };
+    return m;
 }
 
-Theme Theme::DarkBlue() {
-    Theme t;
-    t.name = "DarkBlue";
-    t.bgPrimary         = Color(20, 25, 35);
-    t.bgSecondary       = Color(28, 34, 46);
-    t.bgTertiary        = Color(36, 43, 58);
-    t.textPrimary       = Color(210, 218, 235);
-    t.textSecondary     = Color(140, 150, 170);
-    t.textDisabled      = Color(80, 85, 95);
-    t.accent            = Color(70, 140, 220);
-    t.accentHover       = Color(90, 160, 240);
-    t.accentPressed     = Color(50, 110, 190);
-    t.border            = Color(55, 65, 85);
-    t.borderFocus       = Color(70, 140, 220);
-    t.scrollbarTrack    = Color(30, 36, 50);
-    t.scrollbarThumb    = Color(60, 70, 95);
-    t.selectionBg       = Color(60, 100, 180);
-    t.dialogBg          = Color(28, 34, 46);
-    t.dialogTitleBg     = Color(22, 28, 38);
-    t.dialogBorder      = Color(55, 65, 85);
-    t.tableHeaderBg     = Color(32, 40, 54);
-    t.tableRowAlt       = Color(26, 32, 42);
-    t.tableBorder       = Color(50, 60, 78);
-    t.menuBarBg         = Color(22, 28, 38);
-    t.menuItemSelected  = Color(70, 140, 220);
-    t.tooltipBg         = Color(40, 45, 58);
-    t.tooltipBorder     = Color(65, 75, 95);
-    t.scrollbarHover    = Color(80, 92, 118);
-    t.scrollbarActive   = Color(100, 112, 138);
-    t.progressBarFill   = Color(70, 140, 220);
-    t.progressBarTrack  = Color(36, 43, 58);
-    return t;
-}
+} // anonymous namespace
 
-Theme Theme::HighContrast() {
-    Theme t;
-    t.name = "HighContrast";
-    t.bgPrimary         = Color(0, 0, 0);
-    t.bgSecondary       = Color(15, 15, 15);
-    t.bgTertiary        = Color(30, 30, 30);
-    t.textPrimary       = Color(255, 255, 255);
-    t.textSecondary     = Color(200, 255, 0);
-    t.textDisabled      = Color(100, 100, 100);
-    t.accent            = Color(0, 255, 255);
-    t.accentHover       = Color(80, 255, 255);
-    t.accentPressed     = Color(0, 200, 200);
-    t.border            = Color(255, 255, 255);
-    t.borderFocus       = Color(0, 255, 255);
-    t.scrollbarTrack    = Color(30, 30, 30);
-    t.scrollbarThumb    = Color(200, 200, 200);
-    t.selectionBg       = Color(0, 100, 200);
-    t.dialogBg          = Color(15, 15, 15);
-    t.dialogTitleBg     = Color(0, 0, 0);
-    t.dialogBorder      = Color(255, 255, 255);
-    t.tableHeaderBg     = Color(30, 30, 30);
-    t.tableRowAlt       = Color(20, 20, 20);
-    t.tableBorder       = Color(255, 255, 255);
-    t.menuBarBg         = Color(0, 0, 0);
-    t.menuItemSelected  = Color(0, 255, 255);
-    t.tooltipBg         = Color(40, 40, 0);
-    t.tooltipBorder     = Color(200, 255, 0);
-    t.scrollbarHover    = Color(230, 230, 230);
-    t.scrollbarActive   = Color(255, 255, 255);
-    t.progressBarFill   = Color(0, 255, 255);
-    t.progressBarTrack  = Color(30, 30, 30);
-    return t;
-}
+// --- Theme preset factory methods (delegate to table) ---
 
-Theme Theme::Solarized() {
-    Theme t;
-    t.name = "Solarized";
-    t.bgPrimary         = Color(0, 43, 54);
-    t.bgSecondary       = Color(7, 54, 66);
-    t.bgTertiary        = Color(0, 43, 54);
-    t.textPrimary       = Color(131, 148, 150);
-    t.textSecondary     = Color(88, 110, 117);
-    t.textDisabled      = Color(50, 65, 70);
-    t.accent            = Color(38, 139, 210);
-    t.accentHover       = Color(60, 160, 230);
-    t.accentPressed     = Color(20, 110, 180);
-    t.border            = Color(55, 78, 85);
-    t.borderFocus       = Color(38, 139, 210);
-    t.scrollbarTrack    = Color(0, 43, 54);
-    t.scrollbarThumb    = Color(55, 78, 85);
-    t.selectionBg       = Color(38, 139, 210);
-    t.dialogBg          = Color(7, 54, 66);
-    t.dialogTitleBg     = Color(0, 43, 54);
-    t.dialogBorder      = Color(55, 78, 85);
-    t.tableHeaderBg     = Color(0, 43, 54);
-    t.tableRowAlt       = Color(5, 48, 60);
-    t.tableBorder       = Color(55, 78, 85);
-    t.menuBarBg         = Color(0, 43, 54);
-    t.menuItemSelected  = Color(38, 139, 210);
-    t.tooltipBg         = Color(7, 54, 66);
-    t.tooltipBorder     = Color(55, 78, 85);
-    t.scrollbarHover    = Color(80, 105, 112);
-    t.scrollbarActive   = Color(100, 125, 132);
-    t.progressBarFill   = Color(38, 139, 210);
-    t.progressBarTrack  = Color(0, 43, 54);
-    return t;
-}
+Theme Theme::Light()         { return makeTheme(kPresets[0]); }
+Theme Theme::Dark()          { return makeTheme(kPresets[1]); }
+Theme Theme::DarkBlue()      { return makeTheme(kPresets[2]); }
+Theme Theme::HighContrast()  { return makeTheme(kPresets[3]); }
+Theme Theme::Solarized()     { return makeTheme(kPresets[4]); }
+Theme Theme::Nord()          { return makeTheme(kPresets[5]); }
 
-Theme Theme::Nord() {
-    Theme t;
-    t.name = "Nord";
-    t.bgPrimary         = Color(46, 52, 64);
-    t.bgSecondary       = Color(59, 66, 82);
-    t.bgTertiary        = Color(67, 76, 94);
-    t.textPrimary       = Color(236, 239, 244);
-    t.textSecondary     = Color(129, 142, 165);
-    t.textDisabled      = Color(76, 86, 106);
-    t.accent            = Color(136, 192, 208);
-    t.accentHover       = Color(158, 212, 228);
-    t.accentPressed     = Color(114, 172, 188);
-    t.border            = Color(67, 76, 94);
-    t.borderFocus       = Color(136, 192, 208);
-    t.scrollbarTrack    = Color(46, 52, 64);
-    t.scrollbarThumb    = Color(76, 86, 106);
-    t.selectionBg       = Color(94, 129, 172);
-    t.dialogBg          = Color(59, 66, 82);
-    t.dialogTitleBg     = Color(46, 52, 64);
-    t.dialogBorder      = Color(67, 76, 94);
-    t.tableHeaderBg     = Color(46, 52, 64);
-    t.tableRowAlt       = Color(56, 62, 78);
-    t.tableBorder       = Color(67, 76, 94);
-    t.menuBarBg         = Color(46, 52, 64);
-    t.menuItemSelected  = Color(136, 192, 208);
-    t.tooltipBg         = Color(59, 66, 82);
-    t.tooltipBorder     = Color(76, 86, 106);
-    t.scrollbarHover    = Color(94, 104, 124);
-    t.scrollbarActive   = Color(112, 122, 142);
-    t.progressBarFill   = Color(136, 192, 208);
-    t.progressBarTrack  = Color(46, 52, 64);
-    return t;
-}
+// --- Theme comparison (memcmp for Color block, then compare name) ---
 
 bool Theme::operator==(const Theme& o) const {
-    return bgPrimary == o.bgPrimary && bgSecondary == o.bgSecondary &&
-           bgTertiary == o.bgTertiary && textPrimary == o.textPrimary &&
-           textSecondary == o.textSecondary && textDisabled == o.textDisabled &&
-           accent == o.accent && accentHover == o.accentHover &&
-           accentPressed == o.accentPressed && border == o.border &&
-           borderFocus == o.borderFocus && scrollbarTrack == o.scrollbarTrack &&
-           scrollbarThumb == o.scrollbarThumb && selectionBg == o.selectionBg &&
-           dialogBg == o.dialogBg && dialogTitleBg == o.dialogTitleBg &&
-           dialogBorder == o.dialogBorder && tableHeaderBg == o.tableHeaderBg &&
-           tableRowAlt == o.tableRowAlt && tableBorder == o.tableBorder &&
-           menuBarBg == o.menuBarBg && menuItemSelected == o.menuItemSelected &&
-           tooltipBg == o.tooltipBg && tooltipBorder == o.tooltipBorder &&
-           scrollbarHover == o.scrollbarHover && scrollbarActive == o.scrollbarActive &&
-           progressBarFill == o.progressBarFill && progressBarTrack == o.progressBarTrack;
+    static_assert(sizeof(Color) == 4, "Color must be 4 bytes for memcmp");
+    // All 28 Color fields are contiguous from bgPrimary to progressBarTrack
+    constexpr size_t kColorBytes = 28 * sizeof(Color);
+    return std::memcmp(&bgPrimary, &o.bgPrimary, kColorBytes) == 0
+        && name == o.name;
 }
 
 // --- ThemeManager ---
@@ -246,17 +190,14 @@ void ThemeManager::setTheme(const Theme& theme) {
 }
 
 void ThemeManager::setThemeByName(const std::string& name) {
-    // Check built-in presets
-    if (name == "Light")      { setTheme(Theme::Light()); return; }
-    if (name == "Dark")       { setTheme(Theme::Dark()); return; }
-    if (name == "DarkBlue")   { setTheme(Theme::DarkBlue()); return; }
-    if (name == "HighContrast"){ setTheme(Theme::HighContrast()); return; }
-    if (name == "Solarized")  { setTheme(Theme::Solarized()); return; }
-    if (name == "Nord")       { setTheme(Theme::Nord()); return; }
-
-    auto it = customThemes_.find(name);
-    if (it != customThemes_.end()) {
-        setTheme(it->second);
+    auto it = presetMap().find(name);
+    if (it != presetMap().end()) {
+        setTheme(makeTheme(kPresets[it->second]));
+        return;
+    }
+    auto jt = customThemes_.find(name);
+    if (jt != customThemes_.end()) {
+        setTheme(jt->second);
     }
 }
 
@@ -269,8 +210,11 @@ bool ThemeManager::unregisterTheme(const std::string& name) {
 }
 
 std::vector<std::string> ThemeManager::availableThemes() const {
-    std::vector<std::string> names = {"Light", "Dark", "DarkBlue",
-                                       "HighContrast", "Solarized", "Nord"};
+    static const char* kPresetNames[] = {"Light", "Dark", "DarkBlue",
+                                         "HighContrast", "Solarized", "Nord"};
+    std::vector<std::string> names;
+    names.reserve(6 + customThemes_.size());
+    for (const char* n : kPresetNames) names.push_back(n);
     for (auto& kv : customThemes_) names.push_back(kv.first);
     return names;
 }

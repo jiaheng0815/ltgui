@@ -81,8 +81,7 @@ Widget* TabWidget::currentContent() const {
 
 Size TabWidget::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    float dpi = window() ? window()->dpiScale() : 1.0f;
-    setCachedSizeHint({static_cast<int>(300 * dpi), static_cast<int>(200 * dpi)});
+    setCachedSizeHint(dpiScaleSize(300, 200));
     return cachedSizeHint();
 }
 
@@ -102,6 +101,7 @@ void TabWidget::ensureTabWidths() const {
     cachedTabWidths_.reserve(tabs_.size());
     auto* win = window();
     auto* c = win ? win->canvas() : nullptr;
+    if (c) c->setFont(style().font);
     for (auto& tab : tabs_) {
         cachedTabWidths_.push_back(c ? c->measureText(tab.label).width + 24 + 2 : 62);
     }
@@ -127,10 +127,9 @@ Rect TabWidget::tabRect(int index) const {
 
 void TabWidget::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
-    canvas->setColor(style().bgColor);
-    canvas->fillRect(r);
+    paintBackground(canvas);
 
     // Tab bar background
     canvas->setColor(t.bgTertiary);
@@ -154,7 +153,7 @@ void TabWidget::paintSelf(NativeCanvas* canvas) {
         }
 
         canvas->setColor(i == current_ ? t.accent : t.textSecondary);
-        canvas->setFont(Font::systemDefault(12));
+        canvas->setFont(style().font);
         canvas->drawText(tabs_[i].label, tr,
                          NativeCanvas::AlignCenter | NativeCanvas::AlignVCenter | NativeCanvas::SingleLine);
 

@@ -41,12 +41,10 @@ void TextBox::setMultiLine(bool multiLine) {
 Size TextBox::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
     // Apply DPI scale to the default size
-    float dpi = 1.0f;
-    if (window()) dpi = window()->dpiScale();
     if (multiLine_) {
-        setCachedSizeHint({static_cast<int>(150 * dpi), static_cast<int>(80 * dpi)});
+        setCachedSizeHint(dpiScaleSize(150, 80));
     } else {
-        setCachedSizeHint({static_cast<int>(150 * dpi), static_cast<int>(30 * dpi)});
+        setCachedSizeHint(dpiScaleSize(150, 30));
     }
     return cachedSizeHint();
 }
@@ -272,7 +270,7 @@ void TextBox::selectAll() {
 
 void TextBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
     canvas->setColor(style().bgColor);
     canvas->fillRoundedRect(r, style().borderRadius);
@@ -280,6 +278,9 @@ void TextBox::paintSelf(NativeCanvas* canvas) {
     Color borderColor = focused_ ? t.accent : style().borderColor;
     canvas->setColor(borderColor);
     canvas->strokeRoundedRect(r, style().borderRadius, focused_ ? 2 : style().borderWidth);
+
+    // Set font early — required before any measureText() call
+    canvas->setFont(style().font);
 
     int pad = style().paddingLeft;
     Rect textRect(r.x + pad, r.y, r.width - pad * 2, r.height);
@@ -318,7 +319,6 @@ void TextBox::paintSelf(NativeCanvas* canvas) {
     }
 
     canvas->setColor(isEnabled() ? style().fgColor : t.textDisabled);
-    canvas->setFont(style().font);
 
     int flags = NativeCanvas::AlignLeft | NativeCanvas::AlignVCenter;
     if (!multiLine_) flags |= NativeCanvas::SingleLine;
@@ -354,6 +354,7 @@ bool TextBox::handleEvent(Event& event) {
         } else {
             auto* can = window() ? window()->canvas() : nullptr;
             if (can) {
+                can->setFont(style().font);
                 int lo = 0, hi = static_cast<int>(text_.size());
                 while (lo < hi) {
                     int mid = (lo + hi) / 2;
@@ -378,6 +379,7 @@ bool TextBox::handleEvent(Event& event) {
             int clickX = event.pos.x - x() - pad;
             auto* can = window() ? window()->canvas() : nullptr;
             if (can && !text_.empty()) {
+                can->setFont(style().font);
                 int lo = 0, hi = static_cast<int>(text_.size());
                 while (lo < hi) {
                     int mid = (lo + hi) / 2;

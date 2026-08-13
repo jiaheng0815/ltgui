@@ -70,8 +70,7 @@ void TreeView::setSelectedItem(TreeViewItem* item) {
 
 Size TreeView::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    float dpi = window() ? window()->dpiScale() : 1.0f;
-    setCachedSizeHint({static_cast<int>(200 * dpi), static_cast<int>(200 * dpi)});
+    setCachedSizeHint(dpiScaleSize(200, 150));
     return cachedSizeHint();
 }
 
@@ -91,7 +90,7 @@ int TreeView::totalRows() const {
 
 void TreeView::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
     canvas->setColor(style().bgColor);
     canvas->fillRoundedRect(r, style().borderRadius);
@@ -103,7 +102,7 @@ void TreeView::paintSelf(NativeCanvas* canvas) {
 
     if (!root_) return;
 
-    canvas->setFont(Font::systemDefault(12));
+    canvas->setFont(style().font);
     int visible = visibleItems();
     int scrollOffset = static_cast<int>(scrollAnim_.value());
     int total = totalRows();

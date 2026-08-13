@@ -4,7 +4,6 @@
 #include "shortcut.h"
 #include "platform/native_window.h"
 #include "platform/native_canvas.h"
-#include "platform/gpu/gpu_canvas.h"
 #include <string>
 #include <memory>
 #include <vector>
@@ -13,6 +12,7 @@ namespace ltgui {
 
 class Widget;
 class ComboBox;
+namespace gpu { class GpuCanvas; }
 
 class Window {
 public:
@@ -68,6 +68,13 @@ private:
     friend class Widget;
     friend class ComboBox;
     void setFocusWidget(Widget* w);
+
+    // Per-event-type handlers (split from handleEvent for readability)
+    void handlePaintEvent(Event& event);
+    void handleResizeEvent(Event& event);
+    void handleCloseEvent(Event& event);
+    void handleKeyEvent(Event& event);
+    void handleMouseEvent(Event& event);
 
     // Guard against dangling focusWidget_: if the focus widget is no longer in
     // this window's tree (e.g. it was destroyed or reparented), clear and

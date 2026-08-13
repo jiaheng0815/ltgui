@@ -38,7 +38,7 @@ Size Button::sizeHint() const {
 
 void Button::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
     // Fill background: accent when interactive, base bg otherwise
     Color fillColor;

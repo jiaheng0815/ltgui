@@ -32,8 +32,7 @@ Size Image::sizeHint() const {
     if (loaded_) {
         setCachedSizeHint(imageSize_);
     } else {
-        float dpi = window() ? window()->dpiScale() : 1.0f;
-        setCachedSizeHint({static_cast<int>(100 * dpi), static_cast<int>(100 * dpi)});
+        setCachedSizeHint(dpiScaleSize(100, 100));
     }
     return cachedSizeHint();
 }

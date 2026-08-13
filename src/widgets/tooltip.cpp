@@ -35,6 +35,7 @@ Size Tooltip::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
     if (auto* win = window()) {
         if (auto* c = win->canvas()) {
+            c->setFont(style().font);
             Size textSize = c->measureText(text_);
             setCachedSizeHint({textSize.width + style().paddingHorz(),
                                textSize.height + style().paddingVert()});
@@ -53,9 +54,7 @@ void Tooltip::paintSelf(NativeCanvas* canvas) {
     canvas->setColor(Color(0, 0, 0, 40));
     canvas->fillRoundedRect(r.translated(1, 2), style().borderRadius);
 
-    // Background
-    canvas->setColor(style().bgColor);
-    canvas->fillRoundedRect(r, style().borderRadius);
+    paintBackground(canvas);
 
     // Text
     canvas->setColor(style().fgColor);
@@ -74,9 +73,8 @@ void Tooltip::show(Widget* target, const std::string& text) {
     if (parent) {
         auto& kids = parent->children();
         for (int i = static_cast<int>(kids.size()) - 1; i >= 0; --i) {
-            auto* ttp = dynamic_cast<Tooltip*>(kids[i].get());
-            if (ttp) {
-                parent->removeChild(ttp); // destroys the tooltip
+            if (kids[i]->widgetType() == WidgetType::Tooltip) {
+                parent->removeChild(kids[i].get()); // destroys the tooltip
             }
         }
     }

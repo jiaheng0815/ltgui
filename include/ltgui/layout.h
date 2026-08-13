@@ -1,7 +1,7 @@
 #pragma once
 #include "geometry.h"
 #include <vector>
-#include <map>
+#include <unordered_map>
 
 namespace ltgui {
 
@@ -44,8 +44,8 @@ private:
     Direction direction_;
     int spacing_;
     int margin_;
-    std::vector<int> stretchFactors_;       // legacy positional stretch
-    std::map<Widget*, int> widgetStretch_;  // widget-linked stretch (preferred)
+    std::vector<int> stretchFactors_;                 // legacy positional stretch
+    std::unordered_map<Widget*, int> widgetStretch_;  // widget-linked stretch (preferred)
 };
 
 class GridLayout : public Layout {
@@ -63,8 +63,8 @@ private:
     int rowSpacing_;
     int colSpacing_;
     int margin_;
-    std::map<int, int> colStretch_;
-    std::map<int, int> rowStretch_;
+    std::unordered_map<int, int> colStretch_;
+    std::unordered_map<int, int> rowStretch_;
 };
 
 } // namespace ltgui

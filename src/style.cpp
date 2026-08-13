@@ -4,7 +4,7 @@
 namespace ltgui {
 
 Style Style::defaultStyle() {
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
     Style s;
     s.bgColor = t.bgSecondary;
     s.fgColor = t.textPrimary;

@@ -52,8 +52,7 @@ void ScrollArea::updateScrollBars() {
 
 Size ScrollArea::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    float dpi = window() ? window()->dpiScale() : 1.0f;
-    setCachedSizeHint({static_cast<int>(200 * dpi), static_cast<int>(200 * dpi)});
+    setCachedSizeHint(dpiScaleSize(200, 200));
     return cachedSizeHint();
 }
 
@@ -73,7 +72,7 @@ void ScrollArea::scrollTo(int x, int y) {
 
 void ScrollArea::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
     // Update the content widget position from the current animated
     // scroll value each frame.  scrollTo() sets the animation target
@@ -89,8 +88,7 @@ void ScrollArea::paintSelf(NativeCanvas* canvas) {
         }
     }
 
-    canvas->setColor(style().bgColor);
-    canvas->fillRoundedRect(r, style().borderRadius);
+    paintBackground(canvas);
 
     // Scrollbar track — guard against zero contentHeight (avoids div-by-zero)
     if (contentHeight_ > 0 && contentHeight_ > height()) {
@@ -109,12 +107,6 @@ void ScrollArea::paintSelf(NativeCanvas* canvas) {
 
         canvas->setColor(t.scrollbarThumb);
         canvas->fillRoundedRect(Rect(r.right() - sbWidth + 2, thumbY + 1, sbWidth - 4, thumbH - 2), 3);
-    }
-
-    // Content clipping — border stroke on top
-    if (style().borderWidth > 0) {
-        canvas->setColor(style().borderColor);
-        canvas->strokeRoundedRect(r, style().borderRadius, style().borderWidth);
     }
 }
 

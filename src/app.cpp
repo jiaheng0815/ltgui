@@ -24,96 +24,80 @@ Application& Application::instance() {
     return app;
 }
 
+bool Application::pumpPlatformEvents(int timeoutMs) {
+#ifdef LTGUI_PLATFORM_WINDOWS
+    MSG msg;
+    DWORD timeout = (timeoutMs < 0) ? INFINITE : (DWORD)timeoutMs;
+    DWORD result = MsgWaitForMultipleObjects(0, nullptr, FALSE, timeout, QS_ALLINPUT);
+    if (result == WAIT_OBJECT_0) {
+        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                running_ = false;
+                return false;
+            }
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+        }
+    }
+    return running_;
+#elif defined(LTGUI_PLATFORM_LINUX)
+    X11Window::processAllPending();
+    int x11Fd = X11Window::displayFd();
+    if (x11Fd >= 0 && timeoutMs != 0) {
+        fd_set fds;
+        FD_ZERO(&fds);
+        FD_SET(x11Fd, &fds);
+        struct timeval tv;
+        tv.tv_sec  = timeoutMs < 0 ? 60 : timeoutMs / 1000;
+        tv.tv_usec = timeoutMs < 0 ? 0  : (timeoutMs % 1000) * 1000;
+        select(x11Fd + 1, &fds, nullptr, nullptr, &tv);
+        X11Window::processAllPending();
+    } else if (timeoutMs > 0) {
+        usleep(timeoutMs * 1000);
+    }
+    return running_;
+#elif defined(LTGUI_PLATFORM_MACOS)
+    double interval = (timeoutMs <= 0) ? 0.0 : (timeoutMs < 0 ? 60.0 : timeoutMs / 1000.0);
+    @autoreleasepool {
+        NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                            untilDate:[NSDate dateWithTimeIntervalSinceNow:interval]
+                               inMode:NSDefaultRunLoopMode
+                              dequeue:YES];
+        if (event) {
+            [NSApp sendEvent:event];
+        }
+    }
+    return running_;
+#endif
+}
+
 int Application::run() {
     setMainThread(); // record the UI thread for debug assertions
     running_ = true;
 
     // Helper: compute the wakeup timeout in milliseconds.
-    // Returns the minimum of the animation frame interval and the next
-    // timer expiry, clamped to reasonable bounds.
     auto computeWakeupMs = [this]() -> int {
         auto& anim = AnimationManager::instance();
         bool hasAnim = anim.hasActive();
-
-        // Animation frame interval: ~16ms (60 FPS) during animations
         int animTimeout = hasAnim ? 16 : 500;
-
         int64_t timerWakeup = nextTimerWakeupMs();
-        if (timerWakeup == INT64_MAX) {
-            // No timers — use animation timeout
-            return animTimeout;
-        }
-
-        // Clamp timer wakeup: at least 0, at most animTimeout
-        // (we wake up at animation rate anyway; timers can fire a frame late)
+        if (timerWakeup == INT64_MAX) return animTimeout;
         if (timerWakeup <= 0) return 0;
         if (timerWakeup < animTimeout) return (int)timerWakeup;
         return animTimeout;
     };
 
-#ifdef LTGUI_PLATFORM_WINDOWS
-    MSG msg;
-    while (running_) {
-        int wakeMs = computeWakeupMs();
-        DWORD timeout = (wakeMs <= 0) ? 0 : (DWORD)wakeMs;
-
-        DWORD result = MsgWaitForMultipleObjects(0, nullptr, FALSE, timeout, QS_ALLINPUT);
-        if (result == WAIT_OBJECT_0) {
-            while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-                if (msg.message == WM_QUIT) {
-                    running_ = false;
-                    break;
-                }
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
-        }
-        processEvents();
-    }
-#elif defined(LTGUI_PLATFORM_LINUX)
-    int x11Fd = X11Window::displayFd();
-    while (running_) {
-        X11Window::processAllPending();
-        processEvents();
-
-        int wakeMs = computeWakeupMs();
-
-        // Block on X11 connection fd until events arrive, or timeout
-        if (x11Fd >= 0) {
-            fd_set fds;
-            FD_ZERO(&fds);
-            FD_SET(x11Fd, &fds);
-            struct timeval tv;
-            tv.tv_sec = wakeMs / 1000;
-            tv.tv_usec = (wakeMs % 1000) * 1000;
-            select(x11Fd + 1, &fds, nullptr, nullptr, &tv);
-        } else {
-            usleep(wakeMs * 1000);
-        }
-    }
-#elif defined(LTGUI_PLATFORM_MACOS)
+#ifdef LTGUI_PLATFORM_MACOS
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     [NSApp activateIgnoringOtherApps:YES];
     [NSApp finishLaunching];
+#endif
 
     while (running_) {
-        int wakeMs = computeWakeupMs();
-        // Use at least 1ms to avoid busy-wait, at most 500ms to stay responsive
-        double interval = (wakeMs <= 0) ? 0.001 : (wakeMs / 1000.0);
-
-        @autoreleasepool {
-            NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                                untilDate:[NSDate dateWithTimeIntervalSinceNow:interval]
-                                   inMode:NSDefaultRunLoopMode
-                                  dequeue:YES];
-            if (event) {
-                [NSApp sendEvent:event];
-            }
-        }
+        if (!pumpPlatformEvents(computeWakeupMs())) break;
         processEvents();
     }
-#endif
 
     return 0;
 }
@@ -225,51 +209,9 @@ int64_t Application::nextTimerWakeupMs() const {
 
 bool Application::tick(int timeoutMs) {
     if (!running_) return false;
-
-#ifdef LTGUI_PLATFORM_WINDOWS
-    MSG msg;
-    DWORD timeout = (timeoutMs <= 0) ? 0 : (DWORD)timeoutMs;
-    DWORD result = MsgWaitForMultipleObjects(0, nullptr, FALSE, timeout, QS_ALLINPUT);
-    if (result == WAIT_OBJECT_0) {
-        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_QUIT) {
-                running_ = false;
-                return false;
-            }
-            TranslateMessage(&msg);
-            DispatchMessage(&msg);
-        }
-    }
-#elif defined(LTGUI_PLATFORM_LINUX)
-    X11Window::processAllPending();
-    if (timeoutMs > 0) {
-        int x11Fd = X11Window::displayFd();
-        if (x11Fd >= 0) {
-            fd_set fds;
-            FD_ZERO(&fds);
-            FD_SET(x11Fd, &fds);
-            struct timeval tv;
-            tv.tv_sec = timeoutMs / 1000;
-            tv.tv_usec = (timeoutMs % 1000) * 1000;
-            select(x11Fd + 1, &fds, nullptr, nullptr, &tv);
-        } else {
-            usleep(timeoutMs * 1000);
-        }
-        X11Window::processAllPending();
-    }
-#elif defined(LTGUI_PLATFORM_MACOS)
-    double interval = (timeoutMs <= 0) ? 0.0 : (timeoutMs / 1000.0);
-    NSEvent* event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                        untilDate:[NSDate dateWithTimeIntervalSinceNow:interval]
-                           inMode:NSDefaultRunLoopMode
-                          dequeue:YES];
-    if (event) {
-        [NSApp sendEvent:event];
-    }
-#endif
-
-    processEvents();
-    return true;
+    pumpPlatformEvents(timeoutMs);
+    if (running_) processEvents();
+    return running_;
 }
 
 } // namespace ltgui

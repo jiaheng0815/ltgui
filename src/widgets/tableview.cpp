@@ -139,13 +139,8 @@ int TableView::hitTestRow(int localY) const {
 
 void TableView::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
-    canvas->setColor(style().bgColor);
-    canvas->fillRoundedRect(r, style().borderRadius > 0 ? style().borderRadius : 0);
-    if (style().borderWidth > 0) {
-        canvas->setColor(style().borderColor);
-        canvas->strokeRoundedRect(r, style().borderRadius, style().borderWidth);
-    }
+    const Theme& t = currentTheme();
+    paintBackground(canvas);
 
     int numRows = model_ ? model_->rowCount() : 0;
     int numCols = (int)columns_.size();
@@ -158,7 +153,7 @@ void TableView::paintSelf(NativeCanvas* canvas) {
     canvas->setColor(t.tableHeaderBg);
     canvas->fillRoundedRect(Rect(r.x, headerY, totalWidth(), headerHeight_), 4);
     canvas->setColor(t.textPrimary);
-    canvas->setFont(Font::systemDefault(12));
+    canvas->setFont(style().font);
 
     for (int c = 0; c < numCols; c++) {
         int cx = r.x + colX(c);
@@ -195,7 +190,7 @@ void TableView::paintSelf(NativeCanvas* canvas) {
             }
             canvas->setColor(t.textPrimary);
         }
-        canvas->setFont(Font::systemDefault(12));
+        canvas->setFont(style().font);
 
         for (int c = 0; c < numCols; c++) {
             int cx = r.x + colX(c);

@@ -46,6 +46,7 @@ public:
 protected:
     void paintSelf(NativeCanvas* canvas) override;
     bool handleEvent(Event& event) override;
+    void positionPanel();
 
     void addButton(const std::string& text, DialogResult res, bool isDefault = false);
 

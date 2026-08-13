@@ -99,8 +99,7 @@ void MenuBar::addSubSeparator(int menuIdx, int itemIdx, int subIdx) {
 
 Size MenuBar::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    float dpi = window() ? window()->dpiScale() : 1.0f;
-    setCachedSizeHint({static_cast<int>(400 * dpi), static_cast<int>(menuBarHeight_ * dpi)});
+    setCachedSizeHint(dpiScaleSize(400, menuBarHeight_));
     return cachedSizeHint();
 }
 
@@ -173,7 +172,7 @@ static void drawHighlight(NativeCanvas* canvas, const Rect& r, const Color& acce
 
 void MenuBar::paintItem(NativeCanvas* canvas, const Rect& r, const MenuItem& item,
                          bool hovered, int depth) {
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
     int indent = depth * 12;
 
     if (hovered && !item.separator)
@@ -213,10 +212,9 @@ void MenuBar::paintItem(NativeCanvas* canvas, const Rect& r, const MenuItem& ite
 
 void MenuBar::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
-    canvas->setColor(style().bgColor);
-    canvas->fillRect(r);
-    canvas->setFont(Font::systemDefault(13));
+    const Theme& t = currentTheme();
+    paintBackground(canvas);
+    canvas->setFont(Font(style().font.family, 13, style().font.weight, style().font.style));
 
     // Top-level menus
     int x = r.x + 4;
@@ -243,7 +241,7 @@ void MenuBar::paintSelf(NativeCanvas* canvas) {
     canvas->fillRoundedRect(Rect(dropX, dropY, dropW, dropH), 4);
     canvas->setColor(t.border);
     canvas->strokeRoundedRect(Rect(dropX, dropY, dropW, dropH), 4);
-    canvas->setFont(Font::systemDefault(12));
+    canvas->setFont(style().font);
 
     for (int j = 0; j < (int)items.size(); j++) {
         int iy = dropY + 2 + j * itemHeight_;

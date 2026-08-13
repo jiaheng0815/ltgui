@@ -1,6 +1,7 @@
 #include "layout.h"
 #include "widget.h"
 #include <algorithm>
+#include <unordered_set>
 
 namespace ltgui {
 
@@ -49,17 +50,18 @@ void BoxLayout::layout(Widget* container) {
         return;
     }
 
-    // Purge stale widgetStretch_ entries for children no longer in this
-    // container.  This prevents unbounded map growth and ABA problems where
-    // a new Widget allocated at a recycled pointer address would incorrectly
-    // inherit the old widget's stretch factor.
-    for (auto it = widgetStretch_.begin(); it != widgetStretch_.end(); ) {
-        bool alive = false;
-        for (int i = 0; i < n && !alive; i++) {
-            if (children[i].get() == it->first) alive = true;
+    // Purge stale widgetStretch_ entries only when necessary.
+    // Map size <= child count means every key has a valid child — skip purge.
+    // When map is larger, build a set of valid child pointers for O(n+m) purge
+    // instead of the naive O(n*m) nested loop.
+    if (static_cast<int>(widgetStretch_.size()) > n) {
+        std::unordered_set<Widget*> valid;
+        valid.reserve(n);
+        for (auto& c : children) valid.insert(c.get());
+        for (auto it = widgetStretch_.begin(); it != widgetStretch_.end(); ) {
+            if (valid.count(it->first)) ++it;
+            else                       it = widgetStretch_.erase(it);
         }
-        if (alive) ++it;
-        else       it = widgetStretch_.erase(it);
     }
 
     Rect area = container->geometry();

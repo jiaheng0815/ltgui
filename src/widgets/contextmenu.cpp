@@ -56,8 +56,7 @@ void ContextMenu::dismiss() {
 
 Size ContextMenu::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    float dpi = window() ? window()->dpiScale() : 1.0f;
-    setCachedSizeHint({bestWidth(), static_cast<int>(100 * dpi)});
+    setCachedSizeHint({bestWidth(), dpiScaleSize(1, 100).height});
     return cachedSizeHint();
 }
 
@@ -65,6 +64,7 @@ int ContextMenu::bestWidth() const {
     int w = 120;
     if (auto* win = window()) {
         if (auto* c = win->canvas()) {
+            c->setFont(style().font);
             for (auto& item : items_) {
                 if (item.separator) continue;
                 int tw = c->measureText(item.text).width + 28;
@@ -77,17 +77,11 @@ int ContextMenu::bestWidth() const {
 
 void ContextMenu::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
-    // Background
-    canvas->setColor(style().bgColor);
-    canvas->fillRoundedRect(r, style().borderRadius);
+    paintBackground(canvas);
 
-    // Border
-    canvas->setColor(t.border);
-    canvas->strokeRoundedRect(r, style().borderRadius, style().borderWidth);
-
-    canvas->setFont(Font::systemDefault(12));
+    canvas->setFont(style().font);
     int pad = style().paddingTop;
     int y = r.y + pad;
 

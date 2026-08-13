@@ -41,14 +41,13 @@ void ProgressBar::setIndeterminate(bool on) {
 
 Size ProgressBar::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    float dpi = window() ? window()->dpiScale() : 1.0f;
-    setCachedSizeHint({static_cast<int>(200 * dpi), static_cast<int>(20 * dpi)});
+    setCachedSizeHint(dpiScaleSize(200, 20));
     return cachedSizeHint();
 }
 
 void ProgressBar::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
     // Track
     canvas->setColor(style().bgColor);
@@ -95,7 +94,7 @@ void ProgressBar::paintSelf(NativeCanvas* canvas) {
         // Percentage text
         if (r.width > 60) {
             canvas->setColor(t.textPrimary);
-            canvas->setFont(Font::systemDefault(11));
+            canvas->setFont(style().font);
             int pctInt = static_cast<int>(pct * 100.0f + 0.5f);
             std::string pctText = std::to_string(pctInt) + "%";
             canvas->drawText(pctText, r,

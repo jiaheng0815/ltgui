@@ -55,8 +55,7 @@ void ListBox::setSelected(int index) {
 
 Size ListBox::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    float dpi = window() ? window()->dpiScale() : 1.0f;
-    setCachedSizeHint({static_cast<int>(160 * dpi), static_cast<int>(140 * dpi)});
+    setCachedSizeHint(dpiScaleSize(160, 140));
     return cachedSizeHint();
 }
 
@@ -70,15 +69,9 @@ int ListBox::currentScrollOffset() {
 
 void ListBox::paintSelf(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    Theme t = currentTheme();
+    const Theme& t = currentTheme();
 
-    canvas->setColor(style().bgColor);
-    canvas->fillRoundedRect(r, style().borderRadius);
-
-    if (style().borderWidth > 0) {
-        canvas->setColor(style().borderColor);
-        canvas->strokeRoundedRect(r, style().borderRadius, style().borderWidth);
-    }
+    paintBackground(canvas);
 
     canvas->setFont(style().font);
     int visible = visibleItems();
