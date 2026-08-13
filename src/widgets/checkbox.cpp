@@ -6,39 +6,17 @@
 namespace ltgui {
 
 CheckBox::CheckBox(const std::string& text, Widget* parent)
-    : Widget(parent), text_(text) {
+    : TextWidget(text, parent), Checkable(this) {
     style().bgColor = Color::Transparent;
     style().borderWidth = 0;
     style().fgColor = currentTheme().textPrimary;
 }
 
-void CheckBox::setText(const std::string& text) {
-    text_ = text;
-    invalidateSizeHint();
-    scheduleRelayout();
-    update();
-}
-
-void CheckBox::setChecked(bool checked) {
-    if (checked_ != checked) {
-        checked_ = checked;
-        update();
-        if (toggleCallback_) toggleCallback_(checked_);
-    }
-}
-
 Size CheckBox::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    if (auto* win = window()) {
-        if (auto* c = win->canvas()) {
-            c->setFont(style().font);
-            Size textSize = c->measureText(text_);
-            setCachedSizeHint({textSize.width + 24 + style().paddingHorz(),
-                               std::max(textSize.height, 16) + style().paddingVert()});
-            return cachedSizeHint();
-        }
-    }
-    setCachedSizeHint({100, 22});
+    Size s = textSizeHint({100, 22});
+    setCachedSizeHint({s.width + 24 + style().paddingHorz(),
+                       std::max(s.height, 16 + style().paddingVert())});
     return cachedSizeHint();
 }
 
@@ -78,7 +56,7 @@ bool CheckBox::handleEvent(Event& event) {
     if (!isEnabled()) return false;
 
     if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
-        setChecked(!checked_);
+        setChecked(!isChecked());
         event.accepted = true;
         return true;
     }

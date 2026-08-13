@@ -24,7 +24,7 @@ public:
     void popup(const Point& screenPos);
     void dismiss();
 
-    WidgetType widgetType() const override { return WidgetType::ContextMenu; }
+    LTGUI_DECLARE_WIDGET_TYPE(ContextMenu)
     bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 

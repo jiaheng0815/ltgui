@@ -6,51 +6,12 @@
 
 namespace ltgui {
 
-ListBox::ListBox(Widget* parent) : Widget(parent) {
+ListBox::ListBox(Widget* parent) : Widget(parent), ListItems(this) {
     style().bgColor = currentTheme().bgSecondary;
     style().fgColor = currentTheme().textPrimary;
     style().borderWidth = 1;
     style().borderColor = currentTheme().border;
     style().borderRadius = 4;
-}
-
-void ListBox::addItem(const std::string& item) {
-    items_.push_back(item);
-    update();
-}
-
-void ListBox::removeItem(int index) {
-    if (index >= 0 && index < static_cast<int>(items_.size())) {
-        items_.erase(items_.begin() + index);
-        if (selected_ == index) selected_ = -1;
-        else if (selected_ > index) selected_--;
-        update();
-    }
-}
-
-void ListBox::clear() {
-    items_.clear();
-    selected_ = -1;
-    update();
-}
-
-int ListBox::count() const {
-    return static_cast<int>(items_.size());
-}
-
-std::string ListBox::item(int index) const {
-    if (index >= 0 && index < static_cast<int>(items_.size())) {
-        return items_[index];
-    }
-    return {};
-}
-
-void ListBox::setSelected(int index) {
-    if (index >= -1 && index < static_cast<int>(items_.size())) {
-        selected_ = index;
-        update();
-        if (selectionCallback_) selectionCallback_(selected_);
-    }
 }
 
 Size ListBox::sizeHint() const {
@@ -105,7 +66,7 @@ bool ListBox::handleEvent(Event& event) {
         int scrollOffset = currentScrollOffset();
         int index = scrollOffset + localY / itemHeight_;
         if (index >= 0 && index < static_cast<int>(items_.size())) {
-            setSelected(index);
+            setCurrentIndex(index);
         }
         event.accepted = true;
         return true;
@@ -124,7 +85,7 @@ bool ListBox::handleEvent(Event& event) {
     if (event.type == EventType::KeyDown) {
         if (event.key == Key::Down) {
             if (selected_ < static_cast<int>(items_.size()) - 1) {
-                setSelected(selected_ + 1);
+                setCurrentIndex(selected_ + 1);
                 // Ensure selection is visible
                 int visible = visibleItems();
                 int current = currentScrollOffset();
@@ -138,7 +99,7 @@ bool ListBox::handleEvent(Event& event) {
         }
         if (event.key == Key::Up) {
             if (selected_ > 0) {
-                setSelected(selected_ - 1);
+                setCurrentIndex(selected_ - 1);
                 int current = currentScrollOffset();
                 if (selected_ < current) {
                     scrollTarget_ = selected_;

@@ -27,7 +27,7 @@ public:
                    const std::string& text, ItemCallback cb = nullptr);
     void addSubSeparator(int menuIdx, int itemIdx, int subIdx);
 
-    WidgetType widgetType() const override { return WidgetType::MenuBar; }
+    LTGUI_DECLARE_WIDGET_TYPE(MenuBar)
     bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 

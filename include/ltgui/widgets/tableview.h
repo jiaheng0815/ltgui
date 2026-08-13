@@ -56,9 +56,15 @@ public:
     void addColumn(const TableColumn& col);
     void setColumnWidth(int col, int width);
 
-    int selectedRow() const { return selectedRow_; }
+    // Primary selection — canonical naming.
+    int currentIndex() const { return selectedRow_; }
+    void setCurrentIndex(int row);
+
+    // Legacy names — use currentIndex()/setCurrentIndex() instead.
+    [[deprecated("use currentIndex() instead")]] int selectedRow() const { return selectedRow_; }
+    [[deprecated("use setCurrentIndex() instead")]] void selectRow(int row) { setCurrentIndex(row); }
+
     std::vector<int> selectedRows() const { return selectedRows_; }
-    void selectRow(int row);
     void clearSelection();
 
     void setSortColumn(int col, bool ascending);
@@ -68,7 +74,7 @@ public:
     void onRowSelected(RowCallback cb) { selectCb_ = std::move(cb); }
     void onHeaderClicked(HeaderCallback cb) { headerCb_ = std::move(cb); }
 
-    WidgetType widgetType() const override { return WidgetType::TableView; }
+    LTGUI_DECLARE_WIDGET_TYPE(TableView)
     bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 

@@ -7,7 +7,7 @@ class Label : public TextWidget {
 public:
     explicit Label(const std::string& text = "", Widget* parent = nullptr);
 
-    WidgetType widgetType() const override { return WidgetType::Label; }
+    LTGUI_DECLARE_WIDGET_TYPE(Label)
     bool canAcceptFocus() const override { return false; }
     Size sizeHint() const override;
 

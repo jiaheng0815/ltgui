@@ -121,6 +121,10 @@ public:
     // Subclasses override this to return their WidgetType enum value.
     [[nodiscard]] virtual WidgetType widgetType() const { return WidgetType::Base; }
 
+    // One-line widgetType() override for subclasses:
+    //   LTGUI_DECLARE_WIDGET_TYPE(Button)
+#define LTGUI_DECLARE_WIDGET_TYPE(Name) [[nodiscard]] WidgetType widgetType() const override { return WidgetType::Name; }
+
     // Whether this widget can receive keyboard focus via Tab navigation.
     // Default is false — only interactive widgets override to return true.
     [[nodiscard]] virtual bool canAcceptFocus() const { return false; }

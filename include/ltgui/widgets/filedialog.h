@@ -27,7 +27,7 @@ public:
 
     DialogResult exec() override;
 
-    WidgetType widgetType() const override { return WidgetType::Dialog; }
+    LTGUI_DECLARE_WIDGET_TYPE(Dialog)
 
 private:
     FileDialogMode mode_ = FileDialogMode::OpenFile;

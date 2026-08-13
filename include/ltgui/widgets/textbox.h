@@ -11,7 +11,7 @@ public:
 
     void setText(const std::string& text) override;
 
-    WidgetType widgetType() const override { return WidgetType::TextBox; }
+    LTGUI_DECLARE_WIDGET_TYPE(TextBox)
     bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 

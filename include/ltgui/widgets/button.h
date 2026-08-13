@@ -11,7 +11,7 @@ public:
     using ClickCallback = std::function<void()>;
     void onClick(ClickCallback cb) { clickCallback_ = std::move(cb); }
 
-    WidgetType widgetType() const override { return WidgetType::Button; }
+    LTGUI_DECLARE_WIDGET_TYPE(Button)
     bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 

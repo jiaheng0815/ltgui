@@ -28,7 +28,7 @@ public:
                                              : FitMode::Contain);
     }
 
-    WidgetType widgetType() const override { return WidgetType::Image; }
+    LTGUI_DECLARE_WIDGET_TYPE(Image)
     Size sizeHint() const override;
 
 protected:

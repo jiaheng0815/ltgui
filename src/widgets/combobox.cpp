@@ -6,7 +6,7 @@
 
 namespace ltgui {
 
-ComboBox::ComboBox(Widget* parent) : Widget(parent) {
+ComboBox::ComboBox(Widget* parent) : Widget(parent), ListItems(this) {
     style().bgColor = currentTheme().bgSecondary;
     style().fgColor = currentTheme().textPrimary;
     style().borderWidth = 1;
@@ -21,45 +21,16 @@ ComboBox::~ComboBox() {
     }
 }
 
-void ComboBox::addItem(const std::string& item) {
-    items_.push_back(item);
-    if (selected_ < 0) selected_ = 0;
-    update();
-}
-
-void ComboBox::removeItem(int index) {
-    if (index >= 0 && index < static_cast<int>(items_.size())) {
-        items_.erase(items_.begin() + index);
-        if (selected_ == index) selected_ = std::min(selected_, static_cast<int>(items_.size()) - 1);
-        else if (selected_ > index) selected_--;
-        update();
-    }
-}
-
-void ComboBox::clear() {
-    items_.clear();
-    selected_ = -1;
-    dropdownOpen_ = false;
-    update();
-}
-
-int ComboBox::count() const {
-    return static_cast<int>(items_.size());
-}
-
 std::string ComboBox::currentText() const {
-    if (selected_ >= 0 && selected_ < static_cast<int>(items_.size())) {
-        return items_[selected_];
+    int idx = currentIndex();
+    if (idx >= 0 && idx < count()) {
+        return items_[idx];
     }
     return {};
 }
 
-void ComboBox::setCurrentIndex(int index) {
-    if (index >= -1 && index < static_cast<int>(items_.size())) {
-        selected_ = index;
-        update();
-        if (selectionCallback_) selectionCallback_(selected_);
-    }
+void ComboBox::onItemsStructureChanged() {
+    if (items_.empty()) dropdownOpen_ = false;
 }
 
 Size ComboBox::sizeHint() const {

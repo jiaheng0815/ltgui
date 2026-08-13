@@ -137,7 +137,7 @@ int main(int argc, char* argv[]) {
     combo->setCurrentIndex(1);
 
     auto* comboLabel = selectSection->makeChild<Label>("Size: Medium");
-    combo->onSelectionChanged([&](int index) {
+    combo->onSelectionChanged.connect([&](int index) {
         (void)index;
         comboLabel->setText("Size: " + combo->currentText());
     });
@@ -202,7 +202,7 @@ int main(int argc, char* argv[]) {
     listBox->addItem("Honeydew");
     listBox->addItem("Kiwi");
     listBox->addItem("Lemon");
-    listBox->setSelected(2);
+    listBox->setCurrentIndex(2);
 
     listColLayout->addStretch(0);
     listColLayout->addStretch(1);

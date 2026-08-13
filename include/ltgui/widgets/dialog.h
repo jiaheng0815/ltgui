@@ -36,7 +36,7 @@ public:
     using ResultCallback = std::function<void(DialogResult)>;
     void onFinished(ResultCallback cb) { resultCallback_ = std::move(cb); }
 
-    WidgetType widgetType() const override { return WidgetType::Dialog; }
+    LTGUI_DECLARE_WIDGET_TYPE(Dialog)
     bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 
@@ -77,7 +77,7 @@ public:
                              int buttons = static_cast<int>(DialogButton::OK),
                              Icon icon = Icon::None);
 
-    WidgetType widgetType() const override { return WidgetType::MessageBox; }
+    LTGUI_DECLARE_WIDGET_TYPE(MessageBox)
     bool canAcceptFocus() const override { return true; }
 
 protected:
@@ -103,7 +103,7 @@ public:
                                const std::string& label,
                                const std::string& defaultText = "");
 
-    WidgetType widgetType() const override { return WidgetType::InputDialog; }
+    LTGUI_DECLARE_WIDGET_TYPE(InputDialog)
     bool canAcceptFocus() const override { return true; }
 
 protected:

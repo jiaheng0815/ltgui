@@ -18,7 +18,7 @@ public:
     Widget* tabContent(int index) const;
     Widget* currentContent() const;
 
-    WidgetType widgetType() const override { return WidgetType::TabWidget; }
+    LTGUI_DECLARE_WIDGET_TYPE(TabWidget)
     bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
     void setGeometry(const Rect& rect) override;

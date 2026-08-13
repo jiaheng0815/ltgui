@@ -6,17 +6,10 @@
 namespace ltgui {
 
 RadioButton::RadioButton(const std::string& text, Widget* parent)
-    : Widget(parent), text_(text) {
+    : TextWidget(text, parent), Checkable(this) {
     style().bgColor = Color::Transparent;
     style().borderWidth = 0;
     style().fgColor = currentTheme().textPrimary;
-}
-
-void RadioButton::setText(const std::string& text) {
-    text_ = text;
-    invalidateSizeHint();
-    scheduleRelayout();
-    update();
 }
 
 void RadioButton::setChecked(bool checked) {
@@ -33,7 +26,7 @@ void RadioButton::setChecked(bool checked) {
                     if (rb->isChecked()) {
                         rb->checked_ = false;
                         rb->update();
-                        if (rb->toggleCallback_) rb->toggleCallback_(false);
+                        rb->onToggled.emit(false);
                     }
                 }
             }
@@ -46,21 +39,14 @@ void RadioButton::setChecked(bool checked) {
 
     checked_ = checked;
     update();
-    if (toggleCallback_) toggleCallback_(checked_);
+    onToggled.emit(checked_);
 }
 
 Size RadioButton::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    if (auto* win = window()) {
-        if (auto* c = win->canvas()) {
-            c->setFont(style().font);
-            Size textSize = c->measureText(text_);
-            setCachedSizeHint({textSize.width + 24 + style().paddingHorz(),
-                               std::max(textSize.height, 16) + style().paddingVert()});
-            return cachedSizeHint();
-        }
-    }
-    setCachedSizeHint({100, 22});
+    Size s = textSizeHint({100, 22});
+    setCachedSizeHint({s.width + 24 + style().paddingHorz(),
+                       std::max(s.height, 16 + style().paddingVert())});
     return cachedSizeHint();
 }
 

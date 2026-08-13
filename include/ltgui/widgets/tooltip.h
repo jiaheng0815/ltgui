@@ -1,28 +1,24 @@
 #pragma once
-#include "widget.h"
-#include <string>
+#include "widgets/textwidget.h"
 
 namespace ltgui {
 
-class Tooltip : public Widget {
+class Tooltip : public TextWidget {
 public:
     explicit Tooltip(Widget* parent = nullptr);
 
-    std::string text() const { return text_; }
-    void setText(const std::string& text);
     void showAt(const Point& screenPos);
     void dismiss();
 
     static void show(Widget* target, const std::string& text);
 
-    WidgetType widgetType() const override { return WidgetType::Tooltip; }
+    LTGUI_DECLARE_WIDGET_TYPE(Tooltip)
     Size sizeHint() const override;
 
 protected:
     void paintSelf(NativeCanvas* canvas) override;
 
 private:
-    std::string text_;
     Point position_;
 };
 

@@ -5,18 +5,12 @@
 
 namespace ltgui {
 
-Tooltip::Tooltip(Widget* parent) : Widget(parent) {
+Tooltip::Tooltip(Widget* parent) : TextWidget("", parent) {
     style().bgColor = Color(40, 40, 40);
     style().fgColor = Color::White;
     style().borderRadius = 4;
     style().setPadding(8, 4);
     style().font = Font::systemDefault(11);
-}
-
-void Tooltip::setText(const std::string& text) {
-    text_ = text;
-    invalidateSizeHint();
-    update();
 }
 
 void Tooltip::showAt(const Point& pos) {
@@ -33,16 +27,9 @@ void Tooltip::dismiss() {
 
 Size Tooltip::sizeHint() const {
     if (!sizeHintDirty()) return cachedSizeHint();
-    if (auto* win = window()) {
-        if (auto* c = win->canvas()) {
-            c->setFont(style().font);
-            Size textSize = c->measureText(text_);
-            setCachedSizeHint({textSize.width + style().paddingHorz(),
-                               textSize.height + style().paddingVert()});
-            return cachedSizeHint();
-        }
-    }
-    setCachedSizeHint({60, 22});
+    setCachedSizeHint(textSizeHint({60, 22},
+                                   style().paddingHorz(),
+                                   style().paddingVert()));
     return cachedSizeHint();
 }
 

@@ -110,7 +110,7 @@ int main(int argc, char* argv[]) {
     listBox->addItem("Elderberry");
     listBox->addItem("Fig");
     listBox->addItem("Grape");
-    listBox->setSelected(0);
+    listBox->setCurrentIndex(0);
 
     auto* comboBox = listRow->makeChild<ComboBox>();
     comboBox->addItem("Small");

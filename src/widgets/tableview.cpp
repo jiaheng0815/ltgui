@@ -74,7 +74,7 @@ void TableView::setColumnWidth(int col, int width) {
     }
 }
 
-void TableView::selectRow(int row) {
+void TableView::setCurrentIndex(int row) {
     selectedRow_ = row;
     selectedRows_ = {row};
     if (selectCb_) selectCb_(row);
@@ -248,7 +248,7 @@ bool TableView::handleEvent(Event& event) {
         {
             int row = (int)((localY - headerHeight_ + (int64_t)scrollY_ * rowHeight_) / rowHeight_);
             if (row >= 0 && model_ && row < model_->rowCount()) {
-                selectRow(row);
+                setCurrentIndex(row);
                 update();
                 event.accepted = true;
                 return true;

@@ -13,7 +13,7 @@ public:
     bool indeterminate() const { return indeterminate_; }
     void setIndeterminate(bool on);
 
-    WidgetType widgetType() const override { return WidgetType::ProgressBar; }
+    LTGUI_DECLARE_WIDGET_TYPE(ProgressBar)
     Size sizeHint() const override;
 
 protected:

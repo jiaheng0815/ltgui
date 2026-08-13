@@ -12,7 +12,7 @@ public:
     Widget* widget() const;
     Widget* contentWidget() const;
 
-    WidgetType widgetType() const override { return WidgetType::ScrollArea; }
+    LTGUI_DECLARE_WIDGET_TYPE(ScrollArea)
     bool canAcceptFocus() const override { return true; }
     Size sizeHint() const override;
 

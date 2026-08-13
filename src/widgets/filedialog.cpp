@@ -3,10 +3,7 @@
 #include "widgets/textbox.h"
 #include "widgets/combobox.h"
 #include "widgets/button.h"
-#include "widgets/label.h"
 #include "layout.h"
-#include "theme.h"
-#include <algorithm>
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 #ifndef NOMINMAX
@@ -53,7 +50,7 @@ void FileDialog::buildCustomDialog() {
     pathBar_->setMultiLine(false);
 
     fileList_ = panel_->makeChild<ListBox>();
-    fileList_->onSelectionChanged([this](int) { acceptSelection(); });
+    fileList_->onSelectionChanged.connect([this](int) { acceptSelection(); });
 
     if (!filters_.empty()) {
         filterCombo_ = panel_->makeChild<ComboBox>();
@@ -98,7 +95,7 @@ void FileDialog::populateFileList(const std::string& dir) {
 
 void FileDialog::acceptSelection() {
     if (!fileList_) return;
-    int sel = fileList_->selectedIndex();
+    int sel = fileList_->currentIndex();
     if (sel < 0) return;
     std::string item = fileList_->item(sel);
     // Remove [D] prefix if present
