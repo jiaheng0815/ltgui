@@ -26,7 +26,8 @@ public:
 
     void setTitle(const std::string& title);
     void setSize(int width, int height);
-    Size getSize() const;
+    Size size() const;
+    [[deprecated("use size() instead")]] Size getSize() const { return size(); }
 
     void setCentralWidget(std::unique_ptr<Widget> widget);
     Widget* centralWidget() const { return centralWidget_.get(); }

@@ -19,14 +19,6 @@ TEST_CASE("Style edge: padding") {
         CHECK(s.paddingVert() == 0);
     }
 
-    SUBCASE("negative margin is clamped to zero") {
-        Style s;
-        s.setMargin(-10);
-        CHECK(s.marginLeft == 0);
-        s.setMargin(-5, -3);
-        CHECK(s.marginTop == 0);
-    }
-
     SUBCASE("mixed h/v padding") {
         Style s;
         s.setPadding(10, 5);
@@ -100,19 +92,4 @@ TEST_CASE("Theme edge: setTheme to same value is no-op") {
 
     // Restore
     setTheme(t);
-}
-
-TEST_CASE("Style edge: margin") {
-    Style s;
-    s.setMargin(8);
-    CHECK(s.marginLeft == 8);
-    CHECK(s.marginTop == 8);
-    CHECK(s.marginRight == 8);
-    CHECK(s.marginBottom == 8);
-
-    s.setMargin(10, 20);
-    CHECK(s.marginLeft == 10);
-    CHECK(s.marginRight == 10);
-    CHECK(s.marginTop == 20);
-    CHECK(s.marginBottom == 20);
 }

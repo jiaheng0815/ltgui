@@ -1,7 +1,6 @@
 #include "widgets/image.h"
 #include "window.h"
 #include "platform/native_canvas.h"
-#include <algorithm>
 
 namespace ltgui {
 
@@ -20,11 +19,6 @@ bool Image::load(const std::string& path) {
     invalidateSizeHint();
     update();
     return loaded_;
-}
-
-void Image::setFitMode(char mode) {
-    fitMode_ = mode;
-    update();
 }
 
 Size Image::sizeHint() const {
@@ -46,7 +40,7 @@ void Image::paintSelf(NativeCanvas* canvas) {
 
     Rect drawRect = r;
 
-    if (fitMode_ == 'c') {
+    if (fitMode_ == FitMode::Contain) {
         // Contain: fit within bounds, maintaining aspect ratio
         float imgRatio = static_cast<float>(imageSize_.width) / static_cast<float>(imageSize_.height);
         float rectRatio = static_cast<float>(r.width) / static_cast<float>(r.height);
@@ -59,7 +53,7 @@ void Image::paintSelf(NativeCanvas* canvas) {
             drawRect.x += (r.width - newW) / 2;
             drawRect.width = newW;
         }
-    } else if (fitMode_ == 's') {
+    } else if (fitMode_ == FitMode::Stretch) {
         // Stretch: fill exactly
         drawRect = r;
     } else {

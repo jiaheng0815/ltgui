@@ -83,7 +83,7 @@ void Dialog::done(DialogResult result) {
 void Dialog::positionPanel() {
     int ww = 640, wh = 480;
     if (auto* win = window()) {
-        Size sz = win->getSize();
+        Size sz = win->size();
         ww = sz.width; wh = sz.height;
     }
     if (panel_) {
@@ -100,7 +100,7 @@ void Dialog::paintSelf(NativeCanvas* canvas) {
 
     int ww = 640, wh = 480;
     if (auto* win = window()) {
-        Size sz = win->getSize();
+        Size sz = win->size();
         ww = sz.width; wh = sz.height;
     }
 

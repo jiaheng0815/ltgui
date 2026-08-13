@@ -17,10 +17,6 @@ struct Style {
     int16_t paddingTop = 0;
     int16_t paddingRight = 0;
     int16_t paddingBottom = 0;
-    int16_t marginLeft = 0;
-    int16_t marginTop = 0;
-    int16_t marginRight = 0;
-    int16_t marginBottom = 0;
 
     static Style defaultStyle();
 
@@ -33,16 +29,6 @@ struct Style {
         v = std::clamp(v, 0, static_cast<int>(INT16_MAX));
         paddingLeft = paddingRight = static_cast<int16_t>(h);
         paddingTop = paddingBottom = static_cast<int16_t>(v);
-    }
-    void setMargin(int all) {
-        all = std::clamp(all, 0, static_cast<int>(INT16_MAX));
-        marginLeft = marginTop = marginRight = marginBottom = static_cast<int16_t>(all);
-    }
-    void setMargin(int h, int v) {
-        h = std::clamp(h, 0, static_cast<int>(INT16_MAX));
-        v = std::clamp(v, 0, static_cast<int>(INT16_MAX));
-        marginLeft = marginRight = static_cast<int16_t>(h);
-        marginTop = marginBottom = static_cast<int16_t>(v);
     }
 
     int paddingHorz() const { return paddingLeft + paddingRight; }

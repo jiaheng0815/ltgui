@@ -64,10 +64,6 @@ public:
 
     const std::vector<Window*>& windows() const { return windows_; }
 
-    // Timer management (internal; use Timer::start/stop instead)
-    void registerTimer(Timer* timer);
-    void unregisterTimer(Timer* timer);
-
     // DPI scale factor. Set once at startup; all widgets should
     // multiply their pixel sizes by this value.
     void setDpiScale(float scale) { dpiScale_ = scale > 0 ? scale : 1.0f; }
@@ -77,8 +73,13 @@ public:
     Application& operator=(const Application&) = delete;
 
 private:
+    friend class Timer;
     Application() = default;
     ~Application() = default;
+
+    // Timer management — internal; use Timer::start/stop instead
+    void registerTimer(Timer* timer);
+    void unregisterTimer(Timer* timer);
 
     bool running_ = false;
     float dpiScale_ = 1.0f;

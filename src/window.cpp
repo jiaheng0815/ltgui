@@ -120,7 +120,7 @@ void Window::setSize(int width, int height) {
     }
 }
 
-Size Window::getSize() const {
+Size Window::size() const {
     if (nativeWindow_) {
         return nativeWindow_->getSize();
     }
@@ -131,7 +131,7 @@ void Window::setCentralWidget(std::unique_ptr<Widget> widget) {
     centralWidget_ = std::move(widget);
     if (centralWidget_) {
         centralWidget_->setWindow(this);
-        Size sz = getSize();
+        Size sz = size();
         if (!sz.isEmpty()) {
             centralWidget_->setGeometry(Rect(0, 0, sz.width, sz.height));
         }
@@ -140,7 +140,7 @@ void Window::setCentralWidget(std::unique_ptr<Widget> widget) {
 }
 
 void Window::update() {
-    invalidate(Rect(0, 0, getSize().width, getSize().height));
+    invalidate(Rect(0, 0, size().width, size().height));
 }
 
 void Window::invalidate(const Rect& rect) {
@@ -168,7 +168,7 @@ void Window::handlePaintEvent(Event& event) {
     // GPU clears the entire backbuffer each frame, so we must
     // paint the full window regardless of accumulated dirty rects.
     if (!dirtyValid_ || useGpu_) {
-        Size sz = getSize();
+        Size sz = size();
         accumulatedDirty_ = Rect(0, 0, sz.width, sz.height);
     }
     onPaint(canvas_, accumulatedDirty_);

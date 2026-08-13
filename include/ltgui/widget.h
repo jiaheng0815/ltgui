@@ -32,6 +32,8 @@ enum class WidgetType {
     ContextMenu,
     MenuBar,
     Dialog,
+    MessageBox,
+    InputDialog,
     TableView,
     FileDialog,
 };
@@ -102,7 +104,6 @@ public:
     void invalidateSizeHint() { sizeHintCache_.dirty = true; if (parent_) parent_->invalidateSizeHint(); }
     void scheduleRelayout();
     [[nodiscard]] Window* window() const { return window_; }
-    void setWindow(Window* window);
     void claimFocus();
 
     // Painting
@@ -131,6 +132,11 @@ public:
     [[nodiscard]] Widget* lastFocusableDescendant();
 
 protected:
+    friend class Window;
+    // Called by Window when this widget (or an ancestor) is attached to /
+    // detached from a window. Not part of the public API.
+    void setWindow(Window* window);
+
     virtual void paintSelf(NativeCanvas* canvas);
     virtual void paintChildren(NativeCanvas* canvas, const Rect& dirtyRect);
     virtual void paintBorder(NativeCanvas* canvas);

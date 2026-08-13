@@ -150,7 +150,7 @@ void ComboBox::openDropdown() {
     dropHeight_ = std::min(static_cast<int>(items_.size()) * 26, 200) + 2;
     opensDownward_ = true;
     if (auto* win = window()) {
-        if (absoluteRect().bottom() + dropHeight_ > win->getSize().height - 4) {
+        if (absoluteRect().bottom() + dropHeight_ > win->size().height - 4) {
             opensDownward_ = false;
         }
     }

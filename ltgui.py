@@ -269,7 +269,7 @@ def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=Fa
     obj_path = os.path.join(OBJ_DIR, rel + ext)
 
     if is_msvc:
-        flags = [compiler, "/nologo", "/c", "/std:c++17", "/EHsc"]
+        flags = [compiler, "/nologo", "/c", "/std:c++20", "/EHsc"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
@@ -279,7 +279,7 @@ def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=Fa
         flags += get_platform_flags(platform, is_msvc=True)
         flags += [src_path, f"/Fo{obj_path}"]
     else:
-        flags = [compiler, "-c", "-std=c++17", "-fexec-charset=UTF-8"]
+        flags = [compiler, "-c", "-std=c++20", "-fexec-charset=UTF-8"]
         if pic:
             flags.append("-fPIC")
         if is_release:
@@ -376,7 +376,7 @@ def build_shared_lib(platform, is_release, compiler):
 
     cprint(f"  Linking {dll_name}...", Color.CYAN)
 
-    flags = [compiler, "-shared", "-std=c++17"]
+    flags = [compiler, "-shared", "-std=c++20"]
     if platform != "macos":
         flags.append("-static")
     if platform == "windows":
@@ -453,7 +453,7 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
     exe_path = os.path.join(BUILD_DIR, name + exe_ext)
 
     if is_msvc:
-        flags = [compiler, "/nologo", "/std:c++17", "/EHsc"]
+        flags = [compiler, "/nologo", "/std:c++20", "/EHsc"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
@@ -466,7 +466,7 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
         flags += get_platform_libs(platform, is_msvc=True)
         flags += ["/SUBSYSTEM:CONSOLE"]
     else:
-        flags = [compiler, "-std=c++17", "-fexec-charset=UTF-8"]
+        flags = [compiler, "-std=c++20", "-fexec-charset=UTF-8"]
         if is_release:
             flags += ["-O2", "-DNDEBUG"]
         else:
@@ -986,7 +986,7 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
     vendor_include = os.path.join(SCRIPT_DIR, "vendor")
 
     if is_msvc:
-        flags = [compiler, "/nologo", "/std:c++17", "/EHsc", "/Zi", "/Od"]
+        flags = [compiler, "/nologo", "/std:c++20", "/EHsc", "/Zi", "/Od"]
         flags += ["/I", INCLUDE_DIR, "/I", vendor_include]
         flags += get_platform_flags(platform, is_msvc=True)
         flags += [f"/Fe:{exe_path}"]
@@ -995,7 +995,7 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
         flags += get_platform_libs(platform, is_msvc=True)
         flags += ["/SUBSYSTEM:CONSOLE"]
     else:
-        flags = [compiler, "-std=c++17", "-g", "-O0", "-fexec-charset=UTF-8"]
+        flags = [compiler, "-std=c++20", "-g", "-O0", "-fexec-charset=UTF-8"]
         if platform == "windows":
             flags.append("-mconsole")
         flags += ["-I", INCLUDE_DIR, "-I", vendor_include]
@@ -1220,7 +1220,7 @@ def cmd_lint(positional, flags):
         if os.path.exists(compile_db):
             cmd += [f"-p={BUILD_DIR}"]
         else:
-            cmd += ["--", f"-std=c++17", f"-I{INCLUDE_DIR}", f"-I{VENDOR_DIR}"]
+            cmd += ["--", f"-std=c++20", f"-I{INCLUDE_DIR}", f"-I{VENDOR_DIR}"]
 
         result = subprocess.run(cmd, capture_output=True, text=True)
         output = (result.stdout + result.stderr).strip()
