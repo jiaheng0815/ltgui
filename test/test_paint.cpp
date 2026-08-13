@@ -160,3 +160,20 @@ TEST_CASE("Theme switch updates resolved style automatically") {
 
     setTheme(Theme::Light()); // restore for other tests
 }
+
+TEST_CASE("Style gradient background paints linear gradient") {
+    Widget w;
+    w.setGeometry(Rect(0, 0, 100, 50));
+    w.style().gradient = Gradient{Color::Red, Color(0, 0, 255), true};
+    w.paint(&g_canvas, Rect(0, 0, 100, 50));
+    REQUIRE(g_canvas.gradients.size() == 1);
+    CHECK(g_canvas.gradients[0].from == Color::Red);
+    CHECK(g_canvas.gradients[0].to == Color(0, 0, 255));
+    CHECK(g_canvas.gradients[0].vertical);
+
+    // Without a gradient, a plain fill is used instead.
+    g_canvas.reset();
+    w.style().gradient.reset();
+    w.paint(&g_canvas, Rect(0, 0, 100, 50));
+    CHECK(g_canvas.gradients.empty());
+}

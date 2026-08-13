@@ -255,6 +255,17 @@ void Win32Canvas::strokeRoundedRect(const Rect& rect, int radius, int lineWidth)
     graphics_->DrawPath(pen_, &path);
 }
 
+void Win32Canvas::fillLinearGradient(const Rect& rect, const Color& from, const Color& to,
+                                     bool vertical) {
+    if (!graphics_) return;
+    Gdiplus::LinearGradientBrush brush(
+        Gdiplus::Rect(rect.x, rect.y, rect.width, rect.height),
+        Gdiplus::Color(from.a, from.r, from.g, from.b),
+        Gdiplus::Color(to.a, to.r, to.g, to.b),
+        vertical ? 90.0f : 0.0f);
+    graphics_->FillRectangle(&brush, rect.x, rect.y, rect.width, rect.height);
+}
+
 void Win32Canvas::drawImage(const std::string& path, const Rect& rect) {
     if (!graphics_) return;
 

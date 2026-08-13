@@ -147,6 +147,11 @@ void GpuCanvas::fillRect(const Rect& rect) {
     if (renderer_) renderer_->fillRect(rect, currentColor_);
 }
 
+void GpuCanvas::fillLinearGradient(const Rect& rect, const Color& from, const Color& to,
+                                   bool vertical) {
+    if (renderer_) renderer_->fillLinearGradient(rect, from, to, vertical);
+}
+
 void GpuCanvas::strokeRect(const Rect& rect, int lineWidth) {
     if (renderer_) renderer_->strokeRect(rect, (float)lineWidth, currentColor_);
 }

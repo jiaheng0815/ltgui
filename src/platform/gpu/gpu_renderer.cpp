@@ -74,6 +74,13 @@ void Renderer2D::fillRect(const Rect& r, const Color& c) {
     cmds_.push_back({DrawOp::FillRect, r, c});
 }
 
+void Renderer2D::fillLinearGradient(const Rect& r, const Color& from, const Color& to, bool vertical) {
+    if (from.a == 0 && to.a == 0) return;
+    // p1.x carries the direction flag (1 = vertical) through the draw cmd.
+    cmds_.push_back({DrawOp::FillGradientRect, r, from, 0, 0, -1,
+                     vertical ? Point(1, 0) : Point(0, 0), {}, to});
+}
+
 void Renderer2D::fillRoundedRect(const Rect& r, float radius, const Color& c) {
     if (c.a == 0) return;
     cmds_.push_back({DrawOp::FillRoundedRect, r, c, radius});
@@ -151,6 +158,7 @@ void Renderer2D::flushBatch() {
     auto shaderFor = [](DrawOp op) -> int {
         switch (op) {
         case DrawOp::FillRect:          return 0; // Solid
+        case DrawOp::FillGradientRect:  return 0; // Solid (per-vertex color)
         case DrawOp::FillRoundedRect:   return 1; // Rounded
         case DrawOp::StrokeRect:        return 1;
         case DrawOp::StrokeRounded:     return 1;
@@ -209,6 +217,13 @@ void Renderer2D::flushBatch() {
             switch (cmd.op) {
             case DrawOp::FillRect:
                 emitQuad(verts, cmd.rect, 0, 0, 1, 1, color, 0, 0, 0, 0);
+                break;
+            case DrawOp::FillGradientRect:
+                // Vertical: colorA on top, colorB on bottom; horizontal:
+                // colorA on left, colorB on right. The GPU interpolates
+                // per-vertex colors across the quad.
+                emitGradientQuad(verts, cmd.rect, color, cmd.color2.toABGR(),
+                                 cmd.p1.x > 0.0f);
                 break;
             case DrawOp::FillRoundedRect:
                 emitQuad(verts, cmd.rect, 0, 0, 1, 1, color,
@@ -279,6 +294,29 @@ void Renderer2D::emitQuad(std::vector<Vertex2D>& out, const Rect& r,
         {x0, y1, u0, v1, color, p0, p1, p2, p3},
         {x1, y0, u1, v0, color, p0, p1, p2, p3},
         {x1, y1, u1, v1, color, p0, p1, p2, p3},
+    };
+    out.insert(out.end(), v, v + 6);
+}
+
+void Renderer2D::emitGradientQuad(std::vector<Vertex2D>& out, const Rect& r,
+                                  uint32_t colorA, uint32_t colorB, bool vertical) {
+    float x0 = toNdcX(static_cast<float>(r.x), width_);
+    float y0 = toNdcY(static_cast<float>(r.y), height_);
+    float x1 = toNdcX(static_cast<float>(r.right()), width_);
+    float y1 = toNdcY(static_cast<float>(r.bottom()), height_);
+    // Vertical: A at top (y0), B at bottom (y1); horizontal: A at left (x0).
+    uint32_t cTL = colorA, cTR = colorA, cBL = colorB, cBR = colorB;
+    if (!vertical) {
+        cTL = cBL = colorA;
+        cTR = cBR = colorB;
+    }
+    Vertex2D v[] = {
+        {x0, y0, 0, 0, cTL, 0, 0, 0, 0},
+        {x1, y0, 1, 0, cTR, 0, 0, 0, 0},
+        {x0, y1, 0, 1, cBL, 0, 0, 0, 0},
+        {x0, y1, 0, 1, cBL, 0, 0, 0, 0},
+        {x1, y0, 1, 0, cTR, 0, 0, 0, 0},
+        {x1, y1, 1, 1, cBR, 0, 0, 0, 0},
     };
     out.insert(out.end(), v, v + 6);
 }

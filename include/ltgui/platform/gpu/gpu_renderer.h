@@ -13,6 +13,7 @@ class FontAtlas;
 
 enum class DrawOp : uint8_t {
     FillRect,
+    FillGradientRect,
     FillRoundedRect,
     FillEllipse,
     StrokeRect,
@@ -31,6 +32,7 @@ struct DrawCmd {
     float lineWidth = 1; // for stroke / line
     int texId = -1;     // -1 = solid color, >=0 = texture
     Point p1, p2;       // for DrawLine
+    Color color2;       // second color for FillGradientRect
 };
 
 // Manages texture uploads — keeps GpuTexture alive and maps handles
@@ -67,6 +69,8 @@ public:
 
     // Drawing commands (all deferred)
     void fillRect(const Rect& r, const Color& c);
+    // Two-color linear gradient — interpolated per-vertex on the GPU.
+    void fillLinearGradient(const Rect& r, const Color& from, const Color& to, bool vertical);
     void fillRoundedRect(const Rect& r, float radius, const Color& c);
     void fillEllipse(const Rect& r, const Color& c);
     void strokeRect(const Rect& r, float lineWidth, const Color& c);
@@ -98,6 +102,8 @@ private:
     void emitQuad(std::vector<Vertex2D>& out, const Rect& r,
                   float u0, float v0, float u1, float v1, uint32_t color,
                   float p0, float p1, float p2, float p3);
+    void emitGradientQuad(std::vector<Vertex2D>& out, const Rect& r,
+                          uint32_t colorA, uint32_t colorB, bool vertical);
     void emitStrokeRect(std::vector<Vertex2D>& out, const Rect& r, uint32_t color, float lineWidth);
     void emitStrokeEllipse(std::vector<Vertex2D>& out, const Rect& r, uint32_t color, float lineWidth);
     void emitLine(std::vector<Vertex2D>& out, const Point& p1, const Point& p2, uint32_t color);

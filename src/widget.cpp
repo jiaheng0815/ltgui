@@ -223,8 +223,15 @@ void Widget::paint(NativeCanvas* canvas, const Rect& dirtyRect) {
     // Only fill the dirty portion — the backbuffer retains the rest from the
     // previous frame. Painting the full widget rect would erase sibling widgets
     // that don't intersect the dirty region.
-    canvas->setColor(style_.bgColor);
-    canvas->fillRect(abs.intersected(dirtyRect));
+    ResolvedStyle st = resolvedStyle();
+    if (st.gradient) {
+        canvas->fillLinearGradient(abs.intersected(dirtyRect),
+                                   st.gradient->from, st.gradient->to,
+                                   st.gradient->vertical);
+    } else {
+        canvas->setColor(st.bgColor);
+        canvas->fillRect(abs.intersected(dirtyRect));
+    }
 
     paintSelf(canvas);
     paintBorder(canvas);
@@ -255,16 +262,22 @@ void Widget::paintBorder(NativeCanvas* canvas) {
 
 void Widget::paintBackground(NativeCanvas* canvas) {
     Rect r = absoluteRect();
-    canvas->setColor(style_.bgColor);
-    if (style_.borderRadius > 0) {
-        canvas->fillRoundedRect(r, style_.borderRadius);
+    ResolvedStyle st = resolvedStyle();
+    if (st.gradient) {
+        canvas->fillLinearGradient(r, st.gradient->from, st.gradient->to,
+                                   st.gradient->vertical);
     } else {
-        canvas->fillRect(r);
+        canvas->setColor(st.bgColor);
+        if (st.borderRadius > 0) {
+            canvas->fillRoundedRect(r, st.borderRadius);
+        } else {
+            canvas->fillRect(r);
+        }
     }
-    if (style_.borderWidth > 0) {
-        canvas->setColor(style_.borderColor);
-        int bw = style_.borderWidth;
-        int br = style_.borderRadius;
+    if (st.borderWidth > 0) {
+        canvas->setColor(st.borderColor);
+        int bw = st.borderWidth;
+        int br = st.borderRadius;
         if (br > 0) {
             canvas->strokeRoundedRect(r.adjusted(0, 0, -1, -1), br, bw);
         } else {

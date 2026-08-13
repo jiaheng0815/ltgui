@@ -21,6 +21,11 @@ public:
     virtual void strokeRect(const Rect& rect, int lineWidth = 1) = 0;
     virtual void fillRoundedRect(const Rect& rect, int radius);
     virtual void strokeRoundedRect(const Rect& rect, int radius, int lineWidth = 1);
+    // Two-color linear gradient. Default implementation bands fillRect
+    // rows/columns with lerped colors; backends override with native
+    // gradient primitives where available.
+    virtual void fillLinearGradient(const Rect& rect, const Color& from, const Color& to,
+                                    bool vertical = false);
     virtual void drawText(const std::string& text, const Rect& rect, int flags = 0) = 0;
     virtual void drawLine(const Point& p1, const Point& p2, int lineWidth = 1) = 0;
     virtual void fillEllipse(const Rect& rect) = 0;
@@ -54,6 +59,20 @@ inline void NativeCanvas::fillRoundedRect(const Rect& rect, int /*radius*/) {
 }
 inline void NativeCanvas::strokeRoundedRect(const Rect& rect, int /*radius*/, int lineWidth) {
     strokeRect(rect, lineWidth);
+}
+inline void NativeCanvas::fillLinearGradient(const Rect& rect, const Color& from, const Color& to,
+                                             bool vertical) {
+    int steps = vertical ? rect.height : rect.width;
+    if (steps <= 0) return;
+    for (int i = 0; i < steps; i++) {
+        float t = steps > 1 ? static_cast<float>(i) / static_cast<float>(steps - 1) : 0.0f;
+        setColor(Color::lerp(from, to, t));
+        if (vertical) {
+            fillRect(Rect(rect.x, rect.y + i, rect.width, 1));
+        } else {
+            fillRect(Rect(rect.x + i, rect.y, 1, rect.height));
+        }
+    }
 }
 inline void NativeCanvas::drawImage(const std::string& /*path*/, const Rect& /*rect*/) {
     // No-op default: platforms override when image support is available

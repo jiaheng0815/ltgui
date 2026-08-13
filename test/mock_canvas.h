@@ -31,15 +31,22 @@ public:
         Rect rect;
         Color color;
     };
+    struct GradientFill {
+        Rect rect;
+        Color from;
+        Color to;
+        bool vertical = false;
+    };
 
-    std::vector<Fill>     fills;
-    std::vector<Stroke>   strokes;
-    std::vector<Ellipse>  ellipses;
-    std::vector<Text>     texts;
-    std::vector<Color>    colors; // every setColor call
+    std::vector<Fill>         fills;
+    std::vector<Stroke>       strokes;
+    std::vector<Ellipse>      ellipses;
+    std::vector<Text>         texts;
+    std::vector<GradientFill> gradients;
+    std::vector<Color>        colors; // every setColor call
 
     Color currentColor() const { return colors.empty() ? Color::Transparent : colors.back(); }
-    void reset() { fills.clear(); strokes.clear(); texts.clear(); colors.clear(); }
+    void reset() { fills.clear(); strokes.clear(); ellipses.clear(); texts.clear(); gradients.clear(); colors.clear(); }
 
     // --- NativeCanvas ---
     void resize(int, int) override {}
@@ -51,6 +58,9 @@ public:
     void strokeRect(const Rect& r, int w = 1) override { strokes.push_back({currentColor(), r, 0, w}); }
     void fillRoundedRect(const Rect& r, int radius) override { fills.push_back({currentColor(), r, radius}); }
     void strokeRoundedRect(const Rect& r, int radius, int w = 1) override { strokes.push_back({currentColor(), r, radius, w}); }
+    void fillLinearGradient(const Rect& r, const Color& f, const Color& t, bool v = false) override {
+        gradients.push_back({r, f, t, v});
+    }
     void drawText(const std::string& t, const Rect& r, int = 0) override { texts.push_back({t, r, currentColor()}); }
     void drawLine(const Point&, const Point&, int = 1) override {}
     void fillEllipse(const Rect& r) override { ellipses.push_back({currentColor(), r, true, 0}); }
