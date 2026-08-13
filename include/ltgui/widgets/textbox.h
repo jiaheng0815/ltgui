@@ -1,7 +1,7 @@
 #pragma once
 #include "widgets/textwidget.h"
+#include "signal.h"
 #include <vector>
-#include <functional>
 
 namespace ltgui {
 
@@ -31,8 +31,8 @@ public:
     bool canUndo() const { return !undoStack_.empty(); }
     bool canRedo() const { return !redoStack_.empty(); }
 
-    using TextChangedCallback = std::function<void(const std::string&)>;
-    void onTextChanged(TextChangedCallback cb) { textChangedCallback_ = std::move(cb); }
+    // Emitted whenever the text content changes (programmatic or user input).
+    Signal<const std::string&> onTextChanged;
 
 protected:
     void paintSelf(NativeCanvas* canvas) override;
@@ -50,7 +50,6 @@ private:
     std::string imePreedit_;
     int imeCursor_ = 0;
 
-    TextChangedCallback textChangedCallback_;
 
     // Undo/Redo stack
     struct UndoEntry {

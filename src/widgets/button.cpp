@@ -94,7 +94,7 @@ bool Button::handleEvent(Event& event) {
         if (event.button == MouseButton::Left && pressed_) {
             pressed_ = false;
             update();
-            if (clickCallback_ && hovered_) clickCallback_();
+            if (hovered_) onClicked.emit();
             event.accepted = true;
             return true;
         }
@@ -111,7 +111,7 @@ bool Button::handleEvent(Event& event) {
         if (event.key == Key::Enter || event.key == Key::Space) {
             pressed_ = false;
             update();
-            if (clickCallback_) clickCallback_();
+            onClicked.emit();
             event.accepted = true;
             return true;
         }

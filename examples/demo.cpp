@@ -38,7 +38,7 @@ int main(int argc, char* argv[]) {
     btn2->setEnabled(false);
     int clicks = 0;
     auto* btn3 = buttonRow->makeChild<Button>("Counter: 0");
-    btn3->onClick([&]() {
+    btn3->onClicked.connect([&]() {
         clicks++;
         btn3->setText("Counter: " + std::to_string(clicks));
     });

@@ -1,6 +1,6 @@
 #pragma once
 #include "widgets/textwidget.h"
-#include <functional>
+#include "signal.h"
 
 namespace ltgui {
 
@@ -8,8 +8,8 @@ class Button : public TextWidget {
 public:
     explicit Button(const std::string& text = "", Widget* parent = nullptr);
 
-    using ClickCallback = std::function<void()>;
-    void onClick(ClickCallback cb) { clickCallback_ = std::move(cb); }
+    // Emitted when the button is activated (click or Enter/Space).
+    Signal<> onClicked;
 
     LTGUI_DECLARE_WIDGET_TYPE(Button)
     bool canAcceptFocus() const override { return true; }
@@ -22,7 +22,6 @@ protected:
 private:
     bool pressed_ = false;
     bool hovered_ = false;
-    ClickCallback clickCallback_;
 };
 
 } // namespace ltgui

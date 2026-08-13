@@ -1,10 +1,10 @@
 #pragma once
 #include "widget.h"
 #include "animation.h"
+#include "signal.h"
 #include <string>
 #include <vector>
 #include <memory>
-#include <functional>
 
 namespace ltgui {
 
@@ -49,8 +49,8 @@ public:
     TreeViewItem* selectedItem() const { return selected_; }
     void setSelectedItem(TreeViewItem* item);
 
-    using SelectionChangedCallback = std::function<void(TreeViewItem*)>;
-    void onSelectionChanged(SelectionChangedCallback cb) { selectionCallback_ = std::move(cb); }
+    // Emitted whenever the selected item changes.
+    Signal<TreeViewItem*> onSelectionChanged;
 
     LTGUI_DECLARE_WIDGET_TYPE(TreeView)
     bool canAcceptFocus() const override { return true; }
@@ -67,7 +67,6 @@ private:
     int scrollTarget_ = 0;
     int itemHeight_ = 26;
     int indentWidth_ = 20;
-    SelectionChangedCallback selectionCallback_;
 
     int visibleItems() const;
     int totalRows() const;

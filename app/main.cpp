@@ -45,7 +45,7 @@ int main(int argc, char* argv[]) {
     // Theme toggle button
     bool darkTheme = false;
     auto* themeBtn = header->makeChild<Button>("Dark Theme");
-    themeBtn->onClick([&]() {
+    themeBtn->onClicked.connect([&]() {
         darkTheme = !darkTheme;
         setTheme(darkTheme ? Theme::Dark() : Theme::Light());
         themeBtn->setText(darkTheme ? "Light Theme" : "Dark Theme");
@@ -80,7 +80,7 @@ int main(int argc, char* argv[]) {
     primaryBtn->style().fgColor = Color::White;
 
     auto* counterBtn = btnRow->makeChild<Button>("Clicked: 0 times");
-    counterBtn->onClick([&]() {
+    counterBtn->onClicked.connect([&]() {
         g_clickCount++;
         counterBtn->setText("Clicked: " + std::to_string(g_clickCount) + " times");
     });

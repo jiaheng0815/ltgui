@@ -65,7 +65,7 @@ TreeViewItem* TreeView::rootItem() { return root_.get(); }
 void TreeView::setSelectedItem(TreeViewItem* item) {
     selected_ = item;
     update();
-    if (selectionCallback_) selectionCallback_(item);
+    onSelectionChanged.emit(item);
 }
 
 Size TreeView::sizeHint() const {

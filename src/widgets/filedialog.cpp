@@ -65,9 +65,9 @@ void FileDialog::buildCustomDialog() {
     btnRow->setLayout(std::move(bl));
 
     auto* ok = btnRow->makeChild<Button>("Open");
-    ok->onClick([this]() { acceptSelection(); done(DialogResult::OK); });
+    ok->onClicked.connect([this]() { acceptSelection(); done(DialogResult::OK); });
     auto* cancel = btnRow->makeChild<Button>("Cancel");
-    cancel->onClick([this]() { done(DialogResult::Cancel); });
+    cancel->onClicked.connect([this]() { done(DialogResult::Cancel); });
 }
 
 void FileDialog::populateFileList(const std::string& dir) {

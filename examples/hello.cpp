@@ -29,13 +29,13 @@ int main(int argc, char* argv[]) {
 
     auto* button = root->makeChild<Button>("Click Me!");
     int clickCount = 0;
-    button->onClick([&]() {
+    button->onClicked.connect([&]() {
         clickCount++;
         button->setText("Clicked: " + std::to_string(clickCount) + " times");
     });
 
     auto* quitBtn = root->makeChild<Button>("Quit");
-    quitBtn->onClick([&]() {
+    quitBtn->onClicked.connect([&]() {
         window.close();
     });
 

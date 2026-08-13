@@ -134,7 +134,7 @@ bool DropTarget::acceptsMime(const std::string& mime) const {
 }
 
 void DropTarget::handleDrop(const DragData& data) {
-    if (dropCb_) dropCb_(data);
+    onDrop.emit(data);
 }
 
 bool DropTarget::handleDragOver(const DragData& data) {

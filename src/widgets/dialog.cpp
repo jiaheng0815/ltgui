@@ -26,7 +26,7 @@ Size Dialog::sizeHint() const {
 void Dialog::addButton(const std::string& text, DialogResult res, bool isDefault) {
     if (!panel_) return;
     auto* btn = panel_->makeChild<Button>(text);
-    btn->onClick([this, res]() { done(res); });
+    btn->onClicked.connect([this, res]() { done(res); });
     if (isDefault) {
         btn->style().borderWidth = 2;
         btn->style().borderColor = currentTheme().accent;
@@ -76,7 +76,7 @@ DialogResult Dialog::exec() {
 void Dialog::done(DialogResult result) {
     result_ = result;
     running_ = false;
-    if (resultCallback_) resultCallback_(result);
+    onFinished.emit(result);
     update();
 }
 
@@ -169,19 +169,19 @@ void MessageBox::rebuild() {
 
     if (buttonFlags_ & static_cast<int>(DialogButton::OK)) {
         auto* b = btnRow->makeChild<Button>("OK");
-        b->onClick([this]() { done(DialogResult::OK); });
+        b->onClicked.connect([this]() { done(DialogResult::OK); });
     }
     if (buttonFlags_ & static_cast<int>(DialogButton::Cancel)) {
         auto* b = btnRow->makeChild<Button>("Cancel");
-        b->onClick([this]() { done(DialogResult::Cancel); });
+        b->onClicked.connect([this]() { done(DialogResult::Cancel); });
     }
     if (buttonFlags_ & static_cast<int>(DialogButton::Yes)) {
         auto* b = btnRow->makeChild<Button>("Yes");
-        b->onClick([this]() { done(DialogResult::Yes); });
+        b->onClicked.connect([this]() { done(DialogResult::Yes); });
     }
     if (buttonFlags_ & static_cast<int>(DialogButton::No)) {
         auto* b = btnRow->makeChild<Button>("No");
-        b->onClick([this]() { done(DialogResult::No); });
+        b->onClicked.connect([this]() { done(DialogResult::No); });
     }
 
     if (!message_.empty())
@@ -239,9 +239,9 @@ void InputDialog::rebuild() {
     btnRow->setLayout(std::move(bl));
 
     auto* okBtn = btnRow->makeChild<Button>("OK");
-    okBtn->onClick([this]() { done(DialogResult::OK); });
+    okBtn->onClicked.connect([this]() { done(DialogResult::OK); });
     auto* cancelBtn = btnRow->makeChild<Button>("Cancel");
-    cancelBtn->onClick([this]() { done(DialogResult::Cancel); });
+    cancelBtn->onClicked.connect([this]() { done(DialogResult::Cancel); });
 }
 
 void InputDialog::setText(const std::string& text) {

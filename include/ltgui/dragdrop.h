@@ -1,5 +1,6 @@
 #pragma once
 #include "geometry.h"
+#include "signal.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -44,13 +45,15 @@ private:
 
 class DropTarget {
 public:
-    using DropCallback = std::function<void(const DragData&)>;
+    // DragOver returns bool (accept or reject the drag), so it keeps a
+    // single std::function — Signal<T> emits void callbacks only.
     using DragOverCallback = std::function<bool(const DragData&)>;
 
     explicit DropTarget(Widget* w) : widget_(w) {}
 
     void setAcceptedMimeTypes(const std::vector<std::string>& types) { acceptedTypes_ = types; }
-    void onDrop(DropCallback cb) { dropCb_ = std::move(cb); }
+    // Emitted when a drop completes on this widget.
+    Signal<const DragData&> onDrop;
     void onDragOver(DragOverCallback cb) { dragOverCb_ = std::move(cb); }
 
     Widget* widget() const { return widget_; }
@@ -61,7 +64,6 @@ public:
 private:
     Widget* widget_;
     std::vector<std::string> acceptedTypes_;
-    DropCallback dropCb_;
     DragOverCallback dragOverCb_;
 };
 

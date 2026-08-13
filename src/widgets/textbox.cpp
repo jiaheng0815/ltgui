@@ -29,7 +29,7 @@ void TextBox::setText(const std::string& text) {
     invalidateSizeHint();
     scheduleRelayout();
     update();
-    if (textChangedCallback_) textChangedCallback_(text_);
+    onTextChanged.emit(text_);
 }
 
 void TextBox::setMultiLine(bool multiLine) {
@@ -70,7 +70,7 @@ void TextBox::undo() {
     selectionStart_ = entry.selectionStart;
     undoing_ = false;
     update();
-    if (textChangedCallback_) textChangedCallback_(text_);
+    onTextChanged.emit(text_);
 }
 
 void TextBox::redo() {
@@ -84,7 +84,7 @@ void TextBox::redo() {
     selectionStart_ = entry.selectionStart;
     undoing_ = false;
     update();
-    if (textChangedCallback_) textChangedCallback_(text_);
+    onTextChanged.emit(text_);
 }
 
 void TextBox::deleteSelection() {
@@ -110,7 +110,7 @@ void TextBox::insertText(const std::string& str) {
     cursorPos_ += static_cast<int>(str.size());
     invalidateSizeHint();
     update();
-    if (textChangedCallback_) textChangedCallback_(text_);
+    onTextChanged.emit(text_);
 }
 
 void TextBox::deleteCharBefore() {
@@ -118,7 +118,7 @@ void TextBox::deleteCharBefore() {
     if (selectionStart_ >= 0) {
         deleteSelection();
         update();
-        if (textChangedCallback_) textChangedCallback_(text_);
+        onTextChanged.emit(text_);
         return;
     }
     if (cursorPos_ > 0) {
@@ -126,7 +126,7 @@ void TextBox::deleteCharBefore() {
         text_.erase(prev, cursorPos_ - prev);
         cursorPos_ = prev;
         update();
-        if (textChangedCallback_) textChangedCallback_(text_);
+        onTextChanged.emit(text_);
     }
 }
 
@@ -135,14 +135,14 @@ void TextBox::deleteCharAt() {
     if (selectionStart_ >= 0) {
         deleteSelection();
         update();
-        if (textChangedCallback_) textChangedCallback_(text_);
+        onTextChanged.emit(text_);
         return;
     }
     if (cursorPos_ < static_cast<int>(text_.size())) {
         int nxt = utf8::nextPos(text_, cursorPos_);
         text_.erase(cursorPos_, nxt - cursorPos_);
         update();
-        if (textChangedCallback_) textChangedCallback_(text_);
+        onTextChanged.emit(text_);
     }
 }
 
@@ -247,7 +247,7 @@ void TextBox::cut() {
         }
         selectionStart_ = -1;
         update();
-        if (textChangedCallback_) textChangedCallback_(text_);
+        onTextChanged.emit(text_);
     }
 }
 

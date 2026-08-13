@@ -1,8 +1,8 @@
 #pragma once
 #include "widget.h"
 #include "animation.h"
+#include "signal.h"
 #include <string>
-#include <functional>
 
 namespace ltgui {
 
@@ -33,8 +33,8 @@ public:
 
     void setTitle(const std::string& title) { title_ = title; }
 
-    using ResultCallback = std::function<void(DialogResult)>;
-    void onFinished(ResultCallback cb) { resultCallback_ = std::move(cb); }
+    // Emitted when the dialog closes with a result (done()).
+    Signal<DialogResult> onFinished;
 
     LTGUI_DECLARE_WIDGET_TYPE(Dialog)
     bool canAcceptFocus() const override { return true; }
@@ -52,7 +52,6 @@ protected:
 
     std::string title_;
     DialogResult result_ = DialogResult::None;
-    ResultCallback resultCallback_;
     bool running_ = false;
     AnimatedFloat fadeAnim_{0.0f};
     Widget* overlay_ = nullptr;

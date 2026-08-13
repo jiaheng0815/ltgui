@@ -77,7 +77,7 @@ void TableView::setColumnWidth(int col, int width) {
 void TableView::setCurrentIndex(int row) {
     selectedRow_ = row;
     selectedRows_ = {row};
-    if (selectCb_) selectCb_(row);
+    onRowSelected.emit(row);
     update();
 }
 
@@ -237,7 +237,7 @@ bool TableView::handleEvent(Event& event) {
                 if (model_) {
                     model_->sort(col, asc);
                 }
-                if (headerCb_) headerCb_(col);
+                onHeaderClicked.emit(col);
                 update();
             }
             event.accepted = true;

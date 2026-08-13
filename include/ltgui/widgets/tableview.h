@@ -1,8 +1,8 @@
 #pragma once
 #include "widget.h"
+#include "signal.h"
 #include <string>
 #include <vector>
-#include <functional>
 #include <memory>
 
 namespace ltgui {
@@ -69,10 +69,9 @@ public:
 
     void setSortColumn(int col, bool ascending);
 
-    using RowCallback = std::function<void(int)>;
-    using HeaderCallback = std::function<void(int)>;
-    void onRowSelected(RowCallback cb) { selectCb_ = std::move(cb); }
-    void onHeaderClicked(HeaderCallback cb) { headerCb_ = std::move(cb); }
+    // Emitted when a row is selected / a header column is clicked.
+    Signal<int> onRowSelected;
+    Signal<int> onHeaderClicked;
 
     LTGUI_DECLARE_WIDGET_TYPE(TableView)
     bool canAcceptFocus() const override { return true; }
@@ -95,9 +94,6 @@ private:
     int resizingCol_ = -1;
     int resizeStartX_ = 0;
     int resizeStartW_ = 0;
-
-    RowCallback selectCb_;
-    HeaderCallback headerCb_;
 
     int visibleRows() const;
     int totalWidth() const;
