@@ -30,10 +30,17 @@ private:
   void openDropdown();
   void closeDropdown();
   void invalidateExtended();
+  // Move this widget back to its pre-open slot in the parent's child
+  // list. raiseToTop() reorders children_ (needed so the dropdown paints
+  // on top), but layouts position children by vector order — leaving the
+  // combo raised permanently shifts it to the end of its row after any
+  // relayout (e.g. a sibling label's setText on selection).
+  void restoreZOrder();
 
   bool dropdownOpen_ = false;
   bool opensDownward_ = true;
   int dropHeight_ = 0;
+  int zIndex_ = -1; // index in parent's children before raiseToTop()
 };
 
 } // namespace ltgui

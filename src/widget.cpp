@@ -215,6 +215,31 @@ void Widget::raiseToTop() {
   }
 }
 
+void Widget::restoreChildOrder(int index) {
+  if (index < 0 || !parent_)
+    return;
+  auto &siblings = parent_->children_;
+  int cur = -1;
+  for (int i = 0; i < static_cast<int>(siblings.size()); i++) {
+    if (siblings[i].get() == this) {
+      cur = i;
+      break;
+    }
+  }
+  if (cur < 0 || cur == index)
+    return;
+
+  auto self = std::move(siblings[cur]);
+  siblings.erase(siblings.begin() + cur);
+  siblings.insert(siblings.begin() + index, std::move(self));
+
+  // The child order changed — re-lay out the parent so this widget and
+  // its siblings return to their original slots.
+  if (parent_->layout_)
+    parent_->layout_->layout(parent_);
+  update();
+}
+
 void Widget::propagateWindow(Window *window) {
   window_ = window;
   sizeHintCache_.dirty =

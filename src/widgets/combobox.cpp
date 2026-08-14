@@ -28,7 +28,7 @@ std::string ComboBox::currentText() const {
 
 void ComboBox::onItemsStructureChanged() {
   if (items_.empty())
-    dropdownOpen_ = false;
+    closeDropdown(); // also restores z-order, unlike a bare flag reset
 }
 
 Size ComboBox::sizeHint() const {
@@ -137,6 +137,21 @@ void ComboBox::openDropdown() {
     win->openCombo_ = this;
   }
 
+  // Remember our slot BEFORE raising — raiseToTop() reorders the
+  // parent's children vector, which layouts use for positioning. Without
+  // a restore on close, any relayout while raised (e.g. a sibling's
+  // setText) permanently moves the combo to the end of its row.
+  zIndex_ = -1;
+  if (auto *p = parent()) {
+    const auto &siblings = p->children();
+    for (int i = 0; i < static_cast<int>(siblings.size()); i++) {
+      if (siblings[i].get() == this) {
+        zIndex_ = i;
+        break;
+      }
+    }
+  }
+
   // Raise to top of parent's z-order so the dropdown gets mouse events
   // before any overlapping sibling widgets (e.g. Slider, Button).
   raiseToTop();
@@ -150,16 +165,23 @@ void ComboBox::closeDropdown() {
   if (!dropdownOpen_)
     return;
 
-  // Invalidate the full extended area BEFORE clearing the flag,
-  // so the next paint pass clears the dropdown pixels that were
-  // drawn outside the button's geometry.
-  invalidateExtended();
-
   dropdownOpen_ = false;
   if (auto *win = window()) {
     if (win->openCombo_ == this)
       win->openCombo_ = nullptr;
   }
+
+  // Restore the original z-order (and re-lay out the parent) BEFORE
+  // invalidating, so the extended area is computed at the restored
+  // geometry and the stale dropdown pixels get repainted.
+  restoreZOrder();
+  invalidateExtended();
+}
+
+void ComboBox::restoreZOrder() {
+  int target = zIndex_;
+  zIndex_ = -1;
+  restoreChildOrder(target);
 }
 
 void ComboBox::invalidateExtended() {

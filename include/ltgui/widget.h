@@ -177,6 +177,13 @@ protected:
   // call this at the start of paintSelf() for consistent appearance.
   void paintBackground(NativeCanvas *canvas);
 
+  // Move this widget back to `index` in its parent's child list and
+  // re-lay out the parent. raiseToTop() reorders children_, which
+  // layouts use for positioning — popup-style widgets (e.g. the
+  // ComboBox dropdown) must restore the original order when they close,
+  // or any relayout while raised permanently relocates them.
+  void restoreChildOrder(int index);
+
   void propagateWindow(Window *window);
 
   // Mouse state bits — subclasses maintain these in handleEvent() and the
