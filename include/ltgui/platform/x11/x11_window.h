@@ -76,8 +76,8 @@ private:
   // Per-window clipboard state (replaces old file-scope globals)
   std::string clipboardText_;   // text we own on the clipboard
   bool clipboardOwned_ = false; // true if we currently own the selection
-  // Pending async clipboard read
-  std::string *pendingReadResult_ = nullptr;
+  // Pending async clipboard read completion flag (result lives in a local
+  // variable in getClipboardText; only the flag is shared here)
   bool pendingReadDone_ = false;
 };
 

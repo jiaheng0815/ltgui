@@ -26,9 +26,16 @@ struct Event;
   return self;
 }
 - (BOOL)windowShouldClose:(NSWindow *)sender {
-  if (cppWindow_)
+  if (cppWindow_) {
+    // Notify the app layer; the app calls close() which hides the window
+    // (orderOut) instead of performing a second close via performClose:
+    // (which would re-enter this delegate → recursive onClose).
     cppWindow_->onClose();
-  return NO;
+    return NO;
+  }
+  // cppWindow_ is null (destroy() ran) — allow the programmatic
+  // [nsWindow_ close] inside destroy() to finish the teardown.
+  return YES;
 }
 - (void)windowDidResize:(NSNotification *)notification {
   if (!cppWindow_)
@@ -68,6 +75,9 @@ struct Event;
   }
   return self;
 }
+- (BOOL)acceptsFirstResponder {
+  return YES; // receive keyDown/keyUp by default
+}
 - (BOOL)isFlipped {
   return YES;
 }
@@ -79,6 +89,9 @@ struct Event;
 - (void)mouseDown:(NSEvent *)event {
   if (!cppWindow_)
     return;
+  NSWindow *w = self.window;
+  if (w)
+    [w makeFirstResponder:self]; // click grabs keyboard focus
   ltgui::Event ev;
   ev.type = ltgui::EventType::MouseDown;
   ev.button = ltgui::MouseButton::Left;
@@ -126,6 +139,11 @@ struct Event;
   cppWindow_->onMouseEvent(ev);
 }
 - (void)mouseDragged:(NSEvent *)event {
+  if (!cppWindow_)
+    return;
+  NSWindow *w = self.window;
+  if (w)
+    [w makeFirstResponder:self]; // dragging also implies focus
   [self mouseMoved:event];
 }
 - (void)scrollWheel:(NSEvent *)event {
@@ -133,12 +151,22 @@ struct Event;
     return;
   ltgui::Event ev;
   ev.type = ltgui::EventType::MouseWheel;
-  ev.wheelDelta = static_cast<int>([event deltaY]);
+  // Precise (trackpad) deltas need scrollingDeltaY; mouse wheels report
+  // deltaY.  Convert to whole lines: round a zero-truncated non-zero value
+  // to +/-1 so tiny precise scrolls still produce a meaningful event.
+  double dy = [event hasPreciseScrollingDeltas] ? [event scrollingDeltaY]
+                                                : [event deltaY];
+  int wheel = static_cast<int>(dy);
+  if (wheel == 0 && dy != 0.0)
+    wheel = dy > 0.0 ? 1 : -1;
+  ev.wheelDelta = wheel;
   NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
   ev.pos = {static_cast<int>(p.x), static_cast<int>(p.y)};
   cppWindow_->onMouseEvent(ev);
 }
 - (void)keyDown:(NSEvent *)event {
+  if (!cppWindow_)
+    return;
   ltgui::Event ev;
   ev.type = ltgui::EventType::KeyDown;
   NSString *chars = [event characters];
@@ -160,6 +188,8 @@ struct Event;
   cppWindow_->onKeyEvent(ev);
 }
 - (void)keyUp:(NSEvent *)event {
+  if (!cppWindow_)
+    return;
   ltgui::Event ev;
   ev.type = ltgui::EventType::KeyUp;
   // [event characters] is typically empty for KeyUp — leave charCode unset.
@@ -195,6 +225,13 @@ CocoaWindow::~CocoaWindow() {
 bool CocoaWindow::create(int width, int height, const std::string &title) {
   if (nsWindow_)
     return true;
+
+  // A previous teardown may have left a stale canvas — release it before
+  // allocating the new one (destroy() does not own canvas destruction).
+  if (canvas_) {
+    delete canvas_;
+    canvas_ = nullptr;
+  }
 
   NSRect frame = NSMakeRect(0, 0, width, height);
 
@@ -232,18 +269,25 @@ bool CocoaWindow::create(int width, int height, const std::string &title) {
 void CocoaWindow::destroy() {
   // Clear the C++ pointer in ObjC objects BEFORE destroying them
   // to prevent use-after-free from pending callbacks
-  if (delegate_) {
+  if (delegate_)
     delegate_->cppWindow_ = nullptr;
-  }
-  if (view_) {
+  if (view_)
     view_->cppWindow_ = nullptr;
-  }
   if (nsWindow_) {
-    [nsWindow_ close];
+    [nsWindow_ orderOut:nil];
+    [nsWindow_ setDelegate:nil]; // no callbacks when closing below
+    [nsWindow_ close];           // delegate cppWindow_ is null → YES path
+    [nsWindow_ release];         // MRC: window was retained by alloc
     nsWindow_ = nullptr;
   }
-  delegate_ = nullptr;
-  view_ = nullptr;
+  if (delegate_) {
+    [delegate_ release]; // MRC: delegate was retained by alloc
+    delegate_ = nullptr;
+  }
+  if (view_) {
+    [view_ release]; // MRC: view was retained by alloc
+    view_ = nullptr;
+  }
 }
 
 void CocoaWindow::show() {
@@ -260,7 +304,10 @@ void CocoaWindow::hide() {
 
 void CocoaWindow::close() {
   if (nsWindow_) {
-    [nsWindow_ performClose:nil];
+    // Do NOT use performClose: — it consults windowShouldClose: which calls
+    // onClose() again (recursion).  Hide the window; the real teardown is
+    // done by destroy() when the CocoaWindow object is freed.
+    [nsWindow_ orderOut:nil];
   }
 }
 
@@ -273,9 +320,10 @@ void CocoaWindow::setTitle(const std::string &title) {
 
 void CocoaWindow::setSize(int width, int height) {
   if (nsWindow_) {
-    NSRect frame = [nsWindow_ frame];
-    frame.size = NSMakeSize(width, height);
-    [nsWindow_ setFrame:frame display:YES];
+    // setContentSize sets the client/content area directly, matching the
+    // size_ semantics used by the rest of the library (the view is the
+    // contentView).  setFrame would include title-bar/border chrome.
+    [nsWindow_ setContentSize:NSMakeSize(width, height)];
   }
 }
 

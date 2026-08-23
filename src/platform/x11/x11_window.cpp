@@ -2,6 +2,7 @@
 
 #ifdef LTGUI_PLATFORM_LINUX
 
+#include "log.h"
 #include "platform/x11/x11_canvas.h"
 #include <X11/Xatom.h>
 #include <X11/keysym.h>
@@ -45,6 +46,39 @@ void ensureClipboardAtoms() {
     g_utf8Atom = XInternAtom(dpy, "UTF8_STRING", False);
     g_selProperty = XInternAtom(dpy, "LTGUI_SEL", False);
   }
+}
+
+// Decode the first UTF-8 code point from buf (len bytes).  Returns the raw
+// lead byte on malformed/truncated input (a graceful fallback, not a
+// crash), so exotic locale bytes still land as a character.
+unsigned int decodeUtf8First(const char *buf, int len) {
+  if (len <= 0)
+    return 0;
+  const unsigned char *p = reinterpret_cast<const unsigned char *>(buf);
+  int n;
+  unsigned int cp;
+  if ((p[0] & 0x80) == 0) {
+    return p[0];
+  } else if ((p[0] & 0xE0) == 0xC0 && p[0] >= 0xC2) {
+    n = 2;
+    cp = p[0] & 0x1Fu;
+  } else if ((p[0] & 0xF0) == 0xE0) {
+    n = 3;
+    cp = p[0] & 0x0Fu;
+  } else if ((p[0] & 0xF8) == 0xF0 && p[0] <= 0xF4) {
+    n = 4;
+    cp = p[0] & 0x07u;
+  } else {
+    return p[0];
+  }
+  if (n > len)
+    return p[0];
+  for (int i = 1; i < n; i++) {
+    if ((p[i] & 0xC0) != 0x80)
+      return p[0];
+    cp = (cp << 6) | (p[i] & 0x3Fu);
+  }
+  return cp;
 }
 } // namespace
 
@@ -96,12 +130,25 @@ bool X11Window::create(int width, int height, const std::string &title) {
   if (window_)
     return true;
 
+  // A previous close()/destroy() may have left a stale canvas behind —
+  // release it before allocating the new one (create() can be re-run).
+  if (canvas_) {
+    delete canvas_;
+    canvas_ = nullptr;
+  }
+
   int screen = DefaultScreen(s_display_);
   ::Window root = RootWindow(s_display_, screen);
 
   window_ = XCreateSimpleWindow(s_display_, root, 0, 0, width, height, 1,
                                 BlackPixel(s_display_, screen),
                                 WhitePixel(s_display_, screen));
+
+  if (!window_) {
+    LOG_ERROR("X11", "XCreateSimpleWindow failed for %dx%d window", width,
+              height);
+    return false;
+  }
 
   // Set window title
   setTitle(title);
@@ -244,7 +291,6 @@ std::string X11Window::getClipboardText() {
   // request; we then pump the event loop (processing other events too)
   // until SelectionNotify arrives or we time out.
   std::string result;
-  pendingReadResult_ = &result;
   pendingReadDone_ = false;
 
   XConvertSelection(s_display_, g_clipboardAtom, g_utf8Atom, g_selProperty,
@@ -271,25 +317,60 @@ std::string X11Window::getClipboardText() {
 
       if (xev.type == SelectionNotify && xev.xselection.requestor == window_) {
         if (xev.xselection.property != 0) { // None (X11 macro, #undef'd above)
+          // No INCR support: read the property in bounded 64KB chunks
+          // (a single oversized read would exceed the X server's request
+          // size limit).  Cap the loop at 16 chunks (~1MB).
           Atom type;
           int format;
           unsigned long nitems = 0, bytesAfter = 0;
           unsigned char *data = nullptr;
-          XGetWindowProperty(s_display_, window_, g_selProperty, 0, 65536 / 4,
-                             False, AnyPropertyType, &type, &format, &nitems,
-                             &bytesAfter, &data);
-          if (data && type == g_utf8Atom && format == 8) {
-            result.assign(reinterpret_cast<char *>(data), nitems);
+          std::string collected;
+          unsigned long offsetUnits = 0;
+          const unsigned long chunkUnits = 65536 / 4;
+          for (int iter = 0; iter < 16; iter++) {
+            if (data)
+              XFree(data);
+            data = nullptr;
+            XGetWindowProperty(s_display_, window_, g_selProperty,
+                               static_cast<long>(offsetUnits), chunkUnits,
+                               False, AnyPropertyType, &type, &format,
+                               &nitems, &bytesAfter, &data);
+            if (!data)
+              break;
+            if (nitems > 0)
+              collected.append(reinterpret_cast<char *>(data), nitems);
+            if (bytesAfter == 0)
+              break;
+            offsetUnits += chunkUnits;
           }
           if (data)
             XFree(data);
+          if (format == 8 && type == g_utf8Atom) {
+            result.assign(collected);
+          } else if (format == 8 && type == XA_STRING) {
+            // XA_STRING is Latin-1: extend bytes >= 0x80 to UTF-8
+            std::string utf8;
+            utf8.reserve(collected.size());
+            for (unsigned char ch : collected) {
+              if (ch < 0x80) {
+                utf8 += static_cast<char>(ch);
+              } else {
+                utf8 += static_cast<char>(0xC0 | (ch >> 6));
+                utf8 += static_cast<char>(0x80 | (ch & 0x3F));
+              }
+            }
+            result.assign(utf8);
+          }
           XDeleteProperty(s_display_, window_, g_selProperty);
         }
         pendingReadDone_ = true;
       } else {
-        // Forward other events to their windows
+        // Forward other events to their windows *only* — never to this one.
+        // Re-entering this window's own handlers would let app code destroy
+        // this X11Window mid-function (use-after-free); other windows being
+        // destroyed in their callbacks cannot affect this object.
         X11Window *w = findWindow(xev.xany.window);
-        if (w)
+        if (w && w != this)
           w->handleEvent(xev);
       }
     } else {
@@ -298,7 +379,6 @@ std::string X11Window::getClipboardText() {
     }
   }
 
-  pendingReadResult_ = nullptr;
   pendingReadDone_ = false;
   return result;
 }
@@ -411,12 +491,19 @@ void X11Window::handleEvent(XEvent &xev) {
       ev.modifiers |= static_cast<int>(KeyModifier::Control);
     if (state & Mod1Mask)
       ev.modifiers |= static_cast<int>(KeyModifier::Alt);
-    // Also get the character if possible
+    // Also get the character if possible.  XLookupString returns UTF-8 when
+    // the X11 locale is UTF-8; decode multi-byte sequences to the first
+    // code point so non-ASCII input reaches the widget layer.
     char buf[8] = {};
     KeySym ks2;
     int len = XLookupString(&xev.xkey, buf, sizeof(buf), &ks2, nullptr);
-    if (len == 1 && static_cast<unsigned char>(buf[0]) >= 32) {
-      ev.charCode = static_cast<unsigned char>(buf[0]);
+    if (len > 0) {
+      unsigned char first = static_cast<unsigned char>(buf[0]);
+      if (len == 1 && first >= 32) {
+        ev.charCode = first;
+      } else if (len > 1) {
+        ev.charCode = decodeUtf8First(buf, len);
+      }
     }
     eventCallback_(ev);
     break;
@@ -446,8 +533,11 @@ void X11Window::handleEvent(XEvent &xev) {
     break;
 
   case SelectionRequest: {
-    // Serve clipboard content to requesters using per-instance data
+    // Serve clipboard content to requesters using per-instance data.
+    // Some requesters advertise property=None (asking the owner to pick);
+    // fall back to the target atom so XChangeProperty never sees 0.
     const XSelectionRequestEvent &req = xev.xselectionrequest;
+    Atom prop = req.property != 0 ? req.property : req.target;
     XEvent resp = {};
     resp.xselection.type = SelectionNotify;
     resp.xselection.requestor = req.requestor;
@@ -459,16 +549,28 @@ void X11Window::handleEvent(XEvent &xev) {
         clipboardOwned_) {
       if (req.target == g_targetsAtom) {
         // Report supported targets
-        Atom targets[] = {g_targetsAtom, g_utf8Atom};
-        XChangeProperty(s_display_, req.requestor, req.property, XA_ATOM, 32,
-                        PropModeReplace, (unsigned char *)targets, 2);
-        resp.xselection.property = req.property;
-      } else if (req.target == g_utf8Atom || req.target == XA_STRING) {
-        XChangeProperty(s_display_, req.requestor, req.property, req.target, 8,
-                        PropModeReplace,
-                        (const unsigned char *)clipboardText_.c_str(),
-                        (int)clipboardText_.size());
-        resp.xselection.property = req.property;
+        Atom targets[] = {g_targetsAtom, g_utf8Atom, XA_STRING};
+        Status rc = XChangeProperty(s_display_, req.requestor, prop, XA_ATOM,
+                                    32, PropModeReplace,
+                                    (unsigned char *)targets, 3);
+        resp.xselection.property = rc ? prop : 0; // 0 = failure (None)
+      } else if (req.target == g_utf8Atom) {
+        Status rc = XChangeProperty(s_display_, req.requestor, prop,
+                                    g_utf8Atom, 8, PropModeReplace,
+                                    (const unsigned char *)clipboardText_.c_str(),
+                                    (int)clipboardText_.size());
+        resp.xselection.property = rc ? prop : 0; // 0 = failure (None)
+      } else if (req.target == XA_STRING) {
+        // XA_STRING is Latin-1: represent UTF-8 bytes >= 0x80 as '?'
+        std::string latin1;
+        latin1.reserve(clipboardText_.size());
+        for (unsigned char ch : clipboardText_)
+          latin1 += ch < 0x80 ? static_cast<char>(ch) : '?';
+        Status rc = XChangeProperty(s_display_, req.requestor, prop,
+                                    XA_STRING, 8, PropModeReplace,
+                                    (const unsigned char *)latin1.data(),
+                                    (int)latin1.size());
+        resp.xselection.property = rc ? prop : 0; // 0 = failure (None)
       } else {
         resp.xselection.property = 0; // None (X11 macro, #undef'd above)
       }
@@ -479,6 +581,8 @@ void X11Window::handleEvent(XEvent &xev) {
     break;
   }
 
+  // Enter/Leave notify are pointer hover markers; kept as focus hints
+  // (existing behavior — they are not the same as real keyboard focus).
   case EnterNotify:
     ev.type = EventType::FocusIn;
     eventCallback_(ev);
@@ -488,6 +592,18 @@ void X11Window::handleEvent(XEvent &xev) {
     ev.type = EventType::FocusOut;
     eventCallback_(ev);
     break;
+
+  case 9: { // FocusIn (macro #undef'd at file top; X11 numeric value = 9)
+    ev.type = EventType::FocusIn;
+    eventCallback_(ev);
+    break;
+  }
+
+  case 10: { // FocusOut (macro #undef'd at file top; X11 numeric value = 10)
+    ev.type = EventType::FocusOut;
+    eventCallback_(ev);
+    break;
+  }
   }
 }
 
