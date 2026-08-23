@@ -593,6 +593,47 @@ cmake --install build-cmake --prefix /path/prefix
 #   target_link_libraries(app PRIVATE ltgui::ltgui)   # 自动带上 LTGUI_STATIC
 ```
 
+### C SDK(C23 绑定)
+
+纯 C 绑定覆盖整个框架:不透明句柄(`ltgui_widget*`、`ltgui_window*`)、
+`xxx_create()/xxx_destroy()` 生命周期、int 错误码(`ltgui_last_error()` 读取
+消息)、带 userdata 的 C 回调(`ltgui_signal_connect`)。C 代码按 **C23**
+编译,并用 C++ 驱动链接(库本体是 C++):
+
+```c
+#include "ltgui_c.h"
+
+static void on_clicked(void *userdata, void *arg) {
+  (void)arg;
+  (* (int *)userdata)++;
+}
+
+int main(void) {
+  auto win = ltgui_window_create(400, 300, "from C");
+  if (!win) return 1;
+  auto root = ltgui_widget_create(nullptr);
+  auto layout = ltgui_boxlayout_create(2 /*TopToBottom*/, 8, 12);
+  ltgui_widget_set_layout(root, layout);
+  ltgui_layout_destroy(layout);
+  auto btn = ltgui_button_create("Click", root);
+  int clicks = 0;
+  ltgui_signal_connect(btn, LTGUI_SIGNAL_ON_CLICKED, on_clicked, &clicks);
+  ltgui_window_set_central_widget(win, root);
+  ltgui_window_show(win);
+  return ltgui_run();
+}
+```
+
+```bash
+# Windows / Linux / macOS(使用 clang):
+clang -std=c23 -I sdk -c my_app.c
+clang++ my_app.o -lltgui       # 用 C++ 驱动链接
+```
+
+注意:MSVC 的 C 编译器只实现 C11,不支 C23——C 绑定请用 clang/gcc
+(MSVC 仍可在 C++ 翻译单元中消费该头)。`examples/c_hello.c` 与
+`test/c_api_test.c` 是可运行的示例;SDK 包内 C 头名为 `ltgui_c.h`。
+
 ## 许可证
 
 MIT

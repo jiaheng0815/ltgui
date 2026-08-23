@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Added
+- **C API 绑定(C23)**:`include/ltgui/c/c_ltgui.h` + `src/c_api/c_ltgui.cpp`,
+  覆盖全部 21 控件与 Dialog 族、布局、主题、剪贴板、i18n、动画、计时器;
+  错误码 + `ltgui_last_error()`、信号以 C 回调 + userdata 连接;
+  SDK 中名为 `ltgui_c.h`。
+- **C++23 标准**:构建脚本/CMake 提升至 C++23,应用 `std::to_underlying`
+  与 deduced-this;`examples/c_hello.c`、`test/c_api_test.c`(纯 C23
+  编译+链接+运行验证)、`test/test_c_api.cpp`(doctest)。
+
 ### Removed
 - 公共 API 冗余清理(v1.0.1):`Window::getSize()`、`ListItems::selectedIndex()/setSelected()`、
   `Image::setFitMode(char)`、`TableView::selectedRow()/selectRow()` 别名删除——一律使用

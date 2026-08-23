@@ -639,6 +639,49 @@ cmake --install build-cmake --prefix /path/prefix
 #   target_link_libraries(app PRIVATE ltgui::ltgui)   # includes LTGUI_STATIC
 ```
 
+### C SDK (C23)
+
+A pure-C binding covers the whole framework: opaque handles (`ltgui_widget*`,
+`ltgui_window*`), `xxx_create()/xxx_destroy()` lifetimes, an int error code
+(`ltgui_last_error()` for the message) and C callbacks with a userdata pointer
+(`ltgui_signal_connect`). Compile your C code as **C23** and link it through a
+C++ driver (the library is C++):
+
+```c
+#include "ltgui_c.h"
+
+static void on_clicked(void *userdata, void *arg) {
+  (void)arg;
+  (* (int *)userdata)++;
+}
+
+int main(void) {
+  auto win = ltgui_window_create(400, 300, "from C");
+  if (!win) return 1;
+  auto root = ltgui_widget_create(nullptr);
+  auto layout = ltgui_boxlayout_create(2 /*TopToBottom*/, 8, 12);
+  ltgui_widget_set_layout(root, layout);
+  ltgui_layout_destroy(layout);
+  auto btn = ltgui_button_create("Click", root);
+  int clicks = 0;
+  ltgui_signal_connect(btn, LTGUI_SIGNAL_ON_CLICKED, on_clicked, &clicks);
+  ltgui_window_set_central_widget(win, root);
+  ltgui_window_show(win);
+  return ltgui_run();
+}
+```
+
+```bash
+# Windows / Linux / macOS (clang):
+clang -std=c23 -I sdk -c my_app.c
+clang++ my_app.o -lltgui       # link with a C++ driver
+```
+
+Notes: MSVC's C compiler implements C11, not C23 — use clang/gcc for the C
+binding (MSVC can still consume the header from a C++ translation unit).
+`examples/c_hello.c` and `test/c_api_test.c` are living examples; the C SDK
+header ships in the SDK archive as `ltgui_c.h`.
+
 ## License
 
 MIT
