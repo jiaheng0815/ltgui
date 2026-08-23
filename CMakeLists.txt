@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # --- Options ---
 option(LTGUI_BUILD_EXAMPLES "Build example applications" ON)
 option(LTGUI_BUILD_TESTS    "Build and enable tests" ON)
+option(LTGUI_BUILD_APPS     "Build app targets" ON)
 
 # --- Source files ---
 file(GLOB_RECURSE LTGUI_SOURCES
@@ -33,7 +34,10 @@ target_include_directories(ltgui PRIVATE
 
 # --- Platform-specific ---
 if(WIN32)
-    target_compile_definitions(ltgui PRIVATE _UNICODE UNICODE LTGUI_PLATFORM_WINDOWS)
+    # PUBLIC so tests/examples/apps linked against ltgui get the same
+    # UNICODE/UI-flag state as the library itself (prevents TCHAR/LPWSTR
+    # mismatches in Win32 APIs).
+    target_compile_definitions(ltgui PUBLIC _UNICODE UNICODE LTGUI_PLATFORM_WINDOWS)
     target_link_libraries(ltgui PRIVATE
         gdi32 gdiplus user32 comctl32 ole32 imm32
         d3d11 dxgi d3dcompiler
@@ -63,7 +67,8 @@ endif()
 
 # --- Warnings ---
 if(MSVC)
-    target_compile_options(ltgui PRIVATE /W4 /wd4100)
+    # /utf-8 fixes C4819 warnings on Chinese-locale systems (matches ltgui.py)
+    target_compile_options(ltgui PRIVATE /W4 /wd4100 /utf-8)
 else()
     target_compile_options(ltgui PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-missing-field-initializers)
 endif()
@@ -75,6 +80,16 @@ if(LTGUI_BUILD_EXAMPLES)
         get_filename_component(name ${example} NAME_WE)
         add_executable(example_${name} ${example})
         target_link_libraries(example_${name} PRIVATE ltgui)
+    endforeach()
+endif()
+
+# --- Apps ---
+if(LTGUI_BUILD_APPS)
+    file(GLOB LTGUI_APPS "app/*.cpp")
+    foreach(app ${LTGUI_APPS})
+        get_filename_component(name ${app} NAME_WE)
+        add_executable(app_${name} ${app})
+        target_link_libraries(app_${name} PRIVATE ltgui)
     endforeach()
 endif()
 

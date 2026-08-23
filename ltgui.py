@@ -93,7 +93,16 @@ def resolve_compiler(compiler_arg):
                 return ("clang++", False)
             if shutil.which("cl"):
                 return ("cl", True)  # MSVC
-        return ("clang++", False)
+            raise SystemExit(
+                "No supported C++ compiler found (clang++ or MSVC cl). "
+                "Install clang++ or VS Build Tools.")
+        if shutil.which("clang++"):
+            return ("clang++", False)
+        if shutil.which("g++"):
+            return ("g++", False)
+        raise SystemExit(
+            "No supported C++ compiler found (clang++ or g++). "
+            "Install clang++ or g++.")
     c = compiler_arg.lower()
     if c in ("clang", "clang++"):
         return ("clang++", False)
@@ -205,10 +214,12 @@ def _get_direct_includes(filepath):
                     start = line.index('"') + 1
                     end = line.index('"', start)
                     inc = line[start:end]
-                    # Try relative to the file's directory first, then INCLUDE_DIR
+                    # Try relative to the file's directory first, then
+                    # INCLUDE_DIR, then VENDOR_DIR (e.g. stb_truetype.h)
                     candidates = [
                         os.path.join(os.path.dirname(filepath), inc),
                         os.path.join(INCLUDE_DIR, inc),
+                        os.path.join(VENDOR_DIR, inc),
                     ]
                     for c in candidates:
                         if os.path.exists(c):
@@ -260,13 +271,27 @@ def _write_compile_commands():
         json.dump(_COMPILE_COMMANDS, f, indent=2)
     cprint(f"  Generated {path}", Color.GREEN)
 
+def _config_key(is_release, pic=False):
+    """Short configuration label scoping object file directories.
+
+    Keeps release / debug / profile / --dll object files apart so a plain
+    `build` (release) followed by `test` (debug) does not reuse objects
+    compiled with different flags.
+    """
+    parts = ["release" if is_release else "debug"]
+    if _PROFILE_BUILD and not is_release:
+        parts.append("profile")
+    if pic:
+        parts.append("pic")
+    return "-".join(parts)
+
 def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=False):
     """Build the compiler flags list for a single source file.
     Returns (flags_list, obj_path, rel_path).
     """
     rel = os.path.relpath(src_path, SRC_DIR)
     ext = ".obj" if is_msvc else ".o"
-    obj_path = os.path.join(OBJ_DIR, rel + ext)
+    obj_path = os.path.join(OBJ_DIR, _config_key(is_release, pic), rel + ext)
 
     if is_msvc:
         flags = [compiler, "/nologo", "/c", "/std:c++20", "/EHsc"]
@@ -349,9 +374,17 @@ def _compile_sources_parallel(sources, platform, is_release, compiler, is_msvc, 
         return None
     return object_files
 
-def build_shared_lib(platform, is_release, compiler):
+def build_shared_lib(platform, is_release, compiler, is_msvc):
     """Build a dynamic/shared library (.dll / .so / .dylib)."""
-    sources = get_source_files()
+    if is_msvc:
+        cprint("Error: --dll is not supported with MSVC (cl).", Color.RED, bold=True)
+        cprint("  MSVC shared builds need a .def file or LTGUI_EXPORT markup on", Color.YELLOW)
+        cprint("  every public symbol, which the codebase does not use yet.", Color.YELLOW)
+        cprint("  Use the regular static build instead:", Color.YELLOW)
+        cprint("    python ltgui.py build [--compiler cl]" if shutil.which("cl") else "    python ltgui.py build", Color.CYAN)
+        return None
+
+    sources = get_source_files(is_msvc)
     if not sources:
         cprint("No source files found in src/", Color.RED)
         return None
@@ -360,7 +393,7 @@ def build_shared_lib(platform, is_release, compiler):
     cprint(f"Building ltgui shared library ({build_type}) for {platform} with {compiler}...", Color.BLUE, bold=True)
     cprint(f"Found {len(sources)} source files.", Color.WHITE)
 
-    object_files = _compile_sources_parallel(sources, platform, is_release, compiler, False, pic=True)
+    object_files = _compile_sources_parallel(sources, platform, is_release, compiler, is_msvc, pic=True)
     if not object_files:
         return None
 
@@ -376,11 +409,17 @@ def build_shared_lib(platform, is_release, compiler):
 
     cprint(f"  Linking {dll_name}...", Color.CYAN)
 
-    flags = [compiler, "-shared", "-std=c++20"]
+    # macOS requires -dynamiclib; Linux/Windows link a shared library with -shared.
+    flags = [compiler, "-dynamiclib" if platform == "macos" else "-shared", "-std=c++20"]
     if platform != "macos":
         flags.append("-static")
     if platform == "windows":
-        flags.append("-Wl,--export-all-symbols")
+        # MinGW's ld accepts -Wl,--export-all-symbols, but clang++'s default
+        # Windows linker (lld-link) errors on it. Drop the flag: exported
+        # symbols are declared via the LTGUI_API declspec marker in the
+        # amalgamated header instead (see generate_amalgamated_header).
+        cprint("WARN: --dll on Windows does not auto-export all symbols with clang++.", Color.YELLOW)
+        cprint("      Exports come from the LTGUI_API declspec in the generated ltgui.h.", Color.YELLOW)
     if is_release:
         flags += ["-O2", "-DNDEBUG"]
     else:
@@ -719,48 +758,128 @@ def _strip_function_bodies(text):
 
     return ''.join(out)
 
-# Header ordering: topological sort so dependencies appear before dependents.
-# Order follows the umbrella ltgui.h include list plus all transitive headers.
-# Concrete platform backends (win32/x11/cocoa) are excluded — they are internal
-# implementation details, not part of the public SDK API.
+# Header ordering: dependencies must appear before dependents in the
+# amalgamated SDK header. This list supplies the preference order (and a
+# fallback when the umbrella header cannot be parsed); _get_header_order()
+# additionally topologically sorts the quoted-include graph so the list can
+# never drift from include/ltgui/ltgui.h (as it did when 16 umbrella headers
+# went missing). Concrete platform backends (win32/x11/cocoa) are excluded —
+# they are internal implementation details, not part of the public SDK API.
 _HEADER_ORDER = [
     "geometry.h",
+    "signal.h",
     "color.h",
     "font.h",
     "utf8.h",
-    "platform/platform.h",
+    "dragdrop.h",
     "event.h",
+    "platform/platform.h",
+    "shortcut.h",
     "style.h",
     "theme.h",
+    "timer.h",
+    "i18n.h",
+    "layout.h",
+    "log.h",
     "platform/native_canvas.h",
     "platform/native_window.h",
-    "animation.h",
     "platform/gpu/gpu_device.h",
     "platform/gpu/gpu_font_atlas.h",
     "platform/gpu/gpu_detect.h",
     "platform/gpu/gpu_renderer.h",
     "platform/gpu/gpu_canvas.h",
+    "animation.h",
     "app.h",
     "widget.h",
     "canvas.h",
-    "layout.h",
+    "clipboard.h",
     "window.h",
+    "widgets/textwidget.h",
+    "widgets/checkable.h",
     "widgets/button.h",
     "widgets/label.h",
-    "widgets/textbox.h",
-    "widgets/checkbox.h",
-    "widgets/radiobutton.h",
-    "widgets/slider.h",
-    "widgets/listbox.h",
+    "widgets/listitems.h",
+    "widgets/scrollstate.h",
     "widgets/scrollarea.h",
+    "widgets/listbox.h",
+    "widgets/menubar.h",
     "widgets/combobox.h",
+    "widgets/contextmenu.h",
+    "widgets/dialog.h",
+    "widgets/filedialog.h",
+    "widgets/image.h",
+    "widgets/range.h",
+    "widgets/slider.h",
     "widgets/progressbar.h",
     "widgets/tooltip.h",
     "widgets/tabwidget.h",
-    "widgets/image.h",
+    "widgets/tableview.h",
+    "widgets/textbox.h",
+    "widgets/checkbox.h",
+    "widgets/radiobutton.h",
     "widgets/treeview.h",
-    "widgets/contextmenu.h",
 ]
+
+def _collect_header_set():
+    """All public headers that go into the amalgamation, in preference order:
+    the _HEADER_ORDER list followed by any umbrella-header entries missing
+    from it (appended, so a new ltgui.h include is never silently ignored)."""
+    order = list(_HEADER_ORDER)
+    try:
+        with open(os.path.join(INCLUDE_DIR, "ltgui.h"), "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('#include "'):
+                    start = line.index('"') + 1
+                    end = line.index('"', start)
+                    rel = line[start:end]
+                    if rel not in order and os.path.exists(os.path.join(INCLUDE_DIR, rel)):
+                        order.append(rel)
+    except OSError:
+        pass
+    return order
+
+def _get_header_order():
+    """Amalgamation order: the header set from _collect_header_set(), sorted
+    so that every header appears after its quoted-include dependencies.
+
+    Uses a stable topological sort (Kahn's algorithm, preference index as the
+    priority) — for the current include graph the preference list is already a
+    valid order, so the output matches it exactly, while any future addition to
+    ltgui.h is placed correctly even if the static list was not updated.
+    """
+    headers = _collect_header_set()
+    header_path = {h: os.path.normpath(os.path.join(INCLUDE_DIR, h)) for h in headers}
+    path_to_header = {p: h for h, p in header_path.items()}
+
+    # Edge: dep -> holder (dep must be emitted before holder)
+    dep_of = {h: set() for h in headers}
+    for h in headers:
+        for inc in _get_direct_includes(header_path[h]):
+            dep = path_to_header.get(os.path.normpath(inc))
+            if dep is not None and dep != h:
+                dep_of[h].add(dep)
+
+    import heapq
+    indeg = {h: len(dep_of[h]) for h in headers}
+    pref = {h: i for i, h in enumerate(headers)}
+    ready = [(pref[h], h) for h in headers if indeg[h] == 0]
+    heapq.heapify(ready)
+
+    out = []
+    while ready:
+        _, h = heapq.heappop(ready)
+        out.append(h)
+        for other in headers:
+            if h in dep_of[other]:
+                indeg[other] -= 1
+                if indeg[other] == 0:
+                    heapq.heappush(ready, (pref[other], other))
+
+    if len(out) != len(headers):
+        # Cyclic include graph — emit the preference order unchanged.
+        return headers
+    return out
 
 def generate_amalgamated_header(target_path):
     """Generate a single ltgui.h by merging all public headers."""
@@ -795,7 +914,7 @@ def generate_amalgamated_header(target_path):
     system_includes = set()
     parts = []
 
-    for rel_path in _HEADER_ORDER:
+    for rel_path in _get_header_order():
         h_path = os.path.join(INCLUDE_DIR, rel_path)
         if not os.path.exists(h_path):
             continue
@@ -853,6 +972,22 @@ def export_sdk(lib_path, target_dir, platform):
     shutil.copy2(lib_path, os.path.join(target_dir, lib_name))
     cprint(f"  {lib_name} -> {target_dir}", Color.CYAN)
 
+    # Windows: also ship the import library so consumers can link the DLL
+    if platform == "windows":
+        stem = os.path.splitext(os.path.basename(lib_path))[0]  # "ltgui" from "ltgui.dll"
+        import_candidates = [
+            os.path.join(os.path.dirname(lib_path), stem + ".lib"),
+            os.path.join(os.path.dirname(lib_path), "lib" + stem + ".dll.a"),
+            os.path.join(os.path.dirname(lib_path), "lib" + stem + ".lib"),
+        ]
+        import_lib = next((p for p in import_candidates if os.path.exists(p)), None)
+        if import_lib:
+            shutil.copy2(import_lib, os.path.join(target_dir, os.path.basename(import_lib)))
+            cprint(f"  {os.path.basename(import_lib)} -> {target_dir}", Color.CYAN)
+        else:
+            cprint("WARN: no import library (.lib / .dll.a) found next to the DLL;", Color.YELLOW)
+            cprint("      consumers must create one (e.g. with dlltool) or use a static build.", Color.YELLOW)
+
     cprint("SDK export complete.", Color.GREEN, bold=True)
 
 # --- Commands ---
@@ -869,7 +1004,7 @@ def cmd_build(positional, flags):
     # SDK export (--dll) — build shared lib only, skip examples/apps
     dll_dir = flags.get("dll")
     if dll_dir and isinstance(dll_dir, str):
-        lib_path = build_shared_lib(platform, is_release, compiler)
+        lib_path = build_shared_lib(platform, is_release, compiler, is_msvc)
         if not lib_path:
             return
         export_sdk(lib_path, dll_dir, platform)
@@ -1318,8 +1453,8 @@ Size {name}::sizeHint() const
     cprint(f"  {src_path}", Color.CYAN)
     cprint("", Color.WHITE)
     cprint("Don't forget to include in:", Color.YELLOW)
-    cprint("  1. The ltgui.h umbrella header", Color.YELLOW)
-    cprint(f"  2. Add '{snake}.h' to _HEADER_ORDER in ltgui.py", Color.YELLOW)
+    cprint("  1. The ltgui.h umbrella header (the amalgamation auto-discovers", Color.YELLOW)
+    cprint(f"     any header listed there — no ltgui.py={'_HEADER_ORDER'} edit needed)", Color.YELLOW)
 
 def _scaffold_example(name):
     snake = _to_snake_case(name)
@@ -1618,7 +1753,7 @@ def _resolve_debugger(platform):
         for exe in ["cdb", "lldb", "gdb"]:
             path = shutil.which(exe)
             if path:
-                return (path, ["-c", "g"] if exe == "gdb" else [])
+                return (path, ["-ex", "run"] if exe == "gdb" else [])
         return (None, [])
     elif platform == "macos":
         path = shutil.which("lldb")
@@ -1783,7 +1918,11 @@ def main():
         _VERBOSE = _val.lower() not in ("false", "0", "no", "off")
     else:
         _VERBOSE = bool(_val)
-    _JSON_MODE = flags.pop("json", False) is not False
+    _json_val = flags.pop("json", False)
+    if isinstance(_json_val, str):
+        _JSON_MODE = _json_val.lower() not in ("false", "0", "no", "off")
+    else:
+        _JSON_MODE = bool(_json_val)
 
     jobs_str = flags.pop("jobs", None) or flags.pop("j", None)
     if jobs_str:
