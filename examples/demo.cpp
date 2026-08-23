@@ -63,7 +63,6 @@ int main(int argc, char *argv[]) {
   auto textLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 4);
   auto *tbLabel = textRow->makeChild<Label>("Text:");
   auto *textBox = textRow->makeChild<TextBox>("Edit me!");
-  textLayout->addStretch(0);
   textLayout->addStretch(1);
   textRow->setLayout(std::move(textLayout));
 
@@ -94,7 +93,6 @@ int main(int argc, char *argv[]) {
   auto sliderLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 4);
   auto *slLabel = sliderRow->makeChild<Label>("Volume:");
   auto *slider = sliderRow->makeChild<Slider>();
-  slider->setRange(0, 100);
   slider->setValue(50);
   auto *slValue = sliderRow->makeChild<Label>(" 50");
   slider->onValueChanged.connect([&](int v) {
@@ -107,9 +105,7 @@ int main(int argc, char *argv[]) {
     else
       slValue->setText("  " + std::to_string(v));
   });
-  sliderLayout->addStretch(0);
   sliderLayout->addStretch(1);
-  sliderLayout->addStretch(0);
   sliderRow->setLayout(std::move(sliderLayout));
 
   // List + Combo row
@@ -126,7 +122,6 @@ int main(int argc, char *argv[]) {
   listBox->addItem("Elderberry");
   listBox->addItem("Fig");
   listBox->addItem("Grape");
-  listBox->setCurrentIndex(0);
 
   auto *comboBox = listRow->makeChild<ComboBox>();
   comboBox->addItem("Small");
@@ -135,7 +130,6 @@ int main(int argc, char *argv[]) {
   comboBox->setCurrentIndex(1);
 
   listRowLayout->addStretch(1);
-  listRowLayout->addStretch(0);
   listRow->setLayout(std::move(listRowLayout));
 
   // Table + Tree row
@@ -171,7 +165,6 @@ int main(int argc, char *argv[]) {
 
   auto *progressPage = tabs->tabContent(0);
   auto *progress = progressPage->makeChild<ProgressBar>();
-  progress->setRange(0, 100);
   progress->setValue(42);
   auto *progressLabel = progressPage->makeChild<Label>("42/100");
   progress->onValueChanged.connect([&](int v) {
@@ -181,7 +174,6 @@ int main(int argc, char *argv[]) {
   progressBtn->onClicked.connect(
       [&]() { progress->setValue(progress->value() + 10); });
   auto progressLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 4, 4);
-  progressLayout->addStretch(0);
   progressPage->setLayout(std::move(progressLayout));
 
   auto *scrollPage = tabs->tabContent(1);
@@ -191,12 +183,10 @@ int main(int argc, char *argv[]) {
   auto longLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 2, 2);
   for (int i = 0; i < 25; i++)
     longContent->makeChild<Label>("Scroll row " + std::to_string(i + 1));
-  longLayout->addStretch(0);
   longLayout->addStretch(1);
   longContent->setLayout(std::move(longLayout));
   area->setWidget(std::move(longContent));
   auto scrollLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 0, 0);
-  scrollLayout->addStretch(0);
   scrollPage->setLayout(std::move(scrollLayout));
 
   // Stretch factors — the last one absorbs the leftover space

@@ -5,8 +5,12 @@
 
 ## [Unreleased]
 
-### Added
-- 8 个单主题示例(TableView/对话框/文件对话框/动画/菜单/树/滚动+Tab/可选 i18n)。
+### Removed
+- 公共 API 冗余清理(v1.0.1):`Window::getSize()`、`ListItems::selectedIndex()/setSelected()`、
+  `Image::setFitMode(char)`、`TableView::selectedRow()/selectRow()` 别名删除——一律使用
+  `currentIndex()/setCurrentIndex()`、`size()`、`setFitMode(FitMode)`;
+  死类 `Canvas`(canvas.h)与 `ListBox::currentScrollOffset()` 私有转发移除。
+- 示例样板行清理(setRange(0,100) 等重复默认值、no-op addStretch(0)),行为不变。
 
 ## [1.0.0] - 2026-08-23
 

@@ -290,7 +290,7 @@ All widget callbacks are now `Signal<T>` members — connect instead of assign:
 Other renames: `selectedIndex()/setSelected()` → `currentIndex()/setCurrentIndex()`,
 `TableView::selectedRow()/selectRow()` → `currentIndex()/setCurrentIndex()`,
 `Window::getSize()` → `size()`, `Image::setFitMode(char)` → `setFitMode(FitMode)`,
-`Style::setMargin()` removed. Legacy names are kept as `[[deprecated]]` aliases.
+`Style::setMargin()` removed. The deprecated aliases were dropped in v1.0.1 — use the names in the right column.
 
 ## Animation
 
@@ -335,7 +335,7 @@ kf.play();
 DialogResult r = MessageBox::show(parent, "Save Changes?",
     "Do you want to save before closing?",
     (int)(DialogButton::Yes | DialogButton::No | DialogButton::Cancel),
-    MessageBox::Question);
+    MessageBox::Icon::Question);
 
 // InputDialog — modal, returns text
 std::string name = InputDialog::getText(parent,
@@ -375,8 +375,8 @@ table->setSortColumn(0, true);
 model->sort(0, true);
 
 // Selection
-table->onRowSelected([](int row) { LOG_INFO("UI", "Selected row %d", row); });
-int sel = table->selectedRow();
+table->onRowSelected.connect([](int row) { LOG_INFO("UI", "Selected row %d", row); });
+int sel = table->currentIndex();
 
 // Column resize: drag edge between headers
 table->setColumnWidth(0, 200);
@@ -464,17 +464,15 @@ dropTgt.onDrop([](const DragData& data) {
 ## Layout
 
 ```cpp
-// Box layout
-auto* hbox = new BoxLayout(BoxLayout::LeftToRight, spacing, margin);
-hbox->addStretch(1);
-
-auto* vbox = new BoxLayout(BoxLayout::TopToBottom, spacing, margin);
+// Box layout (takes ownership via unique_ptr)
+auto layout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12);
+layout->addStretch(1);
+container->setLayout(std::move(layout));
 
 // Grid layout
-auto* grid = new GridLayout(columns, rowSpacing, colSpacing, margin);
+auto grid = std::make_unique<GridLayout>(2, 4, 4, 8);
 grid->setColumnStretch(0, 2);
-
-container->setLayout(hbox);
+container2->setLayout(std::move(grid));
 ```
 
 ## Logging
@@ -919,7 +917,7 @@ widget->setStyle(s);
 其他改名：`selectedIndex()/setSelected()` → `currentIndex()/setCurrentIndex()`、
 `TableView::selectedRow()/selectRow()` → `currentIndex()/setCurrentIndex()`、
 `Window::getSize()` → `size()`、`Image::setFitMode(char)` → `setFitMode(FitMode)`。
-`Style::setMargin()` 已移除。旧的名称保留为 `[[deprecated]]` 别名。
+`Style::setMargin()` 已移除。这些 deprecated 旧名已在 v1.0.1 中删除——请一律使用右列的新名。
 
 ## 动画
 
@@ -964,7 +962,7 @@ kf.play();
 DialogResult r = MessageBox::show(parent, "保存更改?",
     "关闭前是否保存?",
     (int)(DialogButton::Yes | DialogButton::No | DialogButton::Cancel),
-    MessageBox::Question);
+    MessageBox::Icon::Question);
 
 // InputDialog — 模态，返回文本
 std::string name = InputDialog::getText(parent,
@@ -995,7 +993,7 @@ table->addColumn({"年份", 60, 40, true, false}); // minWidth=40, 不可排序
 table->setModel(model);
 table->setSortColumn(0, true);
 model->sort(0, true);
-table->onRowSelected([](int row) { LOG_INFO("UI", "选中第 %d 行", row); });
+table->onRowSelected.connect([](int row) { LOG_INFO("UI", "选中第 %d 行", row); });
 ```
 
 ## 国际化 (i18n)
@@ -1054,16 +1052,15 @@ dropTgt.onDrop([](const DragData& d) {
 ## 布局
 
 ```cpp
-// 盒子布局
-auto* hbox = new BoxLayout(BoxLayout::LeftToRight, spacing, margin);
-hbox->addStretch(1);
-auto* vbox = new BoxLayout(BoxLayout::TopToBottom, spacing, margin);
+// 盒子布局（通过 unique_ptr 转移所有权）
+auto layout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12);
+layout->addStretch(1);
+container->setLayout(std::move(layout));
 
 // 网格布局
-auto* grid = new GridLayout(columns, rowSpacing, colSpacing, margin);
+auto grid = std::make_unique<GridLayout>(2, 4, 4, 8);
 grid->setColumnStretch(0, 2);
-
-container->setLayout(hbox);
+container2->setLayout(std::move(grid));
 ```
 
 ## 日志

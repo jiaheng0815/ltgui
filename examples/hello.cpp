@@ -18,7 +18,6 @@ int main(int argc, char *argv[]) {
   }
 
   auto root = std::make_unique<Widget>();
-  root->setStyle(Style::defaultStyle());
   root->style().bgColor = currentTheme().bgPrimary;
 
   auto layout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12);
@@ -36,10 +35,6 @@ int main(int argc, char *argv[]) {
 
   auto *quitBtn = root->makeChild<Button>("Quit");
   quitBtn->onClicked.connect([&]() { window.close(); });
-
-  layout->addStretch(0);
-  layout->addStretch(0);
-  layout->addStretch(0);
 
   root->setLayout(std::move(layout));
 
