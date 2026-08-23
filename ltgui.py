@@ -370,7 +370,7 @@ def compile_source(src_path, platform, is_release, compiler, is_msvc, pic=False,
         cprint(f"    {' '.join(flags)}", Color.YELLOW)
         result = subprocess.run(flags)
     else:
-        result = subprocess.run(flags, capture_output=True, text=True)
+        result = subprocess.run(flags, capture_output=True, text=True, errors="replace")
     if result.returncode != 0:
         cprint(f"  Error compiling {rel}:", Color.RED, bold=True)
         if not _VERBOSE:
@@ -467,7 +467,7 @@ def build_shared_lib(platform, is_release, compiler, is_msvc):
     flags += get_platform_libs(platform)
     flags += ["-o", dll_path]
 
-    result = subprocess.run(flags, capture_output=True, text=True)
+    result = subprocess.run(flags, capture_output=True, text=True, errors="replace")
     if result.returncode != 0:
         cprint(f"  Error linking shared library: {result.stderr}", Color.RED)
         return None
@@ -500,19 +500,19 @@ def build_lib(platform, is_release, compiler, is_msvc):
     if is_msvc:
         result = subprocess.run(
             ["link", "/LIB", "/nologo", f"/OUT:{lib_path}"] + object_files,
-            capture_output=True, text=True)
+            capture_output=True, text=True, errors="replace")
     elif platform == "windows" and "clang" in compiler:
         result = subprocess.run(
             ["llvm-lib"] + object_files + ["/OUT:" + lib_path],
-            capture_output=True, text=True)
+            capture_output=True, text=True, errors="replace")
         if result.returncode != 0:
             result = subprocess.run(
                 ["ar", "rcs", lib_path] + object_files,
-                capture_output=True, text=True)
+                capture_output=True, text=True, errors="replace")
     else:
         result = subprocess.run(
             ["ar", "rcs", lib_path] + object_files,
-            capture_output=True, text=True)
+            capture_output=True, text=True, errors="replace")
 
     if result.returncode != 0:
         cprint(f"  Error creating library: {result.stderr}", Color.RED)
@@ -532,6 +532,11 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
     exe_path = os.path.join(BUILD_DIR, name + exe_ext)
 
     if is_msvc:
+        # /Fo keeps the intermediate object inside build/obj (cl would
+        # otherwise drop it into the current working directory). cl requires
+        # the target directory to exist up front.
+        prog_obj_dir = os.path.join(OBJ_DIR, _config_key(is_release), "programs")
+        os.makedirs(prog_obj_dir, exist_ok=True)
         flags = [compiler, "/nologo", "/std:c++20", "/EHsc", "/DLTGUI_STATIC"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
@@ -540,6 +545,7 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
         flags += ["/I", INCLUDE_DIR, "/I", VENDOR_DIR]
         flags += get_platform_flags(platform, is_msvc=True)
         flags += [f"/Fe:{exe_path}"]
+        flags += [f"/Fo{os.path.join(prog_obj_dir, name + '.obj')}"]
         flags += [src]
         flags += ["/link", lib_path]
         flags += get_platform_libs(platform, is_msvc=True)
@@ -558,7 +564,7 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
         flags += ["-o", exe_path]
 
     cprint(f"  Building: {name}...", Color.CYAN)
-    result = subprocess.run(flags, capture_output=True, text=True)
+    result = subprocess.run(flags, capture_output=True, text=True, errors="replace")
     if result.returncode != 0:
         cprint(f"  Error building {name}:", Color.RED, bold=True)
         cprint(result.stderr or result.stdout or "(no output)", Color.RED)
@@ -800,7 +806,7 @@ def _smoke_compile_header(target_dir, compiler, is_msvc):
     else:
         cmd = [compiler, "-std=c++20", "-fsyntax-only", "-I", target_dir, smoke]
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     if result.returncode != 0:
         cprint("Smoke compile of the amalgamated ltgui.h FAILED:", Color.RED, bold=True)
         for line in result.stderr.splitlines():
@@ -987,10 +993,16 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
     vendor_include = os.path.join(SCRIPT_DIR, "vendor")
 
     if is_msvc:
+        # /Fo keeps the intermediate object inside build/obj (cl would
+        # otherwise drop it into the current working directory). cl requires
+        # the target directory to exist up front.
+        test_obj_dir = os.path.join(OBJ_DIR, "debug", "tests")
+        os.makedirs(test_obj_dir, exist_ok=True)
         flags = [compiler, "/nologo", "/std:c++20", "/EHsc", "/Zi", "/Od", "/DLTGUI_STATIC"]
         flags += ["/I", INCLUDE_DIR, "/I", vendor_include]
         flags += get_platform_flags(platform, is_msvc=True)
         flags += [f"/Fe:{exe_path}"]
+        flags += [f"/Fo{os.path.join(test_obj_dir, tf[:-4] + '.obj')}"]
         flags += [src]
         flags += ["/link", lib_path]
         flags += get_platform_libs(platform, is_msvc=True)
@@ -1006,7 +1018,7 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
         flags += get_platform_libs(platform)
         flags += ["-o", exe_path]
 
-    result = subprocess.run(flags, capture_output=True, text=True)
+    result = subprocess.run(flags, capture_output=True, text=True, errors="replace")
     if result.returncode != 0:
         cprint(f"  {tf}... ", Color.CYAN, end="")
         cprint("COMPILE ERROR", Color.RED)
@@ -1044,7 +1056,7 @@ def cmd_test(positional, flags):
             continue
 
         cprint(f"  {tf}... ", Color.CYAN, end="")
-        result = subprocess.run([exe_path], capture_output=True, text=True)
+        result = subprocess.run([exe_path], capture_output=True, text=True, errors="replace")
         if result.returncode == 0:
             cprint("PASS", Color.GREEN)
             passed += 1
@@ -1174,7 +1186,7 @@ def cmd_fmt(positional, flags):
     for f in files:
         rel = os.path.relpath(f, SCRIPT_DIR)
         cprint(f"  {rel}...", Color.CYAN, end="")
-        result = subprocess.run(cmd + [f], capture_output=True, text=True)
+        result = subprocess.run(cmd + [f], capture_output=True, text=True, errors="replace")
         if result.returncode == 0:
             cprint(" OK", Color.GREEN)
             success += 1
@@ -1225,7 +1237,7 @@ def cmd_lint(positional, flags):
         else:
             cmd += ["--", f"-std=c++20", f"-I{INCLUDE_DIR}", f"-I{VENDOR_DIR}"]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
         output = (result.stdout + result.stderr).strip()
 
         w_count = output.count("warning:")
@@ -1519,7 +1531,7 @@ def cmd_package(positional, flags):
     # does not agree, but never let the package name drift from the header.
     version = LTGUI_VERSION
     tag = subprocess.run(
-        ["git", "describe", "--tags"], capture_output=True, text=True, cwd=SCRIPT_DIR
+        ["git", "describe", "--tags"], capture_output=True, text=True, errors="replace", cwd=SCRIPT_DIR
     ).stdout.strip()
     if tag:
         tag_version = tag.lstrip("v")
