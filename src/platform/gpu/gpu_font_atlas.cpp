@@ -103,8 +103,10 @@ const GlyphEntry *FontAtlas::getGlyph(uint32_t codepoint,
       fontKey(fit->first) ^
       (static_cast<uint64_t>(codepoint) * 0x9E3779B97F4A7C15ULL);
   auto git = glyphCache_.find(key);
-  if (git != glyphCache_.end())
+  if (git != glyphCache_.end()) {
+    touchGlyph(key);
     return &git->second;
+  }
 
   auto &cache = fit->second;
   int glyphIdx = stbtt_FindGlyphIndex(&cache.info, (int)codepoint);
@@ -119,7 +121,7 @@ const GlyphEntry *FontAtlas::getGlyph(uint32_t codepoint,
   if (gw <= 0 || gh <= 0) {
     GlyphEntry empty;
     empty.advance = static_cast<int>(advanceW * cache.scale);
-    glyphCache_[key] = empty;
+    addGlyph(key, empty);
     return &glyphCache_[key];
   }
 
@@ -160,13 +162,38 @@ const GlyphEntry *FontAtlas::getGlyph(uint32_t codepoint,
   entry.advance = static_cast<int>(advanceW * cache.scale);
   entry.texId = texId;
 
-  glyphCache_[key] = entry;
+  addGlyph(key, entry);
   return &glyphCache_[key];
 #else
   (void)codepoint;
   (void)fontDesc;
   return nullptr;
 #endif
+}
+
+void FontAtlas::touchGlyph(uint64_t key) {
+  auto it = glyphCache_.find(key);
+  if (it == glyphCache_.end())
+    return;
+  glyphLRU_.splice(glyphLRU_.begin(), glyphLRU_, it->second.lruIt);
+}
+
+void FontAtlas::addGlyph(uint64_t key, GlyphEntry entry) {
+  auto it = glyphCache_.find(key);
+  if (it != glyphCache_.end()) {
+    // Replacing an existing entry: refresh its LRU position.
+    glyphLRU_.splice(glyphLRU_.begin(), glyphLRU_, it->second.lruIt);
+    it->second = entry;
+    return;
+  }
+  glyphCache_[key] = entry;
+  glyphLRU_.push_front(key);
+  glyphCache_[key].lruIt = glyphLRU_.begin();
+  while (glyphLRU_.size() > kMaxGlyphs) {
+    uint64_t victim = glyphLRU_.back();
+    glyphLRU_.pop_back();
+    glyphCache_.erase(victim);
+  }
 }
 
 Size FontAtlas::measureText(const std::string &text, const Font &fontDesc) {

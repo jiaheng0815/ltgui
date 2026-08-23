@@ -45,6 +45,7 @@ SRC_DIR = os.path.join(SCRIPT_DIR, "src")
 INCLUDE_DIR = os.path.join(SCRIPT_DIR, "include", "ltgui")
 VENDOR_DIR = os.path.join(SCRIPT_DIR, "vendor")
 EXAMPLES_DIR = os.path.join(SCRIPT_DIR, "examples")
+BENCH_DIR = os.path.join(SCRIPT_DIR, "bench")
 APP_DIR      = os.path.join(SCRIPT_DIR, "app")
 BUILD_DIR = os.path.join(SCRIPT_DIR, "build")
 OBJ_DIR = os.path.join(BUILD_DIR, "obj")
@@ -949,6 +950,40 @@ def cmd_clean(positional, flags):
         cprint("Cleaned build directory.", Color.GREEN)
     else:
         cprint("Nothing to clean.", Color.YELLOW)
+
+def cmd_bench(positional, flags):
+    """Build and run all benchmarks in bench/."""
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
+    check_platform_clean(compiler)
+    platform = detect_platform()
+
+    bench_files = sorted([f[:-4] for f in os.listdir(BENCH_DIR)
+                          if f.endswith(".cpp")]) if os.path.exists(BENCH_DIR) else []
+    if not bench_files:
+        cprint("No benchmark files found in bench/", Color.YELLOW)
+        return
+    if len(positional) >= 2:
+        only = positional[1]
+        bench_files = [b for b in bench_files if b == only]
+        if not bench_files:
+            cprint(f"Benchmark '{only}' not found in bench/", Color.RED)
+            return
+
+    lib_path = build_lib(platform, is_release=True, compiler=compiler,
+                         is_msvc=is_msvc)
+    if not lib_path:
+        return
+
+    cprint(f"Running {len(bench_files)} benchmark(s)...\n", Color.BLUE, bold=True)
+    for name in bench_files:
+        if not build_program(name, BENCH_DIR, platform, True, lib_path,
+                             compiler, is_msvc):
+            return
+        exe_name = name + (".exe" if platform == "windows" else "")
+        exe_path = os.path.join(BUILD_DIR, exe_name)
+        cprint(f"  {name}:", Color.CYAN)
+        subprocess.run([exe_path])
+    cprint("\nBenchmarks complete.", Color.GREEN, bold=True)
 
 def cmd_run(positional, flags):
     if len(positional) < 2:
@@ -1907,6 +1942,7 @@ def main():
         "build":   cmd_build,
         "clean":   cmd_clean,
         "run":     cmd_run,
+        "bench":   cmd_bench,
         "test":    cmd_test,
         "install": cmd_install,
         "package": cmd_package,

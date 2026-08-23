@@ -3,6 +3,7 @@
 #include "font.h"
 #include "geometry.h"
 #include "platform/gpu/gpu_device.h"
+#include <list>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -44,6 +45,8 @@ struct GlyphEntry {
   int offsetX = 0, offsetY = 0; // offset from pen position
   int advance = 0;              // horizontal advance
   int texId = -1;
+  // Position inside the access-order list (LRU eviction); see glyphLRU_.
+  std::list<uint64_t>::iterator lruIt;
 };
 
 class FontAtlas {
@@ -102,6 +105,8 @@ private:
   int createAtlasPage();
   bool allocGlyphRect(int w, int h, int &outX, int &outY, int &outTexId);
   uint64_t fontKey(const Font &f) const;
+  void touchGlyph(uint64_t key);
+  void addGlyph(uint64_t key, GlyphEntry entry);
 
   static constexpr int kMaxAtlasPages = 16; // prevent unbounded page growth
 
@@ -114,7 +119,13 @@ private:
   std::unordered_map<Font, std::vector<uint8_t>> ttfData_;
   // Size-specific font caches created on demand from ttfData_
   std::unordered_map<Font, FontCache> loadedFonts_;
+  // Glyph cache with a bound on the entry count. Atlas memory is bounded by
+  // kMaxAtlasPages already (glyphs never leave a page once rasterized); the
+  // LRU here bounds the bookkeeping (and lets an N-glyph face cycle through
+  // long sessions without growing forever).
   std::unordered_map<uint64_t, GlyphEntry> glyphCache_;
+  std::list<uint64_t> glyphLRU_;  // front = most recently used
+  static constexpr size_t kMaxGlyphs = 4096;
   std::vector<AtlasPage> pages_;
 };
 
