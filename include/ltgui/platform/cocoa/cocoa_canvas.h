@@ -38,6 +38,12 @@ public:
   void fillRoundedRect(const Rect &rect, int radius) override;
   void strokeRoundedRect(const Rect &rect, int radius,
                          int lineWidth = 1) override;
+  // Gradient with optional fullBounds mapping (uses the new contract
+  // signature from native_canvas.h — depends on that header being updated
+  // to the 5-parameter fillLinearGradient in the same change set).
+  void fillLinearGradient(const Rect &rect, const Color &from, const Color &to,
+                          bool vertical = false,
+                          const Rect &fullBounds = Rect{}) override;
   void drawText(const std::string &text, const Rect &rect,
                 int flags = 0) override;
   void drawLine(const Point &p1, const Point &p2, int lineWidth = 1) override;

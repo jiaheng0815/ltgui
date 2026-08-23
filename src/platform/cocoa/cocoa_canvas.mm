@@ -40,15 +40,22 @@ void CocoaCanvas::resize(int width, int height) {
       nullptr, width, height, 8, bytesPerRow, colorSpace,
       kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
   CGColorSpaceRelease(colorSpace);
+
+  // New bitmap memory can hold garbage; clear it once so the first paint
+  // pass after a resize doesn't show uninitialized pixels.
+  CGContextRef bctx = static_cast<CGContextRef>(backbuffer_);
+  if (bctx) {
+    CGContextSetRGBFillColor(bctx, 1, 1, 1, 1);
+    CGContextFillRect(bctx, CGRectMake(0, 0, width, height));
+  }
 }
 
 void CocoaCanvas::beginPaint() {
-  if (backbuffer_) {
-    CGContextRef ctx = static_cast<CGContextRef>(backbuffer_);
-    // Clear to white
-    CGContextSetRGBFillColor(ctx, 1, 1, 1, 1);
-    CGContextFillRect(ctx, CGRectMake(0, 0, canvasWidth_, canvasHeight_));
-  }
+  // Deliberately do NOT clear the backbuffer: the widget paint tree only
+  // repaints widgets intersecting the dirty rect (same contract as the
+  // X11 backend).  Clearing here would erase everything outside the dirty
+  // region until the next full-window repaint.
+  (void)backbuffer_;
 }
 
 void CocoaCanvas::endPaint() {
@@ -188,6 +195,7 @@ void CocoaCanvas::drawText(const std::string &text, const Rect &rect,
   CGContextRestoreGState(ctx);
 
   CFRelease(line);
+  [attrStr release]; // MRC: attrStr was retained by alloc (leak fix)
 }
 
 void CocoaCanvas::drawLine(const Point &p1, const Point &p2, int lineWidth) {
@@ -263,6 +271,41 @@ void CocoaCanvas::strokeRoundedRect(const Rect &rect, int radius,
   addRoundedRectPath(ctx, CGRectMake(rect.x, rect.y, rect.width, rect.height),
                      radius);
   CGContextStrokePath(ctx);
+}
+
+void CocoaCanvas::fillLinearGradient(const Rect &rect, const Color &from,
+                                     const Color &to, bool vertical,
+                                     const Rect &fullBounds) {
+  // Banding gradient: legacy behavior when fullBounds is empty; otherwise
+  // the interpolation position of each band is mapped through fullBounds
+  // (gradient spans a larger region; only rect gets painted here).
+  int steps = vertical ? rect.height : rect.width;
+  if (steps <= 0)
+    return;
+  for (int i = 0; i < steps; i++) {
+    float t;
+    if (fullBounds.isEmpty()) {
+      t = steps > 1 ? static_cast<float>(i) / static_cast<float>(steps - 1)
+                    : 0.0f;
+    } else {
+      // Parameter space == fullBounds: interpolate across fullBounds,
+      // painting only the rows/columns of rect.  Uses (extent - 1) as the
+      // divisor to match the reference implementation (Color::lerp clamps).
+      float origin = vertical ? static_cast<float>(fullBounds.y)
+                              : static_cast<float>(fullBounds.x);
+      float extent = vertical ? static_cast<float>(fullBounds.height)
+                              : static_cast<float>(fullBounds.width);
+      float pos = (vertical ? static_cast<float>(rect.y)
+                            : static_cast<float>(rect.x)) +
+                  static_cast<float>(i);
+      t = extent > 1.0f ? (pos - origin) / (extent - 1.0f) : 0.0f;
+    }
+    setColor(Color::lerp(from, to, t));
+    if (vertical)
+      fillRect(Rect(rect.x, rect.y + i, rect.width, 1));
+    else
+      fillRect(Rect(rect.x + i, rect.y, 1, rect.height));
+  }
 }
 
 Size CocoaCanvas::measureText(const std::string &text) {

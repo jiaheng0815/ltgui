@@ -52,11 +52,18 @@ GpuCanvas::~GpuCanvas() {
       renderer_->textures().release(kv.second.texId);
     }
   }
-  // renderer_, fontAtlas_, device_ destroyed automatically via unique_ptr
-  // in reverse declaration order: fontAtlas_ → renderer_ → device_.
-  // This ensures GL textures are deleted before EGL termination.
-  // Do NOT call device_->shutdown() here — it would terminate EGL/GL
-  // before texture destructors run, causing undefined behaviour.
+  // Explicit teardown order (mirrors the unique_ptr reverse declaration
+  // order and keeps it verifiable):
+  //   fontAtlas_ → renderer_ (TextureManager destroys GpuTextures) →
+  //   device_ shutdown (EGL/COM resources must be freed only after GL/D3D
+  //   textures are gone; D3D11/GL shader and buffer teardown lives there).
+  // shutdown() is idempotent, so the subsequent ~D3D11Device() call is safe.
+  fontAtlas_.reset();
+  renderer_.reset();
+  if (device_) {
+    device_->shutdown();
+    device_.reset();
+  }
 }
 
 bool GpuCanvas::initialize(void *windowHandle, int width, int height) {
@@ -154,9 +161,10 @@ void GpuCanvas::fillRect(const Rect &rect) {
 }
 
 void GpuCanvas::fillLinearGradient(const Rect &rect, const Color &from,
-                                   const Color &to, bool vertical) {
+                                   const Color &to, bool vertical,
+                                   const Rect &fullBounds) {
   if (renderer_)
-    renderer_->fillLinearGradient(rect, from, to, vertical);
+    renderer_->fillLinearGradient(rect, from, to, vertical, fullBounds);
 }
 
 void GpuCanvas::strokeRect(const Rect &rect, int lineWidth) {
@@ -315,7 +323,10 @@ void GpuCanvas::drawPixelBuffer(const uint8_t *rgba, int w, int h,
     tempTexId_ = -1;
   }
   tempTexId_ = renderer_->textures().upload(w, h, rgba);
-  renderer_->drawImage(tempTexId_, rect);
+  // upload returns -1 on failure (bad size or GPU texture creation failed);
+  // don't issue a drawImage with an invalid texture id.
+  if (tempTexId_ >= 0)
+    renderer_->drawImage(tempTexId_, rect);
 }
 
 Size GpuCanvas::measureText(const std::string &text) {
@@ -361,10 +372,26 @@ void GpuCanvas::loadImageTexture(const std::string &path) {
 
   rgba.resize(w * h * 4);
   Gdiplus::Rect rc(0, 0, w, h);
-  Gdiplus::BitmapData bd;
-  bmp.LockBits(&rc, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &bd);
-  memcpy(rgba.data(), bd.Scan0, w * h * 4);
-  bmp.UnlockBits(&bd);
+  Gdiplus::BitmapData bd = {};
+  if (bmp.LockBits(&rc, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB,
+                   &bd) == Gdiplus::Ok &&
+      bd.Scan0) {
+    memcpy(rgba.data(), bd.Scan0, w * h * 4);
+    bmp.UnlockBits(&bd);
+    // GDI+ stores 32bppARGB pixels in memory as BGRA — swap R and B so the
+    // buffer is RGBA, matching what texture uploads expect.
+    for (int i = 0; i < w * h; i++) {
+      uint8_t tmp = rgba[i * 4 + 0];
+      rgba[i * 4 + 0] = rgba[i * 4 + 2];
+      rgba[i * 4 + 2] = tmp;
+    }
+  } else {
+    // LockBits failed — mark the path as failed so the caller draws the
+    // placeholder cross instead of an undefined pixel buffer.
+    rgba.clear();
+    imageCache_[path] = {-1, 0, 0};
+    return;
+  }
 #elif defined(LTGUI_PLATFORM_MACOS)
   // macOS: decode via ImageIO/CoreGraphics
   {

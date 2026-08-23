@@ -25,8 +25,13 @@ public:
   // Two-color linear gradient. Default implementation bands fillRect
   // rows/columns with lerped colors; backends override with native
   // gradient primitives where available.
+  // `fullBounds` is the parameter space the gradient interpolates over
+  // (color goes from->to across fullBounds); when it is empty it defaults
+  // to `rect` (legacy behavior). Only `rect` is actually painted, so a
+  // partial repaint still produces the gradient of the full widget.
   virtual void fillLinearGradient(const Rect &rect, const Color &from,
-                                  const Color &to, bool vertical = false);
+                                  const Color &to, bool vertical = false,
+                                  const Rect &fullBounds = Rect{});
   virtual void drawText(const std::string &text, const Rect &rect,
                         int flags = 0) = 0;
   virtual void drawLine(const Point &p1, const Point &p2,
@@ -69,18 +74,49 @@ inline void NativeCanvas::strokeRoundedRect(const Rect &rect, int /*radius*/,
 }
 inline void NativeCanvas::fillLinearGradient(const Rect &rect,
                                              const Color &from, const Color &to,
-                                             bool vertical) {
-  int steps = vertical ? rect.height : rect.width;
-  if (steps <= 0)
+                                             bool vertical,
+                                             const Rect &fullBounds) {
+  if (fullBounds.isEmpty()) {
+    // Legacy behavior: parameter space == the fill rect itself.
+    int steps = vertical ? rect.height : rect.width;
+    if (steps <= 0)
+      return;
+    for (int i = 0; i < steps; i++) {
+      float t =
+          steps > 1 ? static_cast<float>(i) / static_cast<float>(steps - 1)
+                    : 0.0f;
+      setColor(Color::lerp(from, to, t));
+      if (vertical) {
+        fillRect(Rect(rect.x, rect.y + i, rect.width, 1));
+      } else {
+        fillRect(Rect(rect.x + i, rect.y, 1, rect.height));
+      }
+    }
     return;
-  for (int i = 0; i < steps; i++) {
-    float t = steps > 1 ? static_cast<float>(i) / static_cast<float>(steps - 1)
-                        : 0.0f;
-    setColor(Color::lerp(from, to, t));
-    if (vertical) {
-      fillRect(Rect(rect.x, rect.y + i, rect.width, 1));
-    } else {
-      fillRect(Rect(rect.x + i, rect.y, 1, rect.height));
+  }
+  // Parameter space == fullBounds: interpolate across fullBounds but only
+  // paint the rows/columns of `rect`.
+  if (vertical) {
+    if (fullBounds.height <= 0)
+      return;
+    for (int y = rect.y; y < rect.y + rect.height; y++) {
+      float t = fullBounds.height > 1
+                    ? static_cast<float>(y - fullBounds.y) /
+                          static_cast<float>(fullBounds.height - 1)
+                    : 0.0f;
+      setColor(Color::lerp(from, to, t));
+      fillRect(Rect(rect.x, y, rect.width, 1));
+    }
+  } else {
+    if (fullBounds.width <= 0)
+      return;
+    for (int x = rect.x; x < rect.x + rect.width; x++) {
+      float t = fullBounds.width > 1
+                    ? static_cast<float>(x - fullBounds.x) /
+                          static_cast<float>(fullBounds.width - 1)
+                    : 0.0f;
+      setColor(Color::lerp(from, to, t));
+      fillRect(Rect(x, rect.y, 1, rect.height));
     }
   }
 }

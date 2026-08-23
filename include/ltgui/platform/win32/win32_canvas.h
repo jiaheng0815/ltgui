@@ -35,7 +35,8 @@ public:
   void strokeRect(const Rect &rect, int lineWidth = 1) override;
   void fillRoundedRect(const Rect &rect, int radius) override;
   void fillLinearGradient(const Rect &rect, const Color &from, const Color &to,
-                          bool vertical) override;
+                          bool vertical = false,
+                          const Rect &fullBounds = Rect{}) override;
   void strokeRoundedRect(const Rect &rect, int radius,
                          int lineWidth = 1) override;
   void drawText(const std::string &text, const Rect &rect,

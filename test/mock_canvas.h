@@ -58,7 +58,7 @@ public:
     void strokeRect(const Rect& r, int w = 1) override { strokes.push_back({currentColor(), r, 0, w}); }
     void fillRoundedRect(const Rect& r, int radius) override { fills.push_back({currentColor(), r, radius}); }
     void strokeRoundedRect(const Rect& r, int radius, int w = 1) override { strokes.push_back({currentColor(), r, radius, w}); }
-    void fillLinearGradient(const Rect& r, const Color& f, const Color& t, bool v = false) override {
+    void fillLinearGradient(const Rect& r, const Color& f, const Color& t, bool v = false, const Rect& /*fullBounds*/ = Rect{}) override {
         gradients.push_back({r, f, t, v});
     }
     void drawText(const std::string& t, const Rect& r, int = 0) override { texts.push_back({t, r, currentColor()}); }

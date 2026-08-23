@@ -40,13 +40,29 @@ bool Win32Canvas::loadFontFile(const Font &font, const char *ttfPath) {
   // FR_PRIVATE: register for this process only, no admin rights needed.
   // The font becomes visible to GDI+ via its family name for this session.
   int result = AddFontResourceExW(wpath.c_str(), FR_PRIVATE, nullptr);
+  if (result > 0) {
+    // The font tables may have changed (new family, updated metrics for
+    // existing families) — drop cached GDI+ Font objects so the next
+    // setFont()/drawText() rebuilds from fresh data.
+    flushFontCache();
+  }
   return result > 0;
 }
 
+void Win32Canvas::flushFontCache() {
+  for (auto &pair : fontCache_)
+    delete pair.second;
+  fontCache_.clear();
+  // Null out the active font so drawing falls back to lazy re-creation;
+  // setFont() re-resolves even for the previously active descriptor.
+  currentFont_ = nullptr;
+}
+
 Win32Canvas::~Win32Canvas() {
+  // Note: currentFont_ is NOT deleted here — it is an alias into
+  // fontCache_ (like the entries deleted below), which owns the objects.
   delete backbuffer_;
   delete graphics_;
-  delete currentFont_;
   delete brush_;
   delete pen_;
   delete measureBitmap_;
@@ -63,11 +79,29 @@ void Win32Canvas::resize(int width, int height) {
   if (width <= 0 || height <= 0)
     return;
 
-  // Allocate new objects before deleting old ones — if allocation
+  // Allocate new objects before deleting old ones — if construction
   // fails, the old canvas remains intact.
   Gdiplus::Bitmap *newBuf =
       new Gdiplus::Bitmap(width, height, PixelFormat32bppARGB);
-  Gdiplus::Graphics *newGfx = new Gdiplus::Graphics(newBuf);
+  if (newBuf->GetLastStatus() != Gdiplus::Ok) {
+    delete newBuf;
+    return;
+  }
+
+  Gdiplus::Graphics *newGfx = nullptr;
+  try {
+    newGfx = new Gdiplus::Graphics(newBuf);
+  } catch (...) {
+    // Graphics construction failed (e.g. bad_alloc) — keep the old one.
+    delete newBuf;
+    return;
+  }
+  if (newGfx->GetLastStatus() != Gdiplus::Ok) {
+    delete newGfx;
+    delete newBuf;
+    return;
+  }
+
   newGfx->SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
   newGfx->SetTextRenderingHint(Gdiplus::TextRenderingHintClearTypeGridFit);
 
@@ -110,7 +144,10 @@ void Win32Canvas::setColor(const Color &color) {
 }
 
 void Win32Canvas::setFont(const Font &font) {
-  if (font == currentFontDesc_)
+  // Only trust the descriptor compare while a cached font is actually
+  // active — after flushFontCache() currentFont_ is null and the font
+  // must be re-created even for an identical descriptor.
+  if (currentFont_ && font == currentFontDesc_)
     return;
   currentFontDesc_ = font;
   currentFont_ = getOrCreateFont(font);
@@ -286,12 +323,21 @@ void Win32Canvas::strokeRoundedRect(const Rect &rect, int radius,
 }
 
 void Win32Canvas::fillLinearGradient(const Rect &rect, const Color &from,
-                                     const Color &to, bool vertical) {
+                                     const Color &to, bool vertical,
+                                     const Rect &fullBounds) {
   if (!graphics_)
     return;
+  // fullBounds is the gradient parameter space (0%→100% runs across it);
+  // rect is only the area actually filled. An empty fullBounds keeps the
+  // legacy behavior: parameter space == filled rect.
+  Gdiplus::Rect paramSpace = fullBounds.isEmpty()
+                                 ? Gdiplus::Rect(rect.x, rect.y, rect.width,
+                                                 rect.height)
+                                 : Gdiplus::Rect(fullBounds.x, fullBounds.y,
+                                                 fullBounds.width,
+                                                 fullBounds.height);
   Gdiplus::LinearGradientBrush brush(
-      Gdiplus::Rect(rect.x, rect.y, rect.width, rect.height),
-      Gdiplus::Color(from.a, from.r, from.g, from.b),
+      paramSpace, Gdiplus::Color(from.a, from.r, from.g, from.b),
       Gdiplus::Color(to.a, to.r, to.g, to.b), vertical ? 90.0f : 0.0f);
   graphics_->FillRectangle(&brush, rect.x, rect.y, rect.width, rect.height);
 }

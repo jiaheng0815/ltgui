@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <vector>
 
 namespace ltgui {
 
@@ -57,6 +58,16 @@ X11Canvas::~X11Canvas() {
   if (backbuffer_) {
     XFreePixmap(display_, backbuffer_);
     backbuffer_ = 0;
+  }
+  if (!allocColorCache_.empty()) {
+    // Return all XAllocColor'd cells to the colormap (B7-05 leak fix).
+    std::vector<unsigned long> pixels;
+    pixels.reserve(allocColorCache_.size());
+    for (const auto &kv : allocColorCache_)
+      pixels.push_back(kv.second);
+    XFreeColors(display_, colormap_, pixels.data(),
+                static_cast<int>(pixels.size()), 0);
+    allocColorCache_.clear();
   }
   if (gc_) {
     XFreeGC(display_, gc_);
@@ -180,16 +191,60 @@ unsigned long X11Canvas::allocColor(const Color &c) {
     return r | g | b;
   }
 
-  // Fallback: allocate from colormap
+  // Fallback: allocate from colormap — cached by ARGB so repeated
+  // setColor calls reuse the same cell instead of leaking new ones.
+  uint32_t key = (static_cast<uint32_t>(c.r) << 24) |
+                 (static_cast<uint32_t>(c.g) << 16) |
+                 (static_cast<uint32_t>(c.b) << 8) |
+                 static_cast<uint32_t>(c.a);
+  auto it = allocColorCache_.find(key);
+  if (it != allocColorCache_.end())
+    return it->second;
   XColor xc;
   xc.red = c.r * 0x101;
   xc.green = c.g * 0x101;
   xc.blue = c.b * 0x101;
   xc.flags = DoRed | DoGreen | DoBlue;
   if (XAllocColor(display_, colormap_, &xc)) {
+    allocColorCache_[key] = xc.pixel;
     return xc.pixel;
   }
   return BlackPixel(display_, screen_);
+}
+
+void X11Canvas::fillLinearGradient(const Rect &rect, const Color &from,
+                                   const Color &to, bool vertical,
+                                   const Rect &fullBounds) {
+  // Banding gradient: legacy behavior when fullBounds is empty; otherwise
+  // the interpolation position of each band is mapped through fullBounds
+  // (gradient spans a larger region; only rect gets painted here).
+  int steps = vertical ? rect.height : rect.width;
+  if (steps <= 0)
+    return;
+  for (int i = 0; i < steps; i++) {
+    float t;
+    if (fullBounds.isEmpty()) {
+      t = steps > 1 ? static_cast<float>(i) / static_cast<float>(steps - 1)
+                    : 0.0f;
+    } else {
+      // Parameter space == fullBounds: interpolate across fullBounds,
+      // painting only the rows/columns of rect.  Uses (extent - 1) as the
+      // divisor to match the reference implementation (Color::lerp clamps).
+      float origin = vertical ? static_cast<float>(fullBounds.y)
+                              : static_cast<float>(fullBounds.x);
+      float extent = vertical ? static_cast<float>(fullBounds.height)
+                              : static_cast<float>(fullBounds.width);
+      float pos = (vertical ? static_cast<float>(rect.y)
+                            : static_cast<float>(rect.x)) +
+                  static_cast<float>(i);
+      t = extent > 1.0f ? (pos - origin) / (extent - 1.0f) : 0.0f;
+    }
+    setColor(Color::lerp(from, to, t));
+    if (vertical)
+      fillRect(Rect(rect.x, rect.y + i, rect.width, 1));
+    else
+      fillRect(Rect(rect.x + i, rect.y, 1, rect.height));
+  }
 }
 
 void X11Canvas::fillRect(const Rect &rect) {
