@@ -1,4 +1,9 @@
+---
+---
 # ltgui
+
+[![CI](https://github.com/jiaheng0815/ltgui/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaheng0815/ltgui/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A from-scratch, cross-platform retained-mode GUI framework in C++20.
 Zero dependencies beyond platform APIs.

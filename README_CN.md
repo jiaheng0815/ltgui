@@ -1,4 +1,9 @@
+---
+---
 # LTGUI
+
+[![CI](https://github.com/jiaheng0815/ltgui/actions/workflows/ci.yml/badge.svg)](https://github.com/jiaheng0815/ltgui/actions/workflows/ci.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 一个从零构建的跨平台保留模式 C++20 GUI 框架，除平台 API 外零外部依赖。
 
