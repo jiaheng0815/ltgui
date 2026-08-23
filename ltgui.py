@@ -754,7 +754,8 @@ def generate_amalgamated_header(target_path):
             # library, kept behind the __has_include guard in
             # gpu_font_atlas.h — dropping the include broke the guard's
             # true-branch and left stbtt_fontinfo undefined in the SDK.
-            if s.startswith('#include "') and 'stb_' not in s and ('ltgui/' in s or s.endswith('.h"')):
+            if s.startswith('#include "') and 'stb_' not in s and (
+                    'ltgui/' in s or s.endswith('.h"') or s.endswith('.hpp"')):
                 continue
             # Collect system includes for deduplication.
             # Skip stb_truetype — it's guarded by __has_include and must stay in place.
@@ -1485,10 +1486,11 @@ def cmd_package(positional, flags):
         cprint("  Run: python ltgui.py build", Color.YELLOW)
         return
 
-    # Auto-generate amalgamated header if not already done
+    # Always regenerate the amalgamated header — a stale build/ltgui.h in the
+    # build dir would otherwise leak the previous include-merge rules (e.g.
+    # renamed headers) into the package.
     amalgamated = os.path.join(BUILD_DIR, "ltgui.h")
-    if not os.path.exists(amalgamated):
-        generate_amalgamated_header(amalgamated)
+    generate_amalgamated_header(amalgamated)
 
     # Create temp package directory
     sdk_dir = os.path.join(BUILD_DIR, "sdk-pkg")
