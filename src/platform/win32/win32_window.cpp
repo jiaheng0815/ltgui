@@ -9,6 +9,12 @@
 #include <imm.h>
 #include <windowsx.h>
 
+// WinUser.h only defines WM_DPICHANGED when _WIN32_WINNT >= 0x0605; make
+// sure the message is usable on toolchains that default to an older target.
+#ifndef WM_DPICHANGED
+#define WM_DPICHANGED 0x02E0
+#endif
+
 namespace ltgui {
 
 bool Win32Window::classRegistered_ = false;
@@ -26,6 +32,45 @@ static void setDpiAwareness() {
   } else {
     SetProcessDPIAware();
   }
+}
+
+// AdjustWindowRectExForDpi (Win10 1607+) sizes the window frame for the
+// given DPI; on older systems (or non-DPI-aware processes) fall back to
+// the classic 96-dpi based AdjustWindowRect.
+static void adjustRectForDpi(RECT *rect, DWORD style, BOOL menu, UINT dpi) {
+  typedef BOOL(WINAPI * AdjustWindowRectExForDpiFunc)(RECT *, DWORD, BOOL,
+                                                      DWORD, UINT);
+  auto fn = (AdjustWindowRectExForDpiFunc)GetProcAddress(
+      GetModuleHandleW(L"user32.dll"), "AdjustWindowRectExForDpi");
+  if (fn) {
+    fn(rect, style, menu, 0, dpi);
+  } else {
+    AdjustWindowRect(rect, style, menu);
+  }
+}
+
+static LPCWSTR cursorIdOf(CursorShape shape) {
+  switch (shape) {
+  case CursorShape::Arrow:
+    return IDC_ARROW;
+  case CursorShape::IBeam:
+    return IDC_IBEAM;
+  case CursorShape::Wait:
+    return IDC_WAIT;
+  case CursorShape::Crosshair:
+    return IDC_CROSS;
+  case CursorShape::SizeWE:
+    return IDC_SIZEWE;
+  case CursorShape::SizeNS:
+    return IDC_SIZENS;
+  case CursorShape::SizeAll:
+    return IDC_SIZEALL;
+  case CursorShape::Hand:
+    return IDC_HAND;
+  case CursorShape::Denied:
+    return IDC_NO;
+  }
+  return IDC_ARROW;
 }
 
 Win32Window::Win32Window() { registerClass(); }
@@ -54,7 +99,7 @@ void Win32Window::registerClass() {
           GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     }
     if (self) {
-      return self->handleMessage(msg, wParam, lParam);
+      return self->handleMessage(hwnd, msg, wParam, lParam);
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
   };
@@ -64,7 +109,10 @@ void Win32Window::registerClass() {
       nullptr; // Suppress system background paint to prevent flicker
   wc.lpszClassName = L"ltgui_Window";
 
-  RegisterClassExW(&wc);
+  if (RegisterClassExW(&wc) == 0 && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+    LOG_ERROR("Win32", "RegisterClassExW failed, error=%lu", GetLastError());
+    return;
+  }
   classRegistered_ = true;
 }
 
@@ -76,6 +124,10 @@ bool Win32Window::create(int width, int height, const std::string &title) {
   std::wstring wtitle(len, L'\0');
   MultiByteToWideChar(CP_UTF8, 0, title.c_str(), -1, &wtitle[0], len);
 
+  // The frame is computed on the 96-dpi baseline here because the target
+  // monitor's DPI is not known until the window exists (dpiScale_ is
+  // queried below with GetDC); PerMonitorV2 rescales the window via
+  // WM_DPICHANGED once it is created.
   RECT rect = {0, 0, width, height};
   AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
 
@@ -147,7 +199,8 @@ void Win32Window::setSize(int width, int height) {
   if (!hwnd_)
     return;
   RECT rect = {0, 0, width, height};
-  AdjustWindowRect(&rect, WS_OVERLAPPEDWINDOW, FALSE);
+  adjustRectForDpi(&rect, WS_OVERLAPPEDWINDOW, FALSE,
+                   static_cast<UINT>(dpiScale_ * 96.0f));
   SetWindowPos(hwnd_, nullptr, 0, 0, rect.right - rect.left,
                rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER);
   size_.width = width;
@@ -166,63 +219,41 @@ void Win32Window::invalidate(const Rect &rect) {
 }
 
 void Win32Window::setCursor(CursorShape shape) {
-  LPCWSTR id = IDC_ARROW;
-  switch (shape) {
-  case CursorShape::Arrow:
-    id = IDC_ARROW;
-    break;
-  case CursorShape::IBeam:
-    id = IDC_IBEAM;
-    break;
-  case CursorShape::Wait:
-    id = IDC_WAIT;
-    break;
-  case CursorShape::Crosshair:
-    id = IDC_CROSS;
-    break;
-  case CursorShape::SizeWE:
-    id = IDC_SIZEWE;
-    break;
-  case CursorShape::SizeNS:
-    id = IDC_SIZENS;
-    break;
-  case CursorShape::SizeAll:
-    id = IDC_SIZEALL;
-    break;
-  case CursorShape::Hand:
-    id = IDC_HAND;
-    break;
-  case CursorShape::Denied:
-    id = IDC_NO;
-    break;
-  }
-  SetCursor(LoadCursorW(nullptr, id));
+  cursorShape_ = shape;
+  SetCursor(LoadCursorW(nullptr, cursorIdOf(shape)));
 }
 
 bool Win32Window::setClipboardText(const std::string &text) {
-  if (!OpenClipboard(nullptr))
-    return false;
-  EmptyClipboard();
+  // Prepare the payload first — a failure here must not touch the
+  // user's current clipboard contents.
   int wlen = MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, nullptr, 0);
-  if (wlen <= 0) {
-    CloseClipboard();
+  if (wlen <= 0)
+    return false;
+
+  HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, wlen * sizeof(wchar_t));
+  if (!hMem)
+    return false;
+
+  wchar_t *p = static_cast<wchar_t *>(GlobalLock(hMem));
+  if (!p) {
+    GlobalFree(hMem);
     return false;
   }
-  HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, wlen * sizeof(wchar_t));
-  if (hMem) {
-    wchar_t *p = static_cast<wchar_t *>(GlobalLock(hMem));
-    if (p) {
-      MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, p, wlen);
-      GlobalUnlock(hMem);
-    }
-    if (p && SetClipboardData(CF_UNICODETEXT, hMem)) {
-      // success — ownership transferred to clipboard
-    } else {
-      GlobalFree(hMem); // SetClipboardData failed or lock failed
-    }
+  MultiByteToWideChar(CP_UTF8, 0, text.c_str(), -1, p, wlen);
+  GlobalUnlock(hMem);
+
+  if (!OpenClipboard(nullptr)) {
+    GlobalFree(hMem);
+    return false;
   }
+  EmptyClipboard();
+  bool ok = SetClipboardData(CF_UNICODETEXT, hMem) != nullptr;
   CloseClipboard();
-  return hMem != nullptr;
+  // On success the clipboard owns hMem; only free it if the hand-off
+  // failed.
+  if (!ok)
+    GlobalFree(hMem);
+  return ok;
 }
 
 std::string Win32Window::getClipboardText() {
@@ -239,8 +270,11 @@ std::string Win32Window::getClipboardText() {
     int len =
         WideCharToMultiByte(CP_UTF8, 0, p, -1, nullptr, 0, nullptr, nullptr);
     if (len > 0) {
-      result.resize(len - 1);
+      // len includes the terminating NUL — size the buffer so the
+      // conversion fits, then drop the NUL from the result string.
+      result.resize(len);
       WideCharToMultiByte(CP_UTF8, 0, p, -1, &result[0], len, nullptr, nullptr);
+      result.pop_back();
     }
     GlobalUnlock(hData);
   }
@@ -252,20 +286,29 @@ void *Win32Window::nativeHandle() const { return hwnd_; }
 
 NativeCanvas *Win32Window::getCanvas() { return canvas_.get(); }
 
-LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
-  // Guard against cross-thread SendMessage into the widget/GPU pipeline
+LRESULT Win32Window::handleMessage(HWND hwnd, UINT msg, WPARAM wParam,
+                                   LPARAM lParam) {
+  // Guard against cross-thread SendMessage into the widget/GPU pipeline.
+  // Use the message's hwnd (not hwnd_): after WM_DESTROY, hwnd_ is null
+  // but the system still delivers WM_NCDESTROY through this handler.
   assert(isMainThread() && "Win32 window message on non-main thread");
   if (!eventCallback_)
-    return DefWindowProcW(hwnd_, msg, wParam, lParam);
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 
   switch (msg) {
   case WM_PAINT: {
+    // BeginPaint/EndPaint pair: EndPaint validates the region captured
+    // at BeginPaint time, so regions invalidated while we paint remain
+    // dirty and re-trigger WM_PAINT.
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
+    (void)hdc; // painting itself happens via Win32Canvas (dirty-rect blit)
     Event ev;
     ev.type = EventType::Paint;
     ev.width = size_.width;
     ev.height = size_.height;
     eventCallback_(ev);
-    ValidateRect(hwnd_, nullptr);
+    EndPaint(hwnd, &ps);
     return 0;
   }
 
@@ -316,6 +359,7 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
 
   case WM_LBUTTONDOWN:
   case WM_LBUTTONDBLCLK: {
+    pressedButton_ = MouseButton::Left;
     SetCapture(hwnd_);
     Event ev;
     ev.type = EventType::MouseDown;
@@ -326,16 +370,19 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
   }
 
   case WM_LBUTTONUP: {
-    ReleaseCapture();
     Event ev;
     ev.type = EventType::MouseUp;
     ev.button = MouseButton::Left;
     ev.pos = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+    // Dispatch before releasing capture so the synthesized MouseUp from
+    // WM_CAPTURECHANGED always follows the real one.
     eventCallback_(ev);
+    ReleaseCapture();
     return 0;
   }
 
   case WM_RBUTTONDOWN: {
+    pressedButton_ = MouseButton::Right;
     SetCapture(hwnd_);
     Event ev;
     ev.type = EventType::MouseDown;
@@ -346,16 +393,17 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
   }
 
   case WM_RBUTTONUP: {
-    ReleaseCapture();
     Event ev;
     ev.type = EventType::MouseUp;
     ev.button = MouseButton::Right;
     ev.pos = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
     eventCallback_(ev);
+    ReleaseCapture();
     return 0;
   }
 
   case WM_MBUTTONDOWN: {
+    pressedButton_ = MouseButton::Middle;
     SetCapture(hwnd_);
     Event ev;
     ev.type = EventType::MouseDown;
@@ -366,11 +414,27 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
   }
 
   case WM_MBUTTONUP: {
-    ReleaseCapture();
     Event ev;
     ev.type = EventType::MouseUp;
     ev.button = MouseButton::Middle;
     ev.pos = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+    eventCallback_(ev);
+    ReleaseCapture();
+    return 0;
+  }
+
+  case WM_CAPTURECHANGED: {
+    // Capture was taken away (system menu, Alt+Tab, another window).
+    // Synthesize a MouseUp so pressed state resets. A normal click also
+    // passes through here via ReleaseCapture, but its MouseUp was already
+    // dispatched, so the extra event is a no-op for widgets.
+    POINT pt;
+    GetCursorPos(&pt);
+    ScreenToClient(hwnd, &pt);
+    Event ev;
+    ev.type = EventType::MouseUp;
+    ev.button = pressedButton_;
+    ev.pos = {pt.x, pt.y};
     eventCallback_(ev);
     return 0;
   }
@@ -384,6 +448,30 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
     ScreenToClient(hwnd_, &pt);
     ev.pos = {pt.x, pt.y};
     eventCallback_(ev);
+    return 0;
+  }
+
+  case WM_SETCURSOR:
+    // Keep the cursor in sync with the requested shape even after the
+    // window re-takes the pick (mouse leaving and re-entering, etc.).
+    if (LOWORD(lParam) == HTCLIENT) {
+      SetCursor(LoadCursorW(nullptr, cursorIdOf(cursorShape_)));
+      return TRUE;
+    }
+    break;
+
+  case WM_DPICHANGED: {
+    // Window moved to a monitor with a different DPI (PerMonitorV2).
+    // Refresh the scale, then adopt the system-suggested rect; the
+    // following WM_SIZE re-sizes the canvas and dispatches Resize
+    // through the existing path.
+    float newScale = HIWORD(wParam) / 96.0f;
+    if (dpiScale_ != newScale) {
+      dpiScale_ = newScale;
+      RECT *pr = reinterpret_cast<RECT *>(lParam);
+      SetWindowPos(hwnd_, nullptr, pr->left, pr->top, pr->right - pr->left,
+                   pr->bottom - pr->top, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
     return 0;
   }
 
@@ -474,7 +562,7 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
   case WM_SYSKEYDOWN: {
     // Let system key combinations (Alt+F4, Alt+Space, etc.) reach
     // DefWindowProcW so the OS can handle them.
-    return DefWindowProcW(hwnd_, msg, wParam, lParam);
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
   }
 
   case WM_CHAR: {
@@ -554,14 +642,15 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
   }
 
   case WM_IME_SETCONTEXT:
+    // Don't force the IME open — the user's input mode is their choice.
+    // Keep the context fetch/release pair and let DefWindowProcW handle
+    // the rest of the message.
     if (wParam) {
       HIMC hIMC = ImmGetContext(hwnd_);
-      if (hIMC) {
-        ImmSetOpenStatus(hIMC, TRUE);
+      if (hIMC)
         ImmReleaseContext(hwnd_, hIMC);
-      }
     }
-    return DefWindowProcW(hwnd_, msg, wParam, lParam);
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
 
   case WM_IME_STARTCOMPOSITION: {
     HIMC hIMC = ImmGetContext(hwnd_);
@@ -606,9 +695,14 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
                               static_cast<int>(wstr.size()), &utf8[0], utf8Len,
                               nullptr, nullptr);
 
-          // Query the actual cursor position within the composition
+          // Query the actual cursor position within the composition.
+          // GCS_CURSORPOS is reported as a byte offset even for the W
+          // API — convert to UTF-16 character count before comparing
+          // with wstr.size() / substringing.
           LONG cursorPos =
               ImmGetCompositionStringW(hIMC, GCS_CURSORPOS, nullptr, 0);
+          if (cursorPos >= 0)
+            cursorPos /= static_cast<LONG>(sizeof(wchar_t));
           int imeCursorByte =
               static_cast<int>(utf8.size()); // fallback: end of string
           if (cursorPos >= 0 && static_cast<size_t>(cursorPos) <= wstr.size()) {
@@ -657,7 +751,7 @@ LRESULT Win32Window::handleMessage(UINT msg, WPARAM wParam, LPARAM lParam) {
   }
   }
 
-  return DefWindowProcW(hwnd_, msg, wParam, lParam);
+  return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 } // namespace ltgui

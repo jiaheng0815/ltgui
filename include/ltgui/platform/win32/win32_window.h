@@ -42,7 +42,7 @@ public:
 
 private:
   friend LRESULT CALLBACK WndProc(HWND, UINT, WPARAM, LPARAM);
-  LRESULT handleMessage(UINT msg, WPARAM wParam, LPARAM lParam);
+  LRESULT handleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
   static void registerClass();
 
@@ -50,6 +50,8 @@ private:
   std::unique_ptr<NativeCanvas> canvas_;
   Size size_;
   float dpiScale_ = 1.0f;
+  CursorShape cursorShape_ = CursorShape::Arrow;
+  MouseButton pressedButton_ = MouseButton::Left;
   bool trackingMouse_ = false;
   int imeCompX_ = 10;
   int imeCompY_ = 10;
