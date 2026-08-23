@@ -23,6 +23,18 @@ int main(int argc, char *argv[]) {
 
   auto mainLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 4, 8);
 
+  // Menu bar (File + View with a checkable item)
+  auto *menuBar = root->makeChild<MenuBar>();
+  int fileMenu = menuBar->addMenu("File");
+  menuBar->addItem(fileMenu, "New", []() { LOG_INFO("Demo", "File -> New"); });
+  menuBar->addItem(fileMenu, "Open...", []() { LOG_INFO("Demo", "File -> Open"); });
+  menuBar->addSeparator(fileMenu);
+  menuBar->addItem(fileMenu, "Exit", []() { LOG_INFO("Demo", "File -> Exit"); });
+  int viewMenu = menuBar->addMenu("View");
+  menuBar->addItem(viewMenu, "Show Grid", []() { LOG_INFO("Demo", "View -> Grid"); });
+  menuBar->setItemCheckable(viewMenu, 0, true);
+  menuBar->setItemChecked(viewMenu, 0, true);
+
   // Title
   auto *title = root->makeChild<Label>("ltgui Widget Demo");
   title->style().font = Font("Segoe UI", 20, FontWeight::Bold);
@@ -126,12 +138,68 @@ int main(int argc, char *argv[]) {
   listRowLayout->addStretch(0);
   listRow->setLayout(std::move(listRowLayout));
 
-  // Stretch factors
-  mainLayout->addStretch(0);
-  mainLayout->addStretch(0);
-  mainLayout->addStretch(0);
-  mainLayout->addStretch(0);
-  mainLayout->addStretch(0);
+  // Table + Tree row
+  auto *tableRow = root->makeChild<Widget>();
+  tableRow->style().bgColor = Color::Transparent;
+  auto tableRowLayout = std::make_unique<BoxLayout>(BoxLayout::LeftToRight, 8, 4);
+
+  auto *table = tableRow->makeChild<TableView>();
+  table->addColumn(TableColumn{"Name", 150, 60, true, true});
+  table->addColumn(TableColumn{"Value", 90, 50, true, true});
+  auto tmodel = std::make_shared<SimpleTableModel>(0, 2);
+  tmodel->addRow({"One", "1"});
+  tmodel->addRow({"Two", "2"});
+  tmodel->addRow({"Three", "3"});
+  table->setModel(tmodel);
+
+  auto *tree = tableRow->makeChild<TreeView>();
+  auto *catA = tree->rootItem()->addChild("Section A");
+  catA->setExpanded(true);
+  catA->addChild("Item 1");
+  catA->addChild("Item 2");
+  auto *catB = tree->rootItem()->addChild("Section B");
+  catB->addChild("Item 3");
+
+  tableRowLayout->addStretch(1);
+  tableRowLayout->addStretch(1);
+  tableRow->setLayout(std::move(tableRowLayout));
+
+  // Tab row: ProgressBar + long scroll list in two tabs
+  auto *tabs = root->makeChild<TabWidget>();
+  tabs->addTab("Progress");
+  tabs->addTab("Scroller");
+
+  auto *progressPage = tabs->tabContent(0);
+  auto *progress = progressPage->makeChild<ProgressBar>();
+  progress->setRange(0, 100);
+  progress->setValue(42);
+  auto *progressLabel = progressPage->makeChild<Label>("42/100");
+  progress->onValueChanged.connect([&](int v) {
+    progressLabel->setText(std::to_string(v) + "/100");
+  });
+  auto *progressBtn = progressPage->makeChild<Button>("Increment");
+  progressBtn->onClicked.connect(
+      [&]() { progress->setValue(progress->value() + 10); });
+  auto progressLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 4, 4);
+  progressLayout->addStretch(0);
+  progressPage->setLayout(std::move(progressLayout));
+
+  auto *scrollPage = tabs->tabContent(1);
+  auto *area = scrollPage->makeChild<ScrollArea>();
+  auto longContent = std::make_unique<Widget>();
+  longContent->style().bgColor = currentTheme().bgSecondary;
+  auto longLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 2, 2);
+  for (int i = 0; i < 25; i++)
+    longContent->makeChild<Label>("Scroll row " + std::to_string(i + 1));
+  longLayout->addStretch(0);
+  longLayout->addStretch(1);
+  longContent->setLayout(std::move(longLayout));
+  area->setWidget(std::move(longContent));
+  auto scrollLayout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 0, 0);
+  scrollLayout->addStretch(0);
+  scrollPage->setLayout(std::move(scrollLayout));
+
+  // Stretch factors — the last one absorbs the leftover space
   mainLayout->addStretch(1);
 
   root->setLayout(std::move(mainLayout));
