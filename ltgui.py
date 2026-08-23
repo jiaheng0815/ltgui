@@ -2,6 +2,7 @@
 """ltgui build system — python ltgui.py [command] [options]"""
 
 import os
+import re
 import sys
 import time
 import json
@@ -50,12 +51,41 @@ OBJ_DIR = os.path.join(BUILD_DIR, "obj")
 LIB_DIR = os.path.join(BUILD_DIR, "lib")
 TEST_DIR = os.path.join(SCRIPT_DIR, "test")
 
+def _load_version():
+    """Parse LTGUI version from include/ltgui/version.h (single source of truth).
+
+    Guarantees ltgui.py, the C++ header and the CMake project version stay in
+    sync: if the file is unreadable or the macros are missing/duplicated, the
+    script refuses to run rather than silently packaging a stale version.
+    """
+    version_h = os.path.join(INCLUDE_DIR, "version.h")
+    macros = {}
+    try:
+        with open(version_h, "r", encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"^#define\s+LTGUI_VERSION_(MAJOR|MINOR|PATCH|STRING)\s+(\S+)", line.strip())
+                if m:
+                    macros[m.group(1)] = m.group(2)
+    except OSError as e:
+        raise SystemExit(f"ltgui.py: cannot read {version_h}: {e}")
+    if len(macros) != 4 or any(not macros[k] for k in ("MAJOR", "MINOR", "PATCH", "STRING")):
+        raise SystemExit(
+            f"ltgui.py: {version_h} is missing LTGUI_VERSION_* macros (found {sorted(macros)}). "
+            "Fix version.h first.")
+    mac = f"{macros['MAJOR']}.{macros['MINOR']}.{macros['PATCH']}"
+    if mac != macros["STRING"].strip('\"'):
+        raise SystemExit(
+            f"ltgui.py: version.h mismatch: LTGUI_VERSION_STRING=\"{macros['STRING']}\" "
+            f"does not match {mac}.")
+    return mac
+
 # --- Module-level state ---
 _VERBOSE = False
 _JSON_MODE = False
 _JOBS = os.cpu_count() or 1
 _COMPILE_COMMANDS = []
 _PROFILE_BUILD = False
+LTGUI_VERSION = _load_version()
 
 # --- Platform helpers ---
 def detect_platform():
@@ -778,6 +808,7 @@ def _strip_function_bodies(text):
 # they are internal implementation details, not part of the public SDK API.
 _HEADER_ORDER = [
     "api.h",
+    "version.h",
     "geometry.h",
     "signal.h",
     "color.h",
@@ -1273,6 +1304,7 @@ def cmd_info(positional, flags):
     tests = sorted([f[:-4] for f in os.listdir(TEST_DIR) if f.endswith(".cpp")]) if os.path.exists(TEST_DIR) else []
 
     cprint("ltgui Project Info", Color.BLUE, bold=True)
+    print(f"  Version:       {LTGUI_VERSION}")
     print(f"  Platform:      {platform} ({sys.platform})")
     print(f"  Python:        {sys.version.split()[0]}")
     print(f"  CPU cores:     {os.cpu_count() or 'unknown'}")
@@ -1704,14 +1736,16 @@ def cmd_package(positional, flags):
     if not _smoke_compile_header(sdk_dir, compiler, is_msvc):
         return
 
-    # Version from git
-    version = subprocess.run(
-        ["git", "describe", "--tags", "--always"],
-        capture_output=True, text=True, cwd=SCRIPT_DIR
+    # Version from version.h (single source of truth); warn if the git tag
+    # does not agree, but never let the package name drift from the header.
+    version = LTGUI_VERSION
+    tag = subprocess.run(
+        ["git", "describe", "--tags"], capture_output=True, text=True, cwd=SCRIPT_DIR
     ).stdout.strip()
-    if not version:
-        import datetime
-        version = datetime.date.today().strftime("%Y%m%d")
+    if tag:
+        tag_version = tag.lstrip("v")
+        if tag_version.split("-")[0] != version:
+            cprint(f"WARN: git tag '{tag}' does not match version.h ({version}).", Color.YELLOW)
 
     archive_basename = f"ltgui-{version}-sdk"
 

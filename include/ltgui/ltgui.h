@@ -1,6 +1,7 @@
 #pragma once
 
 #include "api.h"
+#include "version.h"
 #include "animation.h"
 #include "app.h"
 #include "canvas.h"

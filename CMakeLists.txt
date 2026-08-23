@@ -1,6 +1,26 @@
 cmake_minimum_required(VERSION 3.16)
 project(ltgui VERSION 1.0.0 LANGUAGES CXX)
 
+# --- Version check (single source of truth: include/ltgui/version.h) ---
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/include/ltgui/version.h" LTGUI_VERSION_LINES
+     REGEX "^#define LTGUI_VERSION_(MAJOR|MINOR|PATCH) [0-9]+$")
+if(NOT LTGUI_VERSION_LINES)
+    message(FATAL_ERROR "include/ltgui/version.h is missing LTGUI_VERSION_MAJOR/MINOR/PATCH macros.")
+endif()
+string(REGEX MATCH "LTGUI_VERSION_MAJOR ([0-9]+)" _ ${LTGUI_VERSION_LINES})
+set(_LTGUI_VER_MAJ ${CMAKE_MATCH_1})
+string(REGEX MATCH "LTGUI_VERSION_MINOR ([0-9]+)" _ ${LTGUI_VERSION_LINES})
+set(_LTGUI_VER_MIN ${CMAKE_MATCH_1})
+string(REGEX MATCH "LTGUI_VERSION_PATCH ([0-9]+)" _ ${LTGUI_VERSION_LINES})
+set(_LTGUI_VER_PAT ${CMAKE_MATCH_1})
+set(_LTGUI_VER "${_LTGUI_VER_MAJ}.${_LTGUI_VER_MIN}.${_LTGUI_VER_PAT}")
+if(NOT "${_LTGUI_VER}" STREQUAL "${PROJECT_VERSION}")
+    message(FATAL_ERROR
+        "Version mismatch: include/ltgui/version.h says ${_LTGUI_VER} but "
+        "project(VERSION) says ${PROJECT_VERSION}. Keep both in sync (bump "
+        "version.h + CMakeLists.txt + git tag together).")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
