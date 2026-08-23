@@ -13,3 +13,6 @@ __pycache__/
 test_sdk/
 .codegraph/
 .cache/
+build-cmake/
+sdk/
+check.txt
