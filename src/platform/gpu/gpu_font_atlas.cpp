@@ -94,7 +94,14 @@ const GlyphEntry *FontAtlas::getGlyph(uint32_t codepoint,
       return nullptr;
   }
 
-  uint64_t key = (fontKey(fit->first) << 32) | codepoint;
+  // Mix the full 64-bit font key (which includes size/weight/style in the
+  // high bits) with the codepoint via XOR + golden-ratio multiplication.
+  // The old `(fontKey << 32) | codepoint` shifted the font's size/weight/
+  // style bits out of the 64-bit range, so glyphs of the same codepoint at
+  // different sizes/styles collided in the cache.
+  uint64_t key =
+      fontKey(fit->first) ^
+      (static_cast<uint64_t>(codepoint) * 0x9E3779B97F4A7C15ULL);
   auto git = glyphCache_.find(key);
   if (git != glyphCache_.end())
     return &git->second;

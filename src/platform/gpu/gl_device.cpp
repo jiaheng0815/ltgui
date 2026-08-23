@@ -152,8 +152,14 @@ static GLuint compileShader(GLenum type, const char *src) {
 static GLuint createProgram(const char *vsSrc, const char *fsSrc) {
   GLuint vs = compileShader(GL_VERTEX_SHADER, vsSrc);
   GLuint fs = compileShader(GL_FRAGMENT_SHADER, fsSrc);
-  if (!vs || !fs)
+  // Don't leak the successfully compiled shader when the other one fails.
+  if (!vs || !fs) {
+    if (vs)
+      glDeleteShader(vs);
+    if (fs)
+      glDeleteShader(fs);
     return 0;
+  }
   GLuint prog = glCreateProgram();
   glAttachShader(prog, vs);
   glAttachShader(prog, fs);
@@ -324,12 +330,36 @@ public:
   }
 
   void shutdown() override {
+    if (display_ != EGL_NO_DISPLAY) {
+      // Make sure the context is current so glDelete* below runs against a
+      // live context (they are no-ops otherwise / undefined after terminate).
+      eglMakeCurrent(display_, surface_, surface_, context_);
+    }
+    // GL objects must be freed BEFORE eglTerminate. The previous order
+    // released them after the context was destroyed.
     if (vbo_) {
       glDeleteBuffers(1, &vbo_);
       vbo_ = 0;
       vboSize_ = 0;
     }
+    if (solidProg_) {
+      glDeleteProgram(solidProg_);
+      solidProg_ = 0;
+    }
+    if (roundedProg_) {
+      glDeleteProgram(roundedProg_);
+      roundedProg_ = 0;
+    }
+    if (ellipseProg_) {
+      glDeleteProgram(ellipseProg_);
+      ellipseProg_ = 0;
+    }
+    if (texProg_) {
+      glDeleteProgram(texProg_);
+      texProg_ = 0;
+    }
     if (display_ != EGL_NO_DISPLAY) {
+      // Detach current state, destroy surface/context, then terminate.
       eglMakeCurrent(display_, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
       if (surface_ != EGL_NO_SURFACE)
         eglDestroySurface(display_, surface_);
@@ -337,10 +367,12 @@ public:
         eglDestroyContext(display_, context_);
       eglTerminate(display_);
     }
-    glDeleteProgram(solidProg_);
-    glDeleteProgram(roundedProg_);
-    glDeleteProgram(ellipseProg_);
-    glDeleteProgram(texProg_);
+    // Reset so a second shutdown() call (e.g. from the destructor after an
+    // initialize() failure already called it) is a full no-op.
+    display_ = EGL_NO_DISPLAY;
+    surface_ = EGL_NO_SURFACE;
+    context_ = EGL_NO_CONTEXT;
+    curProg_ = 0;
   }
 
   void resize(int w, int h) override {
@@ -355,6 +387,9 @@ public:
   }
 
   void beginFrame() override {
+    // Clear any scissor rect left over from last frame so the clear below
+    // covers the whole window; Renderer2D re-disables it after each scene.
+    glDisable(GL_SCISSOR_TEST);
     glClearColor(1, 1, 1, 1);
     glClear(GL_COLOR_BUFFER_BIT);
   }

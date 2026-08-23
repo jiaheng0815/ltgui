@@ -49,17 +49,28 @@ std::vector<GpuInfo> detectGpus() {
   if (FAILED(hr) || !factory)
     return result;
 
-  IDXGIAdapter *adapter = nullptr;
-  for (UINT i = 0; factory->EnumAdapters(i, &adapter) != DXGI_ERROR_NOT_FOUND;
-       i++) {
+  for (UINT i = 0;; i++) {
+    IDXGIAdapter *adapter = nullptr;
+    HRESULT hrEnum = factory->EnumAdapters(i, &adapter);
+    // NOT_FOUND means we're done; any other failure must not loop further
+    // with a stale/null adapter.
+    if (FAILED(hrEnum) || !adapter)
+      break;
     DXGI_ADAPTER_DESC desc;
     if (SUCCEEDED(adapter->GetDesc(&desc))) {
       GpuInfo info;
-      // Convert wide string to UTF-8
-      char nameBuf[256] = {};
-      WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, nameBuf,
-                          sizeof(nameBuf), nullptr, nullptr);
-      info.name = nameBuf;
+      // Convert wide string to UTF-8. Two-pass size query first so long
+      // adapter names are not silently truncated by a fixed buffer.
+      int wlen = WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, nullptr,
+                                     0, nullptr, nullptr);
+      if (wlen > 0) {
+        std::string buf(static_cast<size_t>(wlen), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, &buf[0], wlen,
+                            nullptr, nullptr);
+        if (!buf.empty())
+          buf.pop_back(); // strip the trailing NUL written by -1 length
+        info.name = buf;
+      }
       info.vendor = vendorFromId(desc.VendorId);
       info.backend = GpuBackend::D3D11;
       info.vramBytes = static_cast<int64_t>(desc.DedicatedVideoMemory);

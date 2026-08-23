@@ -82,7 +82,8 @@ void Renderer2D::fillRect(const Rect &r, const Color &c) {
 }
 
 void Renderer2D::fillLinearGradient(const Rect &r, const Color &from,
-                                    const Color &to, bool vertical) {
+                                    const Color &to, bool vertical,
+                                    const Rect &fullBounds) {
   if (from.a == 0 && to.a == 0)
     return;
   // p1.x carries the direction flag (1 = vertical) through the draw cmd.
@@ -94,7 +95,8 @@ void Renderer2D::fillLinearGradient(const Rect &r, const Color &from,
                    -1,
                    vertical ? Point(1, 0) : Point(0, 0),
                    {},
-                   to});
+                   to,
+                   fullBounds});
 }
 
 void Renderer2D::fillRoundedRect(const Rect &r, float radius, const Color &c) {
@@ -210,10 +212,12 @@ void Renderer2D::flushBatch() {
     }
   };
 
+  // Removed: no command emits raw line primitives anymore. StrokeEllipse
+  // generates triangle-band geometry even for lineWidth <= 1 (see
+  // emitStrokeEllipse), and DrawLine goes through emitThickLine (quads), so
+  // every batch vertex is dispatched to drawTriangles. The batchIsLines
+  // branch below is dead code kept for safety.
   auto isLineOp = [](DrawOp op) -> bool {
-    // StrokeEllipse with lineWidth <= 1 uses lines; thicker uses triangles.
-    // We can't check lineWidth here since we only have the op type.
-    // We'll batch StrokeEllipse with the same shader but emit as needed.
     (void)op;
     return false;
   };
@@ -260,10 +264,10 @@ void Renderer2D::flushBatch() {
         break;
       case DrawOp::FillGradientRect:
         // Vertical: colorA on top, colorB on bottom; horizontal:
-        // colorA on left, colorB on right. The GPU interpolates
-        // per-vertex colors across the quad.
+        // colorA on left, colorB on right. Colors are computed per
+        // vertex from the full gradient bounds (not the rect).
         emitGradientQuad(verts, cmd.rect, color, cmd.color2.toABGR(),
-                         cmd.p1.x > 0.0f);
+                         cmd.p1.x > 0.0f, cmd.gradBounds);
         break;
       case DrawOp::FillRoundedRect:
         emitQuad(verts, cmd.rect, 0, 0, 1, 1, color,
@@ -345,17 +349,36 @@ void Renderer2D::emitQuad(std::vector<Vertex2D> &out, const Rect &r, float u0,
 
 void Renderer2D::emitGradientQuad(std::vector<Vertex2D> &out, const Rect &r,
                                   uint32_t colorA, uint32_t colorB,
-                                  bool vertical) {
+                                  bool vertical, const Rect &gradBounds) {
   float x0 = toNdcX(static_cast<float>(r.x), width_);
   float y0 = toNdcY(static_cast<float>(r.y), height_);
   float x1 = toNdcX(static_cast<float>(r.right()), width_);
   float y1 = toNdcY(static_cast<float>(r.bottom()), height_);
+  // t is measured against the FULL gradient bounds (empty gradBounds falls
+  // back to the rect itself), so a gradient that extends beyond the drawn
+  // rect keeps its correct span. Per-vertex lerp in ABGR byte order.
+  Rect gb = (gradBounds.width > 0 && gradBounds.height > 0) ? gradBounds : r;
+  float span = vertical ? (float)gb.height : (float)gb.width;
+  auto tAt = [&](float px, float py) -> float {
+    float d = vertical ? ((float)py - gb.y) : ((float)px - gb.x);
+    float t = span > 0.0f ? d / span : 0.0f;
+    return t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
+  };
+  auto lerp = [](uint32_t from, uint32_t to, float t) -> uint32_t {
+    uint32_t out = 0;
+    for (int c = 0; c < 4; c++) {
+      int shift = c * 8;
+      float a = (float)((from >> shift) & 0xFF);
+      float b = (float)((to >> shift) & 0xFF);
+      out |= (uint32_t)(a + (b - a) * t + 0.5f) << shift;
+    }
+    return out;
+  };
   // Vertical: A at top (y0), B at bottom (y1); horizontal: A at left (x0).
-  uint32_t cTL = colorA, cTR = colorA, cBL = colorB, cBR = colorB;
-  if (!vertical) {
-    cTL = cBL = colorA;
-    cTR = cBR = colorB;
-  }
+  uint32_t cTL = lerp(colorA, colorB, tAt(r.x, r.y));
+  uint32_t cTR = lerp(colorA, colorB, tAt(r.right(), r.y));
+  uint32_t cBL = lerp(colorA, colorB, tAt(r.x, r.bottom()));
+  uint32_t cBR = lerp(colorA, colorB, tAt(r.right(), r.bottom()));
   Vertex2D v[] = {
       {x0, y0, 0, 0, cTL, 0, 0, 0, 0}, {x1, y0, 1, 0, cTR, 0, 0, 0, 0},
       {x0, y1, 0, 1, cBL, 0, 0, 0, 0}, {x0, y1, 0, 1, cBL, 0, 0, 0, 0},
@@ -423,53 +446,44 @@ void Renderer2D::emitStrokeEllipse(std::vector<Vertex2D> &out, const Rect &r,
   float rx = r.width * 0.5f, ry = r.height * 0.5f;
   float cx = static_cast<float>(r.x) + rx, cy = static_cast<float>(r.y) + ry;
 
-  if (lineWidth <= 1.0f) {
-    // Thin stroke: use line segments (1px wide on GPU)
-    const int kSegments = 16;
-    for (int i = 0; i < kSegments; i++) {
-      float a0 = 2.0f * 3.14159265f * i / kSegments;
-      float a1 = 2.0f * 3.14159265f * (i + 1) / kSegments;
-      Vertex2D v[] = {
-          {toNdcX(cx + rx * cosf(a0), width_),
-           toNdcY(cy + ry * sinf(a0), height_), 0, 0, color, 0, 0, 0, 0},
-          {toNdcX(cx + rx * cosf(a1), width_),
-           toNdcY(cy + ry * sinf(a1), height_), 0, 0, color, 0, 0, 0, 0},
-      };
-      out.insert(out.end(), v, v + 2);
-    }
-  } else {
-    // Thick stroke: generate a triangle-strip band between inner and outer
-    // ellipses. Each segment = 6 vertices (2 triangles).
-    float half = lineWidth * 0.5f;
-    float irx = std::max(0.0f, rx - half);
-    float iry = std::max(0.0f, ry - half);
-    const int kSegments = 32;
-    for (int i = 0; i < kSegments; i++) {
-      float a0 = 2.0f * 3.14159265f * i / kSegments;
-      float a1 = 2.0f * 3.14159265f * (i + 1) / kSegments;
-      float cos0 = cosf(a0), sin0 = sinf(a0);
-      float cos1 = cosf(a1), sin1 = sinf(a1);
-      // Outer vertices
-      float ox0 = toNdcX(cx + rx * cos0, width_);
-      float oy0 = toNdcY(cy + ry * sin0, height_);
-      float ox1 = toNdcX(cx + rx * cos1, width_);
-      float oy1 = toNdcY(cy + ry * sin1, height_);
-      // Inner vertices
-      float ix0 = toNdcX(cx + irx * cos0, width_);
-      float iy0 = toNdcY(cy + iry * sin0, height_);
-      float ix1 = toNdcX(cx + irx * cos1, width_);
-      float iy1 = toNdcY(cy + iry * sin1, height_);
+  // Thin strokes (lineWidth <= 1) are normalized to 1px and emitted as the
+  // same triangle-band geometry as thick strokes — the old 2-vertex GL_LINES
+  // output was removed because flushBatch always dispatches drawTriangles
+  // (see isLineOp), and raw line pairs would read as garbage triangles.
+  if (lineWidth < 1.0f)
+    lineWidth = 1.0f;
 
-      Vertex2D v[6] = {
-          {ox0, oy0, 0, 0, color, 0, 0, 0, 0},
-          {ox1, oy1, 0, 0, color, 0, 0, 0, 0},
-          {ix0, iy0, 0, 0, color, 0, 0, 0, 0},
-          {ix0, iy0, 0, 0, color, 0, 0, 0, 0},
-          {ox1, oy1, 0, 0, color, 0, 0, 0, 0},
-          {ix1, iy1, 0, 0, color, 0, 0, 0, 0},
-      };
-      out.insert(out.end(), v, v + 6);
-    }
+  // Thick stroke: generate a triangle band between inner and outer ellipses.
+  // Each segment = 6 vertices (2 triangles).
+  float half = lineWidth * 0.5f;
+  float irx = std::max(0.0f, rx - half);
+  float iry = std::max(0.0f, ry - half);
+  const int kSegments = 32;
+  for (int i = 0; i < kSegments; i++) {
+    float a0 = 2.0f * 3.14159265f * i / kSegments;
+    float a1 = 2.0f * 3.14159265f * (i + 1) / kSegments;
+    float cos0 = cosf(a0), sin0 = sinf(a0);
+    float cos1 = cosf(a1), sin1 = sinf(a1);
+    // Outer vertices
+    float ox0 = toNdcX(cx + rx * cos0, width_);
+    float oy0 = toNdcY(cy + ry * sin0, height_);
+    float ox1 = toNdcX(cx + rx * cos1, width_);
+    float oy1 = toNdcY(cy + ry * sin1, height_);
+    // Inner vertices
+    float ix0 = toNdcX(cx + irx * cos0, width_);
+    float iy0 = toNdcY(cy + iry * sin0, height_);
+    float ix1 = toNdcX(cx + irx * cos1, width_);
+    float iy1 = toNdcY(cy + iry * sin1, height_);
+
+    Vertex2D v[6] = {
+        {ox0, oy0, 0, 0, color, 0, 0, 0, 0},
+        {ox1, oy1, 0, 0, color, 0, 0, 0, 0},
+        {ix0, iy0, 0, 0, color, 0, 0, 0, 0},
+        {ix0, iy0, 0, 0, color, 0, 0, 0, 0},
+        {ox1, oy1, 0, 0, color, 0, 0, 0, 0},
+        {ix1, iy1, 0, 0, color, 0, 0, 0, 0},
+    };
+    out.insert(out.end(), v, v + 6);
   }
 }
 

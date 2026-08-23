@@ -218,6 +218,11 @@ class D3D11Device : public GpuDevice {
 public:
   D3D11Device() = default;
 
+  // shutdown() releases every COM resource and nulls the pointers, so it is
+  // idempotent and safe to call from the destructor (e.g. after an
+  // initialize() failure path has already run it).
+  ~D3D11Device() override { shutdown(); }
+
   const char *name() const override { return "D3D11"; }
   int width() const override { return width_; }
   int height() const override { return height_; }
@@ -277,7 +282,8 @@ public:
       return false;
 
     // Create render target view
-    createRenderTarget();
+    if (!createRenderTarget())
+      return false;
 
     // Set up blend state
     D3D11_BLEND_DESC blendDesc = {};
@@ -290,7 +296,11 @@ public:
     blendDesc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
     blendDesc.RenderTarget[0].RenderTargetWriteMask =
         D3D11_COLOR_WRITE_ENABLE_ALL;
-    device_->CreateBlendState(&blendDesc, &blendState_);
+    HRESULT hrBlend = device_->CreateBlendState(&blendDesc, &blendState_);
+    if (FAILED(hrBlend) || !blendState_) {
+      LOG_ERROR("D3D11", "CreateBlendState failed: 0x%08lx", hrBlend);
+      return false;
+    }
 
     // Default sampler
     D3D11_SAMPLER_DESC sampDesc = {};
@@ -298,7 +308,11 @@ public:
     sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
     sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
     sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-    device_->CreateSamplerState(&sampDesc, &sampler_);
+    HRESULT hrSampler = device_->CreateSamplerState(&sampDesc, &sampler_);
+    if (FAILED(hrSampler) || !sampler_) {
+      LOG_ERROR("D3D11", "CreateSamplerState failed: 0x%08lx", hrSampler);
+      return false;
+    }
 
     // Disable back-face culling — 2D rendering has no "back" faces.
     // Rasterizer WITHOUT scissor (default for most draws)
@@ -306,11 +320,21 @@ public:
     rsDesc.FillMode = D3D11_FILL_SOLID;
     rsDesc.CullMode = D3D11_CULL_NONE;
     rsDesc.ScissorEnable = FALSE;
-    device_->CreateRasterizerState(&rsDesc, &rasterizerState_);
+    HRESULT hrRs = device_->CreateRasterizerState(&rsDesc, &rasterizerState_);
+    if (FAILED(hrRs) || !rasterizerState_) {
+      LOG_ERROR("D3D11", "CreateRasterizerState failed: 0x%08lx", hrRs);
+      return false;
+    }
 
     // Rasterizer WITH scissor enabled — used when setScissor() is called
     rsDesc.ScissorEnable = TRUE;
-    device_->CreateRasterizerState(&rsDesc, &rasterizerScissorState_);
+    HRESULT hrRsScissor =
+        device_->CreateRasterizerState(&rsDesc, &rasterizerScissorState_);
+    if (FAILED(hrRsScissor) || !rasterizerScissorState_) {
+      LOG_ERROR("D3D11", "CreateRasterizerState(scissor) failed: 0x%08lx",
+                hrRsScissor);
+      return false;
+    }
 
     return true;
   }
@@ -380,6 +404,10 @@ public:
     if (ilRounded_) {
       ilRounded_->Release();
       ilRounded_ = nullptr;
+    }
+    if (ilTexture_) {
+      ilTexture_->Release();
+      ilTexture_ = nullptr;
     }
     if (context_) {
       context_->ClearState();
@@ -595,6 +623,28 @@ private:
       }
       return true;
     };
+    // Texture shader's VS_IN is {POSITION, TEXCOORD, COLOR} — 3 elements,
+    // no TEXCOORD1. Binding ilRounded_ (4 elements) would then declare a
+    // param the shader never reads; create a dedicated 3-element layout.
+    auto createTextureIL = [this](const void *bytecode, size_t len) -> bool {
+      D3D11_INPUT_ELEMENT_DESC layout[] = {
+          {"POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0,
+           D3D11_INPUT_PER_VERTEX_DATA, 0},
+          {"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 8,
+           D3D11_INPUT_PER_VERTEX_DATA, 0},
+          {"COLOR", 0, DXGI_FORMAT_R8G8B8A8_UNORM, 0, 16,
+           D3D11_INPUT_PER_VERTEX_DATA, 0},
+      };
+      HRESULT hr =
+          device_->CreateInputLayout(layout, 3, bytecode, len, &ilTexture_);
+      if (FAILED(hr)) {
+        LOG_ERROR("D3D11",
+                  "CreateInputLayout failed for texture shader: 0x%08lx", hr);
+        ilTexture_ = nullptr;
+        return false;
+      }
+      return true;
+    };
 
     // --- Solid shader ---
 #if LTGUI_HAS_PRECOMPILED_SHADERS
@@ -741,6 +791,17 @@ private:
                              &texVS_, nullptr) &&
           createFromBytecode(kTexture_psBytecode, kTexture_psBytecodeLen, false,
                              nullptr, &texPS_)) {
+        if (!createTextureIL(kTexture_vsBytecode, kTexture_vsBytecodeLen)) {
+          if (texVS_) {
+            texVS_->Release();
+            texVS_ = nullptr;
+          }
+          if (texPS_) {
+            texPS_->Release();
+            texPS_ = nullptr;
+          }
+          goto compile_texture_runtime;
+        }
         // OK, precompiled
       } else {
         goto compile_texture_runtime;
@@ -755,6 +816,22 @@ private:
         if (compile(kTextureShader, "PSMain", "ps_4_0", &psBlob)) {
           createFromBlob(vsBlob, true, &texVS_, nullptr);
           createFromBlob(psBlob, false, nullptr, &texPS_);
+          if (ilTexture_ == nullptr) {
+            if (!createTextureIL(vsBlob->GetBufferPointer(),
+                                 vsBlob->GetBufferSize())) {
+              if (texVS_) {
+                texVS_->Release();
+                texVS_ = nullptr;
+              }
+              if (texPS_) {
+                texPS_->Release();
+                texPS_ = nullptr;
+              }
+              vsBlob->Release();
+              psBlob->Release();
+              return false;
+            }
+          }
           vsBlob->Release();
           psBlob->Release();
         } else {
@@ -769,20 +846,22 @@ private:
     return true;
   }
 
-  void createRenderTarget() {
+  bool createRenderTarget() {
     ID3D11Texture2D *backBuffer = nullptr;
     HRESULT hr = swapChain_->GetBuffer(0, __uuidof(ID3D11Texture2D),
                                        (void **)&backBuffer);
     if (FAILED(hr) || !backBuffer) {
       LOG_ERROR("D3D11", "GetBuffer failed: 0x%08lx", hr);
-      return;
+      return false;
     }
     hr = device_->CreateRenderTargetView(backBuffer, nullptr, &rtView_);
     backBuffer->Release();
     if (FAILED(hr)) {
       LOG_ERROR("D3D11", "CreateRenderTargetView failed: 0x%08lx", hr);
       rtView_ = nullptr;
+      return false;
     }
+    return true;
   }
 
   void useShader(ShaderType type) {
@@ -805,7 +884,7 @@ private:
     case ShaderType::Texture:
       context_->VSSetShader(texVS_, nullptr, 0);
       context_->PSSetShader(texPS_, nullptr, 0);
-      context_->IASetInputLayout(ilRounded_);
+      context_->IASetInputLayout(ilTexture_);
       break;
     }
   }
@@ -828,12 +907,23 @@ private:
       desc.ByteWidth = vertexBufferSize_;
       desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
       desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-      device_->CreateBuffer(&desc, nullptr, &vertexBuffer_);
+      HRESULT hrBuf = device_->CreateBuffer(&desc, nullptr, &vertexBuffer_);
+      if (FAILED(hrBuf)) {
+        LOG_ERROR("D3D11", "CreateBuffer failed: 0x%08lx", hrBuf);
+        vertexBuffer_ = nullptr;
+        vertexBufferSize_ = 0;
+        return;
+      }
     }
 
     // Map and update
     D3D11_MAPPED_SUBRESOURCE mapped = {};
-    context_->Map(vertexBuffer_, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
+    HRESULT hrMap = context_->Map(vertexBuffer_, 0, D3D11_MAP_WRITE_DISCARD, 0,
+                                  &mapped);
+    if (FAILED(hrMap)) {
+      LOG_ERROR("D3D11", "Map failed: 0x%08lx", hrMap);
+      return;
+    }
     memcpy(mapped.pData, verts, byteSize);
     context_->Unmap(vertexBuffer_, 0);
 
@@ -869,6 +959,7 @@ private:
   // Input layouts
   ID3D11InputLayout *ilSolid_ = nullptr;
   ID3D11InputLayout *ilRounded_ = nullptr;
+  ID3D11InputLayout *ilTexture_ = nullptr;
 
   float orthoProj_[16] = {};
   int width_ = 0, height_ = 0;

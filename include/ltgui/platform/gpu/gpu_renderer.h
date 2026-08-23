@@ -33,6 +33,8 @@ struct DrawCmd {
   int texId = -1;      // -1 = solid color, >=0 = texture
   Point p1, p2;        // for DrawLine
   Color color2;        // second color for FillGradientRect
+  Rect gradBounds;     // full gradient extent for FillGradientRect (empty =
+                       // use rect)
 };
 
 // Manages texture uploads — keeps GpuTexture alive and maps handles
@@ -70,8 +72,10 @@ public:
   // Drawing commands (all deferred)
   void fillRect(const Rect &r, const Color &c);
   // Two-color linear gradient — interpolated per-vertex on the GPU.
+  // fullBounds is the whole extent of the gradient; t is computed from the
+  // vertex position against fullBounds (falls back to r when empty).
   void fillLinearGradient(const Rect &r, const Color &from, const Color &to,
-                          bool vertical);
+                          bool vertical, const Rect &fullBounds = Rect{});
   void fillRoundedRect(const Rect &r, float radius, const Color &c);
   void fillEllipse(const Rect &r, const Color &c);
   void strokeRect(const Rect &r, float lineWidth, const Color &c);
@@ -109,7 +113,8 @@ private:
                 float u1, float v1, uint32_t color, float p0, float p1,
                 float p2, float p3);
   void emitGradientQuad(std::vector<Vertex2D> &out, const Rect &r,
-                        uint32_t colorA, uint32_t colorB, bool vertical);
+                        uint32_t colorA, uint32_t colorB, bool vertical,
+                        const Rect &gradBounds);
   void emitStrokeRect(std::vector<Vertex2D> &out, const Rect &r, uint32_t color,
                       float lineWidth);
   void emitStrokeEllipse(std::vector<Vertex2D> &out, const Rect &r,
