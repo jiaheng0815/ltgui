@@ -4,6 +4,7 @@
 #include "platform/gpu/gpu_canvas.h"
 #include "widget.h"
 #include "widgets/combobox.h"
+#include "widgets/contextmenu.h"
 
 #ifdef LTGUI_PLATFORM_WINDOWS
 #include "platform/win32/win32_window.h"
@@ -32,9 +33,13 @@ Window::~Window() {
   // Clear focus and open combo BEFORE destroying the central widget.
   // Otherwise Widget::~Widget() may access a partially-destroyed Window
   // via its window_ pointer when trying to clear the focusWidget_ or
-  // openCombo_ state.
+  // openCombo_ state. Also clear the popup registrations — their owners
+  // may be destroyed by centralWidget_.reset() below.
   focusWidget_ = nullptr;
   openCombo_ = nullptr;
+  openMenuBar_ = nullptr;
+  openContextMenu_ = nullptr;
+  modalDialog_ = nullptr;
 
   // Destroy central widget while nativeWindow_ is still valid, since
   // widget destructors may need to call update() which uses nativeWindow_.
@@ -172,7 +177,19 @@ void Window::handlePaintEvent(Event &event) {
   }
   onPaint(canvas_, accumulatedDirty_);
   canvas_->endPaint();
-  dirtyValid_ = false;
+  // Widgets may call update() during onPaint (e.g. animation ticks inside
+  // a paint handler). Those new invalidation rects were unioned into
+  // accumulatedDirty_ above, and must NOT be lost — re-mark the native
+  // window so the OS repaints that area on a subsequent frame, otherwise
+  // the "dirty" widget would never repaint again.
+  if (dirtyValid_) {
+    Rect pending = accumulatedDirty_;
+    dirtyValid_ = false;
+    if (nativeWindow_)
+      nativeWindow_->invalidate(pending);
+  } else {
+    dirtyValid_ = false;
+  }
   event.accepted = true;
 }
 
@@ -194,6 +211,27 @@ void Window::handleCloseEvent(Event &event) {
 }
 
 void Window::handleKeyEvent(Event &event) {
+  // A modal dialog gets keyboard input first — nothing behind it should
+  // react while it is running.
+  if (modalDialog_) {
+    if (modalDialog_->handleEvent(event)) {
+      event.accepted = true;
+      return;
+    }
+    if (validateFocusWidget()) {
+      focusWidget_->handleEvent(event);
+    }
+    return;
+  }
+  // An open MenuBar dropdown gets keyboard input first, mirroring the
+  // ComboBox/Modal routing.
+  if (openMenuBar_) {
+    if (openMenuBar_->handleEvent(event)) {
+      event.accepted = true;
+      return;
+    }
+    // The menubar closed its menu — let the key continue its normal trip.
+  }
   // KeyDown: check shortcuts first, then tab navigation, then focus widget
   if (event.type == EventType::KeyDown) {
     for (auto &entry : shortcuts_) {
@@ -234,6 +272,12 @@ void Window::handleKeyEvent(Event &event) {
 }
 
 void Window::handleMouseEvent(Event &event) {
+  // A running modal dialog swallows all mouse input (its own handleEvent
+  // decides what is inside the panel vs. on the overlay).
+  if (modalDialog_) {
+    modalDialog_->handleEvent(event);
+    return;
+  }
   // Close open ComboBox dropdown if click is outside it.
   if (auto *combo = openCombo_) {
     combo->closeIfClickOutside(event.pos);
@@ -252,6 +296,41 @@ void Window::handleMouseEvent(Event &event) {
     event.pos = savedPos;
     if (event.accepted)
       return;
+  }
+  // An open MenuBar dropdown gets the click first — the panel hangs below
+  // the bar and would otherwise miss hits outside the menubar's base rect.
+  // The menubar swallows any click while its menu is open (it closes the
+  // menu itself if the click lands outside the panel).
+  if (openMenuBar_) {
+    Widget *menu = openMenuBar_;
+    Point savedPos = event.pos;
+    Widget *p = menu->parent();
+    if (p) {
+      Rect pabs = p->absoluteRect();
+      event.pos = {savedPos.x - pabs.x, savedPos.y - pabs.y};
+    }
+    menu->handleEvent(event);
+    event.pos = savedPos;
+    if (event.accepted)
+      return;
+  }
+  // An open context menu: clicks inside are routed to it; clicks outside
+  // dismiss it and are swallowed so they don't leak to widgets below.
+  if (openContextMenu_) {
+    Widget *menu = openContextMenu_;
+    Rect absBase = menu->absoluteRect();
+    Rect absEff = menu->effectiveGeometry().translated(absBase.x, absBase.y);
+    if (!absEff.contains(event.pos)) {
+      // dismiss() is ContextMenu-specific; handleEvent() routes through
+      // the public Widget interface (virtual dispatch).
+      static_cast<ContextMenu *>(menu)->dismiss();
+      event.accepted = true;
+      return;
+    }
+    Point savedPos = event.pos;
+    menu->handleEvent(event);
+    event.pos = savedPos;
+    return;
   }
   if (centralWidget_) {
     Widget *prevFocus = focusWidget_;
@@ -282,6 +361,13 @@ void Window::handleEvent(Event &event) {
     handleMouseEvent(event);
     break;
   default:
+    // While a modal dialog runs, keep every remaining event (MouseUp,
+    // MouseMove, MouseWheel, ...) inside the dialog instead of leaking
+    // them to the central widget behind the overlay.
+    if (modalDialog_) {
+      modalDialog_->handleEvent(event);
+      break;
+    }
     if (centralWidget_) {
       centralWidget_->handleEvent(event);
     }
@@ -330,7 +416,30 @@ void Window::onPaint(NativeCanvas *canvas, const Rect &dirtyRect) {
   if (centralWidget_ && canvas) {
     centralWidget_->paint(canvas, dirtyRect);
   }
+  // A running modal dialog paints its overlay + panel over the window.
+  // Pass the full window rect so the semi-transparent overlay stays
+  // consistent even when only a small region was dirtied.
+  if (modalDialog_ && canvas) {
+    Size sz = size();
+    modalDialog_->paint(canvas, Rect(0, 0, sz.width, sz.height));
+  }
 }
+
+Widget *Window::setModalDialog(Widget *dialog) {
+  Widget *prev = modalDialog_;
+  if (prev == dialog)
+    return prev;
+  modalDialog_ = dialog;
+  // Attach the dialog's subtree to this window so its children can
+  // update()/request focus while it is shown.
+  if (dialog)
+    dialog->propagateWindow(this);
+  return prev;
+}
+
+void Window::setOpenMenuBar(Widget *menubar) { openMenuBar_ = menubar; }
+
+void Window::setOpenContextMenu(Widget *menu) { openContextMenu_ = menu; }
 
 void Window::registerShortcut(const Shortcut &sc, Shortcut::Callback cb) {
   unregisterShortcut(sc); // avoid duplicates

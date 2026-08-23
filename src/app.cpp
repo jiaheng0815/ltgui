@@ -58,8 +58,9 @@ bool Application::pumpPlatformEvents(int timeoutMs) {
   }
   return running_;
 #elif defined(LTGUI_PLATFORM_MACOS)
-  double interval =
-      (timeoutMs <= 0) ? 0.0 : (timeoutMs < 0 ? 60.0 : timeoutMs / 1000.0);
+  // Negative timeout blocks ~60s (matching the X11 branch), 0 polls once
+  // without blocking, positive values wait that many milliseconds.
+  double interval = (timeoutMs < 0) ? 60.0 : static_cast<double>(timeoutMs) / 1000.0;
   @autoreleasepool {
     NSEvent *event = [NSApp
         nextEventMatchingMask:NSEventMaskAny

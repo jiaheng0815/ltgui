@@ -25,13 +25,14 @@ bool Locale::operator==(const Locale &o) const {
 
 Locale I18n::parse(const std::string &str) {
   Locale loc;
-  size_t p1 = str.find('-');
+  // Accept both "zh-CN" and "zh_CN" (BCP-47 uses '-', but '_' is widespread).
+  size_t p1 = str.find_first_of("-_");
   if (p1 == std::string::npos) {
     loc.language = str;
     return loc;
   }
   loc.language = str.substr(0, p1);
-  size_t p2 = str.find('-', p1 + 1);
+  size_t p2 = str.find_first_of("-_", p1 + 1);
   if (p2 == std::string::npos) {
     loc.country = str.substr(p1 + 1);
     return loc;
@@ -52,24 +53,42 @@ int PluralRules::formIndex(const Locale &locale, int64_t n) {
     return Other;
   }
 
+  // Persian, Hindi, Bengali, Gujarati, Kannada, Urdu, Zulu — One for 0 or 1
+  if (lang == "fa" || lang == "hi" || lang == "bn" || lang == "gu" ||
+      lang == "kn" || lang == "ur" || lang == "zu") {
+    return (n == 0 || n == 1) ? One : Other;
+  }
+
+  // Punjabi, Nepali, Sinhala — One for 0..1
+  if (lang == "pa" || lang == "ne" || lang == "si") {
+    return (n >= 0 && n <= 1) ? One : Other;
+  }
+
+  // Icelandic — One for n%10 == 1 && n%100 != 11 (integer case)
+  if (lang == "is") {
+    return (n % 10 == 1 && n % 100 != 11) ? One : Other;
+  }
+
+  // Macedonian — One for n%10 == 1 (integer case)
+  if (lang == "mk") {
+    return (n % 10 == 1) ? One : Other;
+  }
+
   // English, German, Dutch, Italian, Spanish, Portuguese, etc.
   // One: n == 1, Other: everything else
   if (lang == "en" || lang == "de" || lang == "nl" || lang == "it" ||
-      lang == "es" || lang == "pt" || lang == "da" || lang == "nb" ||
-      lang == "nn" || lang == "sv" || lang == "fi" || lang == "el" ||
-      lang == "he" || lang == "hu" || lang == "tr" || lang == "ca" ||
-      lang == "no" || lang == "bg" || lang == "et" || lang == "fa" ||
-      lang == "hi" || lang == "id" || lang == "ms" || lang == "sw" ||
-      lang == "ta" || lang == "te" || lang == "ur" || lang == "eu" ||
-      lang == "gl" || lang == "af" || lang == "bn" || lang == "gu" ||
-      lang == "is" || lang == "kn" || lang == "ky" || lang == "lb" ||
-      lang == "mk" || lang == "ml" || lang == "mr" || lang == "ne" ||
-      lang == "pa" || lang == "si" || lang == "sq" || lang == "zu") {
+      lang == "es" || lang == "da" || lang == "nb" || lang == "nn" ||
+      lang == "sv" || lang == "fi" || lang == "el" || lang == "he" ||
+      lang == "hu" || lang == "tr" || lang == "ca" || lang == "no" ||
+      lang == "bg" || lang == "et" || lang == "id" || lang == "ms" ||
+      lang == "sw" || lang == "ta" || lang == "te" || lang == "eu" ||
+      lang == "gl" || lang == "af" || lang == "ky" || lang == "lb" ||
+      lang == "ml" || lang == "mr" || lang == "sq") {
     return n == 1 ? One : Other;
   }
 
-  // French, Brazilian Portuguese — One for 0 or 1
-  if (lang == "fr" || (lang == "pt" && locale.country == "BR")) {
+  // French, Portuguese (incl. pt-BR) — One for 0 or 1
+  if (lang == "fr" || lang == "pt") {
     return (n == 0 || n == 1) ? One : Other;
   }
 
@@ -172,9 +191,11 @@ int PluralRules::formIndex(const Locale &locale, int64_t n) {
     return Other;
   }
 
-  // Latvian — Zero for 0, One for n%10==1 && n%100!=11, Other
+  // Latvian — Zero for multiples of 10 and 11..19, One for n%10==1 (n%100
+  // != 11), Other otherwise (integer case; CLDR also has a v=2 clause for
+  // cents, which integers never hit)
   if (lang == "lv") {
-    if (n == 0)
+    if (n == 0 || n % 10 == 0 || (n % 100 >= 11 && n % 100 <= 19))
       return Zero;
     if (n % 10 == 1 && n % 100 != 11)
       return One;
@@ -193,7 +214,7 @@ int PluralRules::formIndex(const Locale &locale, int64_t n) {
     return Other;
   }
 
-  // Macedonian — One for n%10==1, Other
+  // Slovenian — One for n%100==1, Two for n%100==2, Few for n%100 3..4
   if (lang == "sl") {
     int m100 = n % 100;
     if (m100 == 1)
@@ -388,9 +409,10 @@ bool TranslationTable::loadFromJsonString(const std::string &json) {
       pos++; // skip [
       std::string forms[6];
       int fi = 0;
-      while (pos < json.size() && fi < 6) {
+      bool tooMany = false;
+      while (pos < json.size()) {
         jsonSkipWhitespace(json, pos);
-        if (json[pos] == ']') {
+        if (pos >= json.size() || json[pos] == ']') {
           pos++;
           break;
         }
@@ -399,12 +421,22 @@ bool TranslationTable::loadFromJsonString(const std::string &json) {
           continue;
         }
         if (json[pos] == '"') {
-          forms[fi] = jsonDecodeString(json, pos);
-          fi++;
+          if (fi < 6) {
+            forms[fi] = jsonDecodeString(json, pos);
+            fi++;
+          } else {
+            // Plural form lists must match PluralRules::MaxForms (6);
+            // anything longer is malformed — keep consuming so the loop
+            // below can find the closing ']', then fail the whole load.
+            tooMany = true;
+            jsonDecodeString(json, pos);
+          }
         } else {
           break;
         }
       }
+      if (tooMany)
+        return false;
       addPlural(key, forms[0], forms[1], forms[2], forms[3], forms[4],
                 forms[5]);
     }

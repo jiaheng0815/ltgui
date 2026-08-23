@@ -44,11 +44,11 @@ void BoxLayout::layout(Widget *container) {
     return;
   }
 
-  // Purge stale widgetStretch_ entries only when necessary.
-  // Map size <= child count means every key has a valid child — skip purge.
-  // When map is larger, build a set of valid child pointers for O(n+m) purge
-  // instead of the naive O(n*m) nested loop.
-  if (static_cast<int>(widgetStretch_.size()) > n) {
+  // Purge stale widgetStretch_ entries unconditionally: a removed child
+  // may leave a dangling pointer in the map even when map size <= child
+  // count (e.g. one child removed and a new one added). Build the set of
+  // valid child pointers for an O(n+m) purge instead of the O(n*m) loop.
+  {
     std::unordered_set<Widget *> valid;
     valid.reserve(n);
     for (auto &c : children)

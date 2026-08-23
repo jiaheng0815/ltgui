@@ -33,6 +33,11 @@ public:
   // Convenience: fire once after `ms` milliseconds.
   // Self-managing — the timer is heap-allocated and auto-deletes after firing.
   static void singleShot(int ms, Callback cb) {
+    // Clamp non-positive delays to 1ms — Timer::start() rejects ms <= 0
+    // without registering, which would leak the heap-allocated timer and
+    // never fire the callback (B2-10).
+    if (ms <= 0)
+      ms = 1;
     auto *t = new Timer();
     auto wrapped = [t, cb = std::move(cb)]() mutable {
       cb();

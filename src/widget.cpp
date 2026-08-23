@@ -51,7 +51,6 @@ Widget *Widget::addChild(std::unique_ptr<Widget> child) {
   child->parent_ = this;
   Widget *raw = child.get();
   raw->propagateWindow(window_);
-  raw->flags_ |= kFlagNeedsLayout;
   children_.push_back(std::move(child));
   invalidateSizeHint();
 
@@ -64,6 +63,9 @@ Widget *Widget::addChild(std::unique_ptr<Widget> child) {
       raw->setGeometry(Rect(0, 0, hint.width, hint.height));
   }
 
+  // The widget tree changed — repaint so the new child appears even if no
+  // geometry change triggered an invalidation.
+  update();
   return raw;
 }
 
@@ -75,8 +77,13 @@ std::unique_ptr<Widget> Widget::removeChild(Widget *child) {
     (*it)->propagateWindow(nullptr);
     auto result = std::move(*it);
     children_.erase(it);
-    flags_ |= kFlagNeedsLayout;
     invalidateSizeHint();
+    // Re-run the layout immediately: the remaining children still occupy
+    // the removed child's slot otherwise until the next explicit relayout.
+    if (layout_)
+      layout_->layout(this);
+    // Repaint both the vacated area and the remaining children.
+    update();
     return result;
   }
   return nullptr;
@@ -101,9 +108,17 @@ Rect Widget::absoluteRect() const {
 
 void Widget::setGeometry(const Rect &rect) {
   if (geometry_ != rect) {
+    // Invalidate the OLD absolute rect too — the area the widget is
+    // moving away from still shows stale pixels. absoluteRect() must be
+    // captured before geometry_ changes.
+    Rect oldAbs = absoluteRect();
     geometry_ = rect;
     if (layout_) {
       layout_->layout(this);
+    }
+    if (window_) {
+      window_->invalidate(oldAbs);
+      window_->invalidate(absoluteRect());
     }
   }
 }
@@ -111,14 +126,11 @@ void Widget::setGeometry(const Rect &rect) {
 void Widget::scheduleRelayout() {
   // Walk up to the nearest ancestor that has a layout, and re-lay it out
   // so children get resized after content changes (e.g. setText).
-  // Guard against re-entrancy: if any ancestor is already inside a layout
-  // pass (detected by needsLayout_ being cleared mid-layout), bail out.
   bool foundLayout = false;
   Widget *ancestor = parent_;
   while (ancestor) {
     if (ancestor->layout() && !ancestor->geometry().isEmpty()) {
       ancestor->layout()->layout(ancestor);
-      ancestor->flags_ &= ~kFlagNeedsLayout;
       foundLayout = true;
       // Continue walking up in case outer containers also need relayout
       ancestor = ancestor->parent();
@@ -137,7 +149,6 @@ void Widget::scheduleRelayout() {
       setGeometry(newGeo);
     }
   }
-  flags_ &= ~kFlagNeedsLayout;
 }
 
 Size Widget::sizeHint() const {
@@ -159,7 +170,9 @@ Size Widget::dpiScaleSize(int w, int h) const {
 
 void Widget::setLayout(std::unique_ptr<Layout> layout) {
   layout_ = std::move(layout);
-  flags_ |= kFlagNeedsLayout;
+  // Size hints are computed by the layout engine — invalidate the cached
+  // value so the next sizeHint()/getGeometry pass reflects the new layout.
+  invalidateSizeHint();
 }
 
 void Widget::setEnabled(bool enabled) {
@@ -193,6 +206,18 @@ void Widget::setVisible(bool visible) {
 }
 
 void Widget::setWindow(Window *window) { propagateWindow(window); }
+
+Window *Widget::findWindow() const {
+  if (window_)
+    return window_;
+  // Detached from a plain tree — walk the parent chain so a freshly cut
+  // widget can still find the window of its former ancestors.
+  for (const Widget *p = parent_; p; p = p->parent_) {
+    if (p->window_)
+      return p->window_;
+  }
+  return nullptr;
+}
 
 void Widget::claimFocus() {
   if (window_) {
@@ -231,6 +256,10 @@ void Widget::restoreChildOrder(int index) {
 
   auto self = std::move(siblings[cur]);
   siblings.erase(siblings.begin() + cur);
+  // Clamp the target position: after the erase the valid insert range is
+  // [0, size] (size == append). Without the clamp an out-of-range index
+  // would be UB.
+  index = std::min(index, static_cast<int>(siblings.size()));
   siblings.insert(siblings.begin() + index, std::move(self));
 
   // The child order changed — re-lay out the parent so this widget and
@@ -241,6 +270,14 @@ void Widget::restoreChildOrder(int index) {
 }
 
 void Widget::propagateWindow(Window *window) {
+  // Detaching a widget that still holds the window's focus would leave a
+  // dangling focusWidget_ behind once this widget leaves the tree (or is
+  // destroyed). Clear the focus first — the widget is still alive here, so
+  // the FocusOut notification is safe. (Window::~Window nulls focusWidget_
+  // before tearing down its tree, so that path doesn't re-enter.)
+  if (window == nullptr && window_ != nullptr && window_->focusWidget_ == this) {
+    window_->setFocusWidget(nullptr);
+  }
   window_ = window;
   sizeHintCache_.dirty =
       true; // canvas availability changed — recompute next time
@@ -262,8 +299,11 @@ void Widget::paint(NativeCanvas *canvas, const Rect &dirtyRect) {
   // that don't intersect the dirty region.
   ResolvedStyle st = resolvedStyle();
   if (st.gradient) {
+    // Gradient interpolates across the whole widget rect (abs) even when
+    // only a dirty sub-rect is painted, so partial repaints keep the
+    // exact same color ramp.
     canvas->fillLinearGradient(abs.intersected(dirtyRect), st.gradient->from,
-                               st.gradient->to, st.gradient->vertical);
+                               st.gradient->to, st.gradient->vertical, abs);
   } else {
     canvas->setColor(st.bgColor);
     canvas->fillRect(abs.intersected(dirtyRect));
@@ -300,7 +340,7 @@ void Widget::paintBackground(NativeCanvas *canvas) {
   ResolvedStyle st = resolvedStyle();
   if (st.gradient) {
     canvas->fillLinearGradient(r, st.gradient->from, st.gradient->to,
-                               st.gradient->vertical);
+                               st.gradient->vertical, r);
   } else {
     canvas->setColor(st.bgColor);
     if (st.borderRadius > 0) {
@@ -392,9 +432,13 @@ Widget *Widget::previousFocusWidget() {
     }
   }
 
-  // Move up to parent
-  if (parent_->isEnabled() && parent_->isVisible())
+  // Move up to parent — only if the parent itself can accept focus;
+  // otherwise keep walking so a non-interactive container (e.g. a plain
+  // panel) isn't handed the focus.
+  if (parent_->canAcceptFocus() && parent_->isEnabled() &&
+      parent_->isVisible()) {
     return parent_;
+  }
   return parent_->previousFocusWidget();
 }
 
@@ -421,8 +465,10 @@ Widget *Widget::lastFocusableDescendant() {
 bool Widget::dispatchToChildren(Event &event, bool targeted) {
   // Snapshot raw pointers — a child handler may mutate children_ via
   // addChild/removeChild, invalidating iterators into the live vector.
-  auto &snapshot = dispatchSnapshot_;
-  snapshot.clear();
+  // A local copy instead of a shared member: a modal dialog pumping its
+  // own event loop can re-enter dispatchToChildren recursively, and a
+  // single member buffer would be clobbered mid-iteration.
+  std::vector<Widget *> snapshot;
   snapshot.reserve(children_.size());
   for (auto &c : children_)
     snapshot.push_back(c.get());
@@ -489,13 +535,15 @@ Widget *Widget::hitTest(const Point &pos) {
   if (!isVisible())
     return nullptr;
 
+  // pos is in parent space — convert to this widget's local coordinates
+  // before comparing against effectiveGeometry() (which is local-origin).
+  Point local = {pos.x - geometry_.x, pos.y - geometry_.y};
+
   // Use effectiveGeometry() so widgets with extended hit areas
   // (context menus, tooltips, shadows) properly receive events.
   Rect eff = effectiveGeometry();
-  if (!eff.contains(pos))
+  if (!eff.contains(local))
     return nullptr;
-
-  Point local = {pos.x - geometry_.x, pos.y - geometry_.y};
 
   for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
     Widget *child = it->get();

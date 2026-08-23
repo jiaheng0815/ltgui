@@ -44,12 +44,10 @@ public:
     auto it = categories_.find(category);
     if (it != categories_.end())
       return it->second;
-    // Unknown categories default to enabled in debug, off in release
-#ifdef NDEBUG
-    return false;
-#else
+    // Unregistered categories default to enabled so WARN/ERROR from a
+    // brand-new category always surface. In release builds the level gate
+    // in log() already suppresses Debug/Info (B2-09).
     return true;
-#endif
   }
 
   void log(LogLevel level, const char *category, const char *fmt, ...) {

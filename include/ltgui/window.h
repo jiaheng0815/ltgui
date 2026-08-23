@@ -58,6 +58,23 @@ public:
   // Focus management
   Widget *focusWidget() const { return focusWidget_; }
 
+  // Modal dialog plumbing. While a modal dialog is registered, the window
+  // paints it over the central widget and routes all mouse/keyboard events
+  // to it first. Returns the previous modal dialog so nested dialogs can
+  // restore the outer one when they finish.
+  Widget *setModalDialog(Widget *dialog);
+  Widget *modalDialog() const { return modalDialog_; }
+
+  // Open MenuBar dropdown plumbing: while registered the window routes
+  // mouse/keyboard input to the menubar so its open dropdown receives
+  // events even outside the menubar's base rect.
+  void setOpenMenuBar(Widget *menubar);
+  Widget *openMenuBar() const { return openMenuBar_; }
+
+  // Open ContextMenu plumbing (analogous to the MenuBar dropdown).
+  void setOpenContextMenu(Widget *menu);
+  Widget *openContextMenu() const { return openContextMenu_; }
+
   // Keyboard shortcuts: registered shortcuts are checked before widget
   // event dispatch. If a shortcut matches, its callback fires and the
   // key event is consumed.
@@ -73,6 +90,7 @@ private:
 
   friend class Widget;
   friend class ComboBox;
+  friend class Dialog;
   void setFocusWidget(Widget *w);
 
   // Per-event-type handlers (split from handleEvent for readability)
@@ -93,6 +111,9 @@ private:
   std::unique_ptr<Widget> centralWidget_;
   Widget *focusWidget_ = nullptr;
   ComboBox *openCombo_ = nullptr;
+  Widget *openMenuBar_ = nullptr;
+  Widget *openContextMenu_ = nullptr;
+  Widget *modalDialog_ = nullptr;
   Rect accumulatedDirty_;
   bool dirtyValid_ = false;
   bool useGpu_ = false;

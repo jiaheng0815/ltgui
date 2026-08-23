@@ -1,4 +1,5 @@
 #pragma once
+#include <algorithm>
 #include <string>
 
 namespace ltgui {
@@ -73,7 +74,10 @@ inline int nextPos(const std::string &s, int pos) {
   int len = static_cast<int>(s.size());
   if (pos < 0 || pos >= len)
     return len;
-  return pos + codePointLen(static_cast<unsigned char>(s[pos]));
+  // Clamp to the string length: codePointLen() reports the full declared
+  // length of a truncated multi-byte sequence, which would otherwise step
+  // past the end of the string (B2-08).
+  return std::min(len, pos + codePointLen(static_cast<unsigned char>(s[pos])));
 }
 
 } // namespace utf8

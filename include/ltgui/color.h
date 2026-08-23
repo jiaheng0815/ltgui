@@ -25,7 +25,11 @@ struct Color {
   }
   bool operator!=(const Color &o) const { return !(*this == o); }
 
-  uint32_t toARGB() const { return (a << 24) | (r << 16) | (g << 8) | b; }
+  uint32_t toARGB() const {
+    return (static_cast<uint32_t>(a) << 24) |
+           (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) |
+           static_cast<uint32_t>(b);
+  }
 
   // Linear interpolation per channel (alpha included). t=0 -> a, t=1 -> b.
   static Color lerp(const Color &a, const Color &b, float t) {
@@ -40,7 +44,11 @@ struct Color {
   // DXGI_FORMAT_R8G8B8A8_UNORM and GL_RGBA+GL_UNSIGNED_BYTE both
   // read bytes at increasing offsets as [R][G][B][A], which in LE
   // corresponds to the uint32_t layout 0xAABBGGRR.
-  uint32_t toABGR() const { return (a << 24) | (b << 16) | (g << 8) | r; }
+  uint32_t toABGR() const {
+    return (static_cast<uint32_t>(a) << 24) |
+           (static_cast<uint32_t>(b) << 16) | (static_cast<uint32_t>(g) << 8) |
+           static_cast<uint32_t>(r);
+  }
 
   static const Color Transparent;
   static const Color Black;

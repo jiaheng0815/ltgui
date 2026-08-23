@@ -223,9 +223,13 @@ float easeValue(Easing e, float t) {
   case Easing::EaseInOutBounce:
     return easeInOutBounce(t);
   case Easing::StepStart:
-    return 0.0f;
-  case Easing::StepEnd:
+    // Step-start: the value jumps to the next step at the segment start,
+    // so for t in (0,1) it is already at the end value (B2-12).
     return 1.0f;
+  case Easing::StepEnd:
+    // Step-end: the value holds the previous step until the segment end,
+    // so for t < 1 it stays at the start value (t=1 clamps to 1.0f above).
+    return 0.0f;
   }
   return t;
 }
@@ -342,8 +346,11 @@ void AnimatedFloat::complete() {
 
 WidgetAnimation::~WidgetAnimation() {
   // Auto-unregister on destruction so AnimationManager doesn't hold
-  // a dangling pointer after the animation is destroyed.
+  // a dangling pointer after the animation is destroyed. Also halt the
+  // underlying animation so the manager's active-count stays balanced
+  // (setImmediate triggers onAnimStopped when mid-flight, B2-03).
   if (playing_) {
+    anim_.setImmediate(anim_.target());
     AnimationManager::instance().unregisterAnimation(this);
   }
 }
@@ -365,7 +372,8 @@ WidgetAnimation::WidgetAnimation(WidgetAnimation &&other) noexcept
 
 WidgetAnimation &WidgetAnimation::operator=(WidgetAnimation &&other) noexcept {
   if (this != &other) {
-    if (playing_)
+    bool wasPlaying = playing_;
+    if (wasPlaying)
       AnimationManager::instance().unregisterAnimation(this);
     anim_ = std::move(other.anim_);
     durationMs_ = other.durationMs_;
@@ -384,14 +392,29 @@ WidgetAnimation &WidgetAnimation::operator=(WidgetAnimation &&other) noexcept {
       AnimationManager::instance().unregisterAnimation(&other);
       AnimationManager::instance().registerAnimation(this);
       other.playing_ = false;
+    } else if (wasPlaying) {
+      // The old animation was mid-flight and is now gone — keep the
+      // manager's active-animation count balanced (B2-03).
+      AnimationManager::instance().onAnimStopped();
     }
   }
   return *this;
 }
 
 void WidgetAnimation::play() {
-  if (playing_)
+  if (playing_) {
+    // Already running: re-target with the most recent settings so a
+    // mid-flight setDuration/setEasing/setEndValue/setLoop/setYoyo takes
+    // effect (B2-05). setTarget() relaunches from the current value with
+    // the fresh duration/easing. During the delay phase the target is only
+    // applied once the delay elapses (tick() reads the members at that
+    // moment), so the delayed start is left untouched.
+    if (!delayPhase_)
+      anim_.setTarget(endVal_, durationMs_, easing_);
+    anim_.setLoop(loop_);
+    anim_.setYoyo(yoyo_);
     return;
+  }
   playing_ = true;
   startTickMs_ = AnimationManager::instance().nowMs();
   delayPhase_ = delayMs_ > 0;
@@ -407,13 +430,21 @@ void WidgetAnimation::play() {
 }
 
 void WidgetAnimation::pause() {
+  if (!playing_)
+    return;
   playing_ = false;
+  // Halt the underlying animation so the manager's active-count stays
+  // balanced (setImmediate triggers onAnimStopped when mid-flight, B2-03).
+  anim_.setImmediate(anim_.target());
   AnimationManager::instance().unregisterAnimation(this);
 }
 
 void WidgetAnimation::stop() {
   if (playing_) {
     playing_ = false;
+    // Jump to the end value and halt the underlying animation so the
+    // manager's active-count stays balanced (B2-03).
+    anim_.setImmediate(anim_.target());
     AnimationManager::instance().unregisterAnimation(this);
     onFinished.emit();
   }
@@ -422,8 +453,10 @@ void WidgetAnimation::stop() {
 // --- KeyframeAnimation ---
 
 KeyframeAnimation::~KeyframeAnimation() {
-  // Auto-unregister on destruction to prevent dangling pointer
+  // Auto-unregister on destruction to prevent dangling pointer, and
+  // balance the manager's active-animation count if still running (B2-06).
   if (playing_) {
+    AnimationManager::instance().onAnimStopped();
     AnimationManager::instance().unregisterKeyframe(this);
   }
 }
@@ -443,7 +476,8 @@ KeyframeAnimation::KeyframeAnimation(KeyframeAnimation &&other) noexcept
 KeyframeAnimation &
 KeyframeAnimation::operator=(KeyframeAnimation &&other) noexcept {
   if (this != &other) {
-    if (playing_)
+    bool wasPlaying = playing_;
+    if (wasPlaying)
       AnimationManager::instance().unregisterKeyframe(this);
     keyframes_ = std::move(other.keyframes_);
     durationMs_ = other.durationMs_;
@@ -456,12 +490,25 @@ KeyframeAnimation::operator=(KeyframeAnimation &&other) noexcept {
       AnimationManager::instance().unregisterKeyframe(&other);
       AnimationManager::instance().registerKeyframe(this);
       other.playing_ = false;
+    } else if (wasPlaying) {
+      // The old animation was running and is now gone — keep the
+      // manager's active-animation count balanced (B2-06).
+      AnimationManager::instance().onAnimStopped();
     }
   }
   return *this;
 }
 
 void KeyframeAnimation::addKeyframe(const Keyframe &kf) {
+  // Replace any existing keyframe at the same time so times stay unique —
+  // a duplicate time would produce a zero-length segment (divide-by-zero
+  // in interpolate(), B2-07).
+  auto it = std::find_if(keyframes_.begin(), keyframes_.end(),
+                         [&kf](const Keyframe &k) { return k.time == kf.time; });
+  if (it != keyframes_.end()) {
+    *it = kf;
+    return;
+  }
   keyframes_.push_back(kf);
   std::sort(
       keyframes_.begin(), keyframes_.end(),
@@ -496,8 +543,12 @@ float KeyframeAnimation::interpolate(float t) const {
 
   for (size_t i = 1; i < keyframes_.size(); i++) {
     if (t <= keyframes_[i].time) {
-      float segT = (t - keyframes_[i - 1].time) /
-                   (keyframes_[i].time - keyframes_[i - 1].time);
+      float segLen = keyframes_[i].time - keyframes_[i - 1].time;
+      // Zero-length segment (duplicate time) — skip this keyframe
+      // (B2-07); the previous keyframe still delimits the value.
+      if (segLen <= 0.0f)
+        continue;
+      float segT = (t - keyframes_[i - 1].time) / segLen;
       float eased = easeValue(keyframes_[i].easing, segT);
       return keyframes_[i - 1].value +
              (keyframes_[i].value - keyframes_[i - 1].value) * eased;
@@ -512,11 +563,13 @@ void KeyframeAnimation::play() {
   playing_ = true;
   startTickMs_ = AnimationManager::instance().nowMs();
   AnimationManager::instance().registerKeyframe(this);
+  AnimationManager::instance().onAnimStarted();
 }
 
 void KeyframeAnimation::stop() {
   if (playing_) {
     playing_ = false;
+    AnimationManager::instance().onAnimStopped();
     AnimationManager::instance().unregisterKeyframe(this);
     onFinished.emit();
   }
@@ -582,12 +635,11 @@ void AnimationManager::tick() {
       // because the current slot now holds the next element.
       if (widgetAnims_.size() == oldSize)
         i++;
-      // Move the signal to a local before emitting so that even if
-      // a connected slot destroys the WidgetAnimation during the
-      // emit, the stack-local Signal remains valid and the emit
-      // runs to completion safely.
-      auto finishedSignal = std::move(anim->onFinished);
-      finishedSignal.emit();
+      // Emit a snapshot of the held connections (B2-04): onFinished stays
+      // wired for subsequent runs, and the snapshot is copied up-front so a
+      // slot that destroys this WidgetAnimation mid-emit cannot invalidate
+      // the fan-out.
+      anim->onFinished.emitCopy();
     } else {
       i++;
     }
@@ -614,17 +666,19 @@ void AnimationManager::tick() {
     uint64_t elapsed = nowMs_ - kf->startTickMs_;
     if (elapsed >= static_cast<uint64_t>(kf->durationMs_) && !kf->loop_) {
       kf->playing_ = false;
+      // Balance the manager's active-animation count (B2-06).
+      AnimationManager::instance().onAnimStopped();
       size_t oldSize = keyframeAnims_.size();
       keyframeAnims_.erase(
           std::remove(keyframeAnims_.begin(), keyframeAnims_.end(), kf),
           keyframeAnims_.end());
       if (keyframeAnims_.size() == oldSize)
         i++;
-      // Move the signal to a local before emitting so that even if
-      // a connected slot destroys the KeyframeAnimation during the
-      // emit, the stack-local Signal remains valid.
-      auto finishedSignal = std::move(kf->onFinished);
-      finishedSignal.emit();
+      // Emit a snapshot of the held connections (B2-04): onFinished stays
+      // wired for subsequent runs, and the snapshot is copied up-front so a
+      // slot that destroys this KeyframeAnimation mid-emit cannot
+      // invalidate the fan-out.
+      kf->onFinished.emitCopy();
     } else {
       i++;
     }

@@ -126,6 +126,11 @@ public:
   }
   void scheduleRelayout();
   [[nodiscard]] Window *window() const { return window_; }
+
+  // Returns the window this widget is attached to, either directly
+  // (window_) or via one of its ancestors. Detached popups (e.g. a modal
+  // Dialog) that call propagateWindow(win) directly resolve to win too.
+  [[nodiscard]] Window *findWindow() const;
   void claimFocus();
 
   // Painting
@@ -214,11 +219,10 @@ private:
   Rect geometry_;
   std::unique_ptr<Layout> layout_;
   Style style_;
-  uint8_t flags_ = kFlagEnabled | kFlagVisible | kFlagNeedsLayout;
+  uint8_t flags_ = kFlagEnabled | kFlagVisible;
   static constexpr uint8_t kFlagEnabled = 1 << 0;
   static constexpr uint8_t kFlagVisible = 1 << 1;
   static constexpr uint8_t kFlagFocused = 1 << 2;
-  static constexpr uint8_t kFlagNeedsLayout = 1 << 3;
   Window *window_ = nullptr;
 
   // Only the sizeHint cache is mutable — it's updated lazily in the
@@ -229,10 +233,6 @@ private:
     bool dirty = true;
   };
   mutable SizeHintCache sizeHintCache_;
-
-  // Reusable buffer for safe child iteration during event dispatch.
-  // Pre-allocated capacity avoids heap allocation on every mouse event.
-  mutable std::vector<Widget *> dispatchSnapshot_;
 
   // Repaints this widget when the theme switches — resolvedStyle() is
   // re-evaluated lazily on paint, so only a repaint is needed.

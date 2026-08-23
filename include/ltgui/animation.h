@@ -151,6 +151,10 @@ public:
 
   // Jump immediately to a value (no animation).
   void setImmediate(const Color &value) {
+    // Stop any in-flight animation first so the next tick cannot overwrite
+    // this value with a stale interpolation (B2-05).
+    if (anim_.isPlaying())
+      anim_.stop();
     current_ = value;
     if (onValue_)
       onValue_(current_);
