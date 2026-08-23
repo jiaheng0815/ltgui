@@ -329,7 +329,7 @@ def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=Fa
     obj_path = os.path.join(OBJ_DIR, _config_key(is_release, pic), rel + ext)
 
     if is_msvc:
-        flags = [compiler, "/nologo", "/c", "/std:c++20", "/EHsc", "/DLTGUI_STATIC"]
+        flags = [compiler, "/nologo", "/c", "/std:c++23", "/EHsc", "/DLTGUI_STATIC"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
@@ -339,7 +339,7 @@ def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=Fa
         flags += get_platform_flags(platform, is_msvc=True)
         flags += [src_path, f"/Fo{obj_path}"]
     else:
-        flags = [compiler, "-c", "-std=c++20", "-fexec-charset=UTF-8"]
+        flags = [compiler, "-c", "-std=c++23", "-fexec-charset=UTF-8"]
         flags.append("-DLTGUI_EXPORTS" if dll else "-DLTGUI_STATIC")
         if pic:
             flags.append("-fPIC")
@@ -456,7 +456,7 @@ def build_shared_lib(platform, is_release, compiler, is_msvc):
     cprint(f"  Linking {dll_name}...", Color.CYAN)
 
     # macOS requires -dynamiclib; Linux/Windows link a shared library with -shared.
-    flags = [compiler, "-dynamiclib" if platform == "macos" else "-shared", "-std=c++20"]
+    flags = [compiler, "-dynamiclib" if platform == "macos" else "-shared", "-std=c++23"]
     if platform != "macos":
         flags.append("-static")
     if platform == "windows":
@@ -544,7 +544,7 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
         # the target directory to exist up front.
         prog_obj_dir = os.path.join(OBJ_DIR, _config_key(is_release), "programs")
         os.makedirs(prog_obj_dir, exist_ok=True)
-        flags = [compiler, "/nologo", "/std:c++20", "/EHsc", "/DLTGUI_STATIC"]
+        flags = [compiler, "/nologo", "/std:c++23", "/EHsc", "/DLTGUI_STATIC"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
@@ -558,7 +558,7 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
         flags += get_platform_libs(platform, is_msvc=True)
         flags += ["/SUBSYSTEM:CONSOLE"]
     else:
-        flags = [compiler, "-std=c++20", "-fexec-charset=UTF-8"]
+        flags = [compiler, "-std=c++23", "-fexec-charset=UTF-8"]
         if is_release:
             flags += ["-O2", "-DNDEBUG"]
         else:
@@ -810,9 +810,9 @@ def _smoke_compile_header(target_dir, compiler, is_msvc):
         f.write("int main() { return 0; }\n")
 
     if is_msvc:
-        cmd = [compiler, "/nologo", "/Zs", "/std:c++20", "/EHsc", "/I", target_dir, smoke]
+        cmd = [compiler, "/nologo", "/Zs", "/std:c++23", "/EHsc", "/I", target_dir, smoke]
     else:
-        cmd = [compiler, "-std=c++20", "-fsyntax-only", "-I", target_dir, smoke]
+        cmd = [compiler, "-std=c++23", "-fsyntax-only", "-I", target_dir, smoke]
 
     result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     if result.returncode != 0:
@@ -859,6 +859,12 @@ def export_sdk(lib_path, import_lib_path, target_dir, platform, compiler, is_msv
     if os.path.exists(stb):
         shutil.copy2(stb, os.path.join(target_dir, "stb_truetype.h"))
         cprint(f"  stb_truetype.h -> {target_dir}", Color.CYAN)
+
+    # C23 binding header for C consumers.
+    c_header = os.path.join(INCLUDE_DIR, "c", "c_ltgui.h")
+    if os.path.exists(c_header):
+        shutil.copy2(c_header, os.path.join(target_dir, "ltgui_c.h"))
+        cprint(f"  ltgui_c.h -> {target_dir}", Color.CYAN)
 
     # Validate the amalgamated header actually compiles
     if not _smoke_compile_header(target_dir, compiler, is_msvc):
@@ -1008,7 +1014,7 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
         # the target directory to exist up front.
         test_obj_dir = os.path.join(OBJ_DIR, "debug", "tests")
         os.makedirs(test_obj_dir, exist_ok=True)
-        flags = [compiler, "/nologo", "/std:c++20", "/EHsc", "/Zi", "/Od", "/DLTGUI_STATIC"]
+        flags = [compiler, "/nologo", "/std:c++23", "/EHsc", "/Zi", "/Od", "/DLTGUI_STATIC"]
         flags += ["/I", INCLUDE_DIR, "/I", vendor_include]
         flags += get_platform_flags(platform, is_msvc=True)
         flags += [f"/Fe:{exe_path}"]
@@ -1018,17 +1024,44 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
         flags += get_platform_libs(platform, is_msvc=True)
         flags += ["/SUBSYSTEM:CONSOLE"]
     else:
-        flags = [compiler, "-std=c++20", "-g", "-O0", "-fexec-charset=UTF-8"]
-        if platform == "windows":
-            flags.append("-mconsole")
-        flags += ["-I", INCLUDE_DIR, "-I", vendor_include]
-        flags += get_platform_flags(platform)
-        flags += ["-DLTGUI_STATIC"]
-        if _SANITIZE:
-            flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
-        flags += [src, lib_path]
-        flags += get_platform_libs(platform)
-        flags += ["-o", exe_path]
+        # C23 tests (c_*.c): compile as C23 with a C compiler, then link with
+        # the C++ driver (the library is C++; the C test program sits on top).
+        if tf.endswith(".c"):
+            c_compiler = "clang" if shutil.which("clang") else "cc"
+            obj_dir = os.path.join(OBJ_DIR, "debug", "tests")
+            os.makedirs(obj_dir, exist_ok=True)
+            obj_path = os.path.join(obj_dir, tf[:-4] + ".o")
+            cflags = [c_compiler, "-std=c23", "-g", "-O0", "-Wall",
+                      "-Wextra", "-I", INCLUDE_DIR]
+            cflags += get_platform_flags(platform)
+            cflags += [src, "-c", "-o", obj_path]
+            r = subprocess.run(cflags, capture_output=True, text=True,
+                               errors="replace")
+            if r.returncode != 0:
+                cprint(f"  {tf}... ", Color.CYAN, end="")
+                cprint("COMPILE ERROR", Color.RED)
+                for line in r.stderr.strip().split('\n')[-4:]:
+                    cprint(f"    {line.strip()}", Color.RED)
+                return None
+            link = [compiler, "-std=c++23", obj_path, lib_path]
+            if _SANITIZE:
+                link += ["-fsanitize=address,undefined",
+                         "-fno-omit-frame-pointer"]
+            link += get_platform_libs(platform)
+            link += ["-o", exe_path]
+            flags = link
+        else:
+            flags = [compiler, "-std=c++23", "-g", "-O0", "-fexec-charset=UTF-8"]
+            if platform == "windows":
+                flags.append("-mconsole")
+            flags += ["-I", INCLUDE_DIR, "-I", vendor_include]
+            flags += get_platform_flags(platform)
+            flags += ["-DLTGUI_STATIC"]
+            if _SANITIZE:
+                flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
+            flags += [src, lib_path]
+            flags += get_platform_libs(platform)
+            flags += ["-o", exe_path]
 
     result = subprocess.run(flags, capture_output=True, text=True, errors="replace")
     if result.returncode != 0:
@@ -1048,7 +1081,11 @@ def cmd_test(positional, flags):
     check_platform_clean(compiler)
     platform = detect_platform()
 
-    test_files = sorted([f for f in os.listdir(TEST_DIR) if f.endswith(".cpp")])
+    # C23 sources (c_*.c) are excluded from the MSVC track — the MSVC C
+    # compiler implements C11, not C23; clang/gcc handle them.
+    test_files = sorted(
+        f for f in os.listdir(TEST_DIR)
+        if f.endswith(".cpp") or (f.startswith("c_") and f.endswith(".c") and not is_msvc))
     if not test_files:
         cprint("No test files found in test/", Color.YELLOW)
         return
@@ -1249,7 +1286,7 @@ def cmd_lint(positional, flags):
         if os.path.exists(compile_db):
             cmd += [f"-p={BUILD_DIR}"]
         else:
-            cmd += ["--", f"-std=c++20", f"-I{INCLUDE_DIR}", f"-I{VENDOR_DIR}"]
+            cmd += ["--", f"-std=c++23", f"-I{INCLUDE_DIR}", f"-I{VENDOR_DIR}"]
 
         result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
         output = (result.stdout + result.stderr).strip()
@@ -1535,6 +1572,12 @@ def cmd_package(positional, flags):
     if os.path.exists(stb):
         shutil.copy2(stb, sdk_dir)
         cprint("  Packaged: stb_truetype.h", Color.CYAN)
+
+    # C23 binding header for C consumers
+    c_header = os.path.join(INCLUDE_DIR, "c", "c_ltgui.h")
+    if os.path.exists(c_header):
+        shutil.copy2(c_header, os.path.join(sdk_dir, "ltgui_c.h"))
+        cprint("  Packaged: ltgui_c.h", Color.CYAN)
 
     # Validate the amalgamated header compiles before packaging
     compiler, is_msvc = resolve_compiler(flags.get("compiler"))

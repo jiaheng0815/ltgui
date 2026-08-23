@@ -104,8 +104,12 @@ public:
     style_ = style;
     update();
   }
-  [[nodiscard]] const Style &style() const { return style_; }
-  Style &style() { return style_; }
+  // C++23 deduced-this accessor — one definition serves const and non-const
+  // calls without a duplicated overload pair.
+  template <typename Self>
+  [[nodiscard]] decltype(auto) style(this Self &&self) noexcept {
+    return (self.style_);
+  }
 
   // Effective style for the current widget state (hovered/pressed/focused/
   // enabled): state patch > style > theme defaults. Re-evaluated on every

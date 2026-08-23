@@ -1,6 +1,7 @@
 #pragma once
 #include "geometry.h"
 #include <string>
+#include <utility>  // std::to_underlying (C++23)
 
 namespace ltgui {
 
@@ -36,17 +37,17 @@ enum class KeyModifier {
 };
 
 inline KeyModifier operator|(KeyModifier a, KeyModifier b) {
-  return static_cast<KeyModifier>(static_cast<int>(a) | static_cast<int>(b));
+  return static_cast<KeyModifier>(std::to_underlying(a) | std::to_underlying(b));
 }
 inline KeyModifier operator&(KeyModifier a, KeyModifier b) {
-  return static_cast<KeyModifier>(static_cast<int>(a) & static_cast<int>(b));
+  return static_cast<KeyModifier>(std::to_underlying(a) & std::to_underlying(b));
 }
 // Mixed-type operators for use with Event::modifiers (int-typed)
-inline int operator|(int a, KeyModifier b) { return a | static_cast<int>(b); }
-inline int operator&(int a, KeyModifier b) { return a & static_cast<int>(b); }
+inline int operator|(int a, KeyModifier b) { return a | std::to_underlying(b); }
+inline int operator&(int a, KeyModifier b) { return a & std::to_underlying(b); }
 
 inline bool hasModifier(int modifiers, KeyModifier mod) {
-  return (modifiers & static_cast<int>(mod)) != 0;
+  return (modifiers & std::to_underlying(mod)) != 0;
 }
 
 enum class Key {

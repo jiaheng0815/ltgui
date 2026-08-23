@@ -21,7 +21,7 @@ if(NOT "${_LTGUI_VER}" STREQUAL "${PROJECT_VERSION}")
         "version.h + CMakeLists.txt + git tag together).")
 endif()
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -59,7 +59,7 @@ add_library(ltgui STATIC ${LTGUI_SOURCES} ${LTGUI_HEADERS})
 # tests/examples/apps through target_link_libraries).
 target_compile_definitions(ltgui PUBLIC LTGUI_STATIC)
 # Export the required standard to consumers via find_package(ltgui).
-target_compile_features(ltgui PUBLIC cxx_std_20)
+target_compile_features(ltgui PUBLIC cxx_std_23)
 target_include_directories(ltgui PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/ltgui>"
@@ -142,6 +142,21 @@ if(LTGUI_BUILD_TESTS)
         target_link_libraries(${name} PRIVATE ltgui)
         add_test(NAME ${name} COMMAND ${name})
     endforeach()
+
+    # C23 SDK tests (c_*.c must compile as C23; MSVC's C mode is C11).
+    if(NOT MSVC)
+        enable_language(C)
+        file(GLOB LTGUI_CTESTS CONFIGURE_DEPENDS "test/c_*.c")
+        foreach(ctestfile ${LTGUI_CTESTS})
+            get_filename_component(cname ${ctestfile} NAME_WE)
+            add_executable(${cname} ${ctestfile})
+            # link through the C++ driver: the library is C++.
+            set_target_properties(${cname} PROPERTIES LINKER_LANGUAGE CXX)
+            target_compile_options(${cname} PRIVATE -std=c23 -Wall -Wextra)
+            target_link_libraries(${cname} PRIVATE ltgui)
+            add_test(NAME ${cname} COMMAND ${cname})
+        endforeach()
+    endif()
 endif()
 
 # --- Install / find_package(ltgui) ---
