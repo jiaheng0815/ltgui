@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: python ltgui.py test
 
+      - name: SDK (--dll)
+        run: python ltgui.py build --dll ./sdk
+
   windows-msvc:
     runs-on: windows-latest
     steps:

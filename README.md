@@ -147,7 +147,7 @@ ticker.stop();  // cancel
 ## Signal (Safe Callbacks)
 
 ```cpp
-#include "signal.h"
+#include "signal.hpp"
 
 Signal<int> onValueChanged;
 
@@ -563,7 +563,7 @@ ltgui/
 │   ├── layout.h, style.h, theme.h    # Layout & styling
 │   ├── event.h, shortcut.h           # Input
 │   ├── animation.h, timer.h          # Time
-│   ├── signal.h, log.h               # Utilities
+│   ├── signal.hpp, log.h               # Utilities
 │   ├── geometry.h, color.h, font.h   # Primitives
 │   ├── utf8.h                        # UTF-8
 │   ├── i18n.h                        # Internationalization
@@ -780,7 +780,7 @@ ticker.stop();  // 取消
 ## 信号（安全回调）
 
 ```cpp
-#include "signal.h"
+#include "signal.hpp"
 
 Signal<int> onValueChanged;
 
@@ -1152,7 +1152,7 @@ ltgui/
 │   ├── layout.h, style.h, theme.h    # 布局和样式
 │   ├── event.h, shortcut.h           # 输入
 │   ├── animation.h, timer.h          # 时间
-│   ├── signal.h, log.h               # 工具
+│   ├── signal.hpp, log.h               # 工具
 │   ├── geometry.h, color.h, font.h   # 基础类型
 │   ├── utf8.h                        # UTF-8
 │   ├── i18n.h                        # 国际化

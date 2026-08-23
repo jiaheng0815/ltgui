@@ -30,22 +30,33 @@ option(LTGUI_BUILD_EXAMPLES "Build example applications" ON)
 option(LTGUI_BUILD_TESTS    "Build and enable tests" ON)
 option(LTGUI_BUILD_APPS     "Build app targets" ON)
 
+if(MSVC)
+    # /utf-8 fixes C4819 warnings on Chinese-locale systems. Project-wide:
+    # tests/examples/apps compile Chinese comments and literals too.
+    add_compile_options(/utf-8)
+endif()
+
 # --- Source files ---
-file(GLOB_RECURSE LTGUI_SOURCES
+file(GLOB_RECURSE LTGUI_SOURCES CONFIGURE_DEPENDS
     "src/*.cpp"
     "src/*.mm"
 )
 
 # --- Headers ---
-file(GLOB_RECURSE LTGUI_HEADERS
+file(GLOB_RECURSE LTGUI_HEADERS CONFIGURE_DEPENDS
     "include/ltgui/*.h"
     "include/ltgui/**/*.h"
 )
 
 # --- Static library ---
 add_library(ltgui STATIC ${LTGUI_SOURCES} ${LTGUI_HEADERS})
+# Consumer side of the LTGUI_API decoration: headers must not assume
+# __declspec(dllimport) when linking the static library (propagates to
+# tests/examples/apps through target_link_libraries).
+target_compile_definitions(ltgui PUBLIC LTGUI_STATIC)
 target_include_directories(ltgui PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/ltgui>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor>"
 )
 target_include_directories(ltgui PRIVATE
@@ -87,15 +98,14 @@ endif()
 
 # --- Warnings ---
 if(MSVC)
-    # /utf-8 fixes C4819 warnings on Chinese-locale systems (matches ltgui.py)
-    target_compile_options(ltgui PRIVATE /W4 /wd4100 /utf-8)
+    target_compile_options(ltgui PRIVATE /W4 /wd4100)
 else()
     target_compile_options(ltgui PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-missing-field-initializers)
 endif()
 
 # --- Examples ---
 if(LTGUI_BUILD_EXAMPLES)
-    file(GLOB LTGUI_EXAMPLES "examples/*.cpp")
+    file(GLOB LTGUI_EXAMPLES CONFIGURE_DEPENDS "examples/*.cpp")
     foreach(example ${LTGUI_EXAMPLES})
         get_filename_component(name ${example} NAME_WE)
         add_executable(example_${name} ${example})
@@ -105,7 +115,7 @@ endif()
 
 # --- Apps ---
 if(LTGUI_BUILD_APPS)
-    file(GLOB LTGUI_APPS "app/*.cpp")
+    file(GLOB LTGUI_APPS CONFIGURE_DEPENDS "app/*.cpp")
     foreach(app ${LTGUI_APPS})
         get_filename_component(name ${app} NAME_WE)
         add_executable(app_${name} ${app})
@@ -116,7 +126,7 @@ endif()
 # --- Tests ---
 if(LTGUI_BUILD_TESTS)
     enable_testing()
-    file(GLOB LTGUI_TESTS "test/test_*.cpp")
+    file(GLOB LTGUI_TESTS CONFIGURE_DEPENDS "test/test_*.cpp")
     foreach(testfile ${LTGUI_TESTS})
         get_filename_component(name ${testfile} NAME_WE)
         add_executable(${name} ${testfile})

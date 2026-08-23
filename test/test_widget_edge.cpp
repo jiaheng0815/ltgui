@@ -50,10 +50,12 @@ TEST_CASE("Widget tree edge: remove during iteration") {
   w->makeChild<Widget>();
   w->makeChild<Widget>();
 
-  // Remove first child — should not affect iteration of remaining
-  w->removeChild(a);
+  // Remove first child — should not affect iteration of remaining.
+  // The removed child is owned by the returned unique_ptr; the raw pointer
+  // must not be dereferenced afterwards (it was destroyed by removeChild).
+  auto removed = w->removeChild(a);
   CHECK(w->children().size() == 2);
-  CHECK(a->parent() == nullptr);
+  CHECK(removed->parent() == nullptr);
 }
 
 TEST_CASE("Widget tree edge: remove child that isn't ours") {

@@ -1,7 +1,7 @@
 #pragma once
 #include "api.h"
 #include "color.h"
-#include "signal.h"
+#include "signal.hpp"
 #include <string>
 #include <unordered_map>
 #include <vector>

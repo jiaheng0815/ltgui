@@ -16,7 +16,7 @@
 #include "log.h"
 #include "platform/platform.h"
 #include "shortcut.h"
-#include "signal.h"
+#include "signal.hpp"
 #include "style.h"
 #include "theme.h"
 #include "timer.h"

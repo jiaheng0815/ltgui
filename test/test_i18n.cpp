@@ -1,7 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include "doctest/doctest.h"
 #include "i18n.h"
-#include "signal.h"
+#include "signal.hpp"
 #include <string>
 
 using namespace ltgui;

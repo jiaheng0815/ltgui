@@ -1,6 +1,6 @@
 #pragma once
 #include "color.h"
-#include "signal.h"
+#include "signal.hpp"
 #include <cstdint>
 #include <functional>
 #include <vector>

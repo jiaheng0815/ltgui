@@ -10,9 +10,6 @@ build/
 __pycache__/
 *.pyc
 .vscode/
-a.txt
 test_sdk/
-%temp%/
 .codegraph/
 .cache/
-generate_tutorial_28.py

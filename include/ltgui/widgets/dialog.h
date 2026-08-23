@@ -1,6 +1,6 @@
 #pragma once
 #include "animation.h"
-#include "signal.h"
+#include "signal.hpp"
 #include "widget.h"
 #include <string>
 

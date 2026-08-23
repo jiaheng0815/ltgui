@@ -1,5 +1,5 @@
 #pragma once
-#include "signal.h"
+#include "signal.hpp"
 #include "widget.h"
 #include "widgets/scrollstate.h"
 #include <memory>

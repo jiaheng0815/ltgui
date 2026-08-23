@@ -2,7 +2,7 @@
 #include "api.h"
 #include "event.h"
 #include "geometry.h"
-#include "signal.h"
+#include "signal.hpp"
 #include "style.h"
 #include <memory>
 #include <vector>

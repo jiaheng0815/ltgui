@@ -1,5 +1,5 @@
 #pragma once
-#include "signal.h"
+#include "signal.hpp"
 #include <cstdint>
 #include <string>
 #include <unordered_map>

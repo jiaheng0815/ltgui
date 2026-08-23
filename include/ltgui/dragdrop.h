@@ -1,6 +1,6 @@
 #pragma once
 #include "geometry.h"
-#include "signal.h"
+#include "signal.hpp"
 #include <functional>
 #include <memory>
 #include <string>
