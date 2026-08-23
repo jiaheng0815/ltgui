@@ -1,4 +1,5 @@
 #pragma once
+#include "api.h"
 #include "event.h"
 #include "geometry.h"
 #include "platform/platform.h"
@@ -28,7 +29,7 @@ inline bool isMainThread() {
 inline void setMainThread() { s_mainThreadId = std::this_thread::get_id(); }
 #endif
 
-class Application {
+class LTGUI_API Application {
 public:
   static Application &instance();
 

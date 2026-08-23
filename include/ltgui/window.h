@@ -1,4 +1,5 @@
 #pragma once
+#include "api.h"
 #include "event.h"
 #include "geometry.h"
 #include "platform/native_canvas.h"
@@ -16,7 +17,7 @@ namespace gpu {
 class GpuCanvas;
 }
 
-class Window {
+class LTGUI_API Window {
 public:
   Window();
   virtual ~Window();

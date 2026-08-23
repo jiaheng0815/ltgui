@@ -1,4 +1,5 @@
 #pragma once
+#include "api.h"
 #include "event.h"
 #include "geometry.h"
 #include "signal.h"
@@ -46,7 +47,7 @@ enum class WidgetType {
   FileDialog,
 };
 
-class Widget {
+class LTGUI_API Widget {
 public:
   explicit Widget(Widget *parent = nullptr);
   virtual ~Widget();

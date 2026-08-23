@@ -1,4 +1,5 @@
 #pragma once
+#include "api.h"
 #include "color.h"
 #include "signal.h"
 #include <string>
@@ -62,7 +63,7 @@ struct Theme {
   bool operator!=(const Theme &o) const { return !(*this == o); }
 };
 
-class ThemeManager {
+class LTGUI_API ThemeManager {
 public:
   static ThemeManager &instance();
 

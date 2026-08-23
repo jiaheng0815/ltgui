@@ -285,16 +285,20 @@ def _config_key(is_release, pic=False):
         parts.append("pic")
     return "-".join(parts)
 
-def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=False):
+def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=False, dll=False):
     """Build the compiler flags list for a single source file.
     Returns (flags_list, obj_path, rel_path).
+
+    dll=True compiles the objects that go into the shared library
+    (LTGUI_EXPORTS); every other build defines LTGUI_STATIC so the public
+    LTGUI_API decoration resolves to plain symbols instead of dllimport.
     """
     rel = os.path.relpath(src_path, SRC_DIR)
     ext = ".obj" if is_msvc else ".o"
     obj_path = os.path.join(OBJ_DIR, _config_key(is_release, pic), rel + ext)
 
     if is_msvc:
-        flags = [compiler, "/nologo", "/c", "/std:c++20", "/EHsc"]
+        flags = [compiler, "/nologo", "/c", "/std:c++20", "/EHsc", "/DLTGUI_STATIC"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
@@ -305,6 +309,7 @@ def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=Fa
         flags += [src_path, f"/Fo{obj_path}"]
     else:
         flags = [compiler, "-c", "-std=c++20", "-fexec-charset=UTF-8"]
+        flags.append("-DLTGUI_EXPORTS" if dll else "-DLTGUI_STATIC")
         if pic:
             flags.append("-fPIC")
         if is_release:
@@ -322,8 +327,8 @@ def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=Fa
         flags += [src_path, "-o", obj_path]
     return flags, obj_path, rel
 
-def compile_source(src_path, platform, is_release, compiler, is_msvc, pic=False):
-    flags, obj_path, rel = _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic)
+def compile_source(src_path, platform, is_release, compiler, is_msvc, pic=False, dll=False):
+    flags, obj_path, rel = _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic, dll)
     os.makedirs(os.path.dirname(obj_path), exist_ok=True)
 
     if _object_is_fresh(obj_path, src_path):
@@ -345,7 +350,7 @@ def compile_source(src_path, platform, is_release, compiler, is_msvc, pic=False)
     _record_compile_command(src_path, flags)
     return obj_path
 
-def _compile_sources_parallel(sources, platform, is_release, compiler, is_msvc, pic=False):
+def _compile_sources_parallel(sources, platform, is_release, compiler, is_msvc, pic=False, dll=False):
     """Compile multiple sources in parallel using a thread pool."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     object_files = []
@@ -353,7 +358,7 @@ def _compile_sources_parallel(sources, platform, is_release, compiler, is_msvc, 
 
     with ThreadPoolExecutor(max_workers=_JOBS) as executor:
         futures = {
-            executor.submit(compile_source, src, platform, is_release, compiler, is_msvc, pic): src
+            executor.submit(compile_source, src, platform, is_release, compiler, is_msvc, pic, dll): src
             for src in sources
         }
         for future in as_completed(futures):
@@ -378,10 +383,12 @@ def build_shared_lib(platform, is_release, compiler, is_msvc):
     """Build a dynamic/shared library (.dll / .so / .dylib)."""
     if is_msvc:
         cprint("Error: --dll is not supported with MSVC (cl).", Color.RED, bold=True)
-        cprint("  MSVC shared builds need a .def file or LTGUI_EXPORT markup on", Color.YELLOW)
+        cprint("  MSVC shared builds need a .def file or LTGUI_EXPORTS markup on", Color.YELLOW)
         cprint("  every public symbol, which the codebase does not use yet.", Color.YELLOW)
-        cprint("  Use the regular static build instead:", Color.YELLOW)
-        cprint("    python ltgui.py build [--compiler cl]" if shutil.which("cl") else "    python ltgui.py build", Color.CYAN)
+        cprint("  Two working options:", Color.YELLOW)
+        cprint("    1. python ltgui.py build --dll <dir> --compiler clang", Color.CYAN)
+        cprint("       (MinGW-target clang++ shared build; produces DLL + import library)", Color.WHITE)
+        cprint("    2. python ltgui.py build --compiler cl   (static library)", Color.CYAN)
         return None
 
     sources = get_source_files(is_msvc)
@@ -393,7 +400,7 @@ def build_shared_lib(platform, is_release, compiler, is_msvc):
     cprint(f"Building ltgui shared library ({build_type}) for {platform} with {compiler}...", Color.BLUE, bold=True)
     cprint(f"Found {len(sources)} source files.", Color.WHITE)
 
-    object_files = _compile_sources_parallel(sources, platform, is_release, compiler, is_msvc, pic=True)
+    object_files = _compile_sources_parallel(sources, platform, is_release, compiler, is_msvc, pic=True, dll=True)
     if not object_files:
         return None
 
@@ -401,11 +408,15 @@ def build_shared_lib(platform, is_release, compiler, is_msvc):
 
     if platform == "windows":
         dll_name = "ltgui.dll"
+        import_lib_name = "libltgui.dll.a"
     elif platform == "macos":
         dll_name = "libltgui.dylib"
+        import_lib_name = None
     else:
         dll_name = "libltgui.so"
+        import_lib_name = "libltgui.so"  # not an import lib; used only for SDK naming
     dll_path = os.path.join(LIB_DIR, dll_name)
+    import_lib_path = os.path.join(LIB_DIR, import_lib_name) if import_lib_name else None
 
     cprint(f"  Linking {dll_name}...", Color.CYAN)
 
@@ -414,12 +425,9 @@ def build_shared_lib(platform, is_release, compiler, is_msvc):
     if platform != "macos":
         flags.append("-static")
     if platform == "windows":
-        # MinGW's ld accepts -Wl,--export-all-symbols, but clang++'s default
-        # Windows linker (lld-link) errors on it. Drop the flag: exported
-        # symbols are declared via the LTGUI_API declspec marker in the
-        # amalgamated header instead (see generate_amalgamated_header).
-        cprint("WARN: --dll on Windows does not auto-export all symbols with clang++.", Color.YELLOW)
-        cprint("      Exports come from the LTGUI_API declspec in the generated ltgui.h.", Color.YELLOW)
+        # ld.lld and GNU ld both accept --out-implib; it emits the import
+        # library (libltgui.dll.a) consumers need to link against the DLL.
+        flags += ["-Wl,--out-implib," + import_lib_path]
     if is_release:
         flags += ["-O2", "-DNDEBUG"]
     else:
@@ -435,7 +443,9 @@ def build_shared_lib(platform, is_release, compiler, is_msvc):
         return None
 
     cprint(f"  Created {dll_path}", Color.GREEN)
-    return dll_path
+    if import_lib_path and os.path.exists(import_lib_path):
+        cprint(f"  Created {import_lib_path}", Color.GREEN)
+    return (dll_path, import_lib_path)
 
 def build_lib(platform, is_release, compiler, is_msvc):
     sources = get_source_files(is_msvc)
@@ -492,7 +502,7 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
     exe_path = os.path.join(BUILD_DIR, name + exe_ext)
 
     if is_msvc:
-        flags = [compiler, "/nologo", "/std:c++20", "/EHsc"]
+        flags = [compiler, "/nologo", "/std:c++20", "/EHsc", "/DLTGUI_STATIC"]
         if is_release:
             flags += ["/O2", "/DNDEBUG"]
         else:
@@ -512,6 +522,7 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
             flags += ["-g", "-O0"]
         flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
         flags += get_platform_flags(platform)
+        flags += ["-DLTGUI_STATIC"]
         flags += [src, lib_path]
         flags += get_platform_libs(platform)
         flags += ["-o", exe_path]
@@ -766,6 +777,7 @@ def _strip_function_bodies(text):
 # went missing). Concrete platform backends (win32/x11/cocoa) are excluded —
 # they are internal implementation details, not part of the public SDK API.
 _HEADER_ORDER = [
+    "api.h",
     "geometry.h",
     "signal.h",
     "color.h",
@@ -929,8 +941,12 @@ def generate_amalgamated_header(target_path):
             # Skip #pragma once
             if s.startswith('#pragma once'):
                 continue
-            # Skip internal includes (they're being amalgamated)
-            if s.startswith('#include "') and ('ltgui/' in s or s.endswith('.h"') or 'stb_' in s):
+            # Skip internal includes (they're being amalgamated).
+            # stb_truetype.h must STAY: it is the external single-header font
+            # library, kept behind the __has_include guard in
+            # gpu_font_atlas.h — dropping the include broke the guard's
+            # true-branch and left stbtt_fontinfo undefined in the SDK.
+            if s.startswith('#include "') and 'stb_' not in s and ('ltgui/' in s or s.endswith('.h"')):
                 continue
             # Collect system includes for deduplication.
             # Skip stb_truetype — it's guarded by __has_include and must stay in place.
@@ -957,38 +973,76 @@ def generate_amalgamated_header(target_path):
 
     cprint(f"  Generated {target_path}", Color.GREEN)
 
-def export_sdk(lib_path, target_dir, platform):
-    """Build SDK: shared library + single declaration-only ltgui.h."""
+def _smoke_compile_header(target_dir, compiler, is_msvc):
+    """Syntax-check the amalgamated header with a minimal TU.
+
+    Guards the SDK against a _HEADER_ORDER / umbrella mismatch: if the
+    generated ltgui.h does not compile, --dll and package fail loudly.
+    """
+    smoke = os.path.join(BUILD_DIR, "sdk-smoke.cpp")
+    os.makedirs(BUILD_DIR, exist_ok=True)
+    with open(smoke, "w", encoding="utf-8") as f:
+        f.write("// auto-generated smoke test for the amalgamated SDK header\n")
+        f.write('#include "ltgui.h"\n')
+        f.write("int main() { return 0; }\n")
+
+    if is_msvc:
+        cmd = [compiler, "/nologo", "/Zs", "/std:c++20", "/EHsc", "/I", target_dir, smoke]
+    else:
+        cmd = [compiler, "-std=c++20", "-fsyntax-only", "-I", target_dir, smoke]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        cprint("Smoke compile of the amalgamated ltgui.h FAILED:", Color.RED, bold=True)
+        for line in result.stderr.splitlines():
+            cprint(f"  {line}", Color.RED)
+        return False
+    cprint("  Smoke compile of amalgamated ltgui.h OK", Color.GREEN)
+    return True
+
+
+def export_sdk(lib_path, import_lib_path, target_dir, platform, compiler, is_msvc):
+    """Build SDK: shared library + amalgamated ltgui.h + vendor header.
+
+    import_lib_path is the Windows import library produced by
+    build_shared_lib (None on non-Windows or when it was not produced).
+    """
     target_dir = os.path.abspath(target_dir)
+    os.makedirs(target_dir, exist_ok=True)
 
     cprint(f"Exporting SDK to {target_dir}...", Color.BLUE, bold=True)
 
-    # Generate amalgamated ltgui.h (declarations only)
+    # Generate amalgamated ltgui.h
     generate_amalgamated_header(os.path.join(target_dir, "ltgui.h"))
 
     # Copy shared library
-    os.makedirs(target_dir, exist_ok=True)
     lib_name = os.path.basename(lib_path)
     shutil.copy2(lib_path, os.path.join(target_dir, lib_name))
     cprint(f"  {lib_name} -> {target_dir}", Color.CYAN)
 
-    # Windows: also ship the import library so consumers can link the DLL
+    # Windows: ship the import library so consumers can link the DLL
     if platform == "windows":
-        stem = os.path.splitext(os.path.basename(lib_path))[0]  # "ltgui" from "ltgui.dll"
-        import_candidates = [
-            os.path.join(os.path.dirname(lib_path), stem + ".lib"),
-            os.path.join(os.path.dirname(lib_path), "lib" + stem + ".dll.a"),
-            os.path.join(os.path.dirname(lib_path), "lib" + stem + ".lib"),
-        ]
-        import_lib = next((p for p in import_candidates if os.path.exists(p)), None)
-        if import_lib:
-            shutil.copy2(import_lib, os.path.join(target_dir, os.path.basename(import_lib)))
-            cprint(f"  {os.path.basename(import_lib)} -> {target_dir}", Color.CYAN)
+        if import_lib_path and os.path.exists(import_lib_path):
+            shutil.copy2(import_lib_path, os.path.join(target_dir, os.path.basename(import_lib_path)))
+            cprint(f"  {os.path.basename(import_lib_path)} -> {target_dir}", Color.CYAN)
         else:
-            cprint("WARN: no import library (.lib / .dll.a) found next to the DLL;", Color.YELLOW)
-            cprint("      consumers must create one (e.g. with dlltool) or use a static build.", Color.YELLOW)
+            cprint("WARN: no import library produced for the DLL; consumers", Color.YELLOW)
+            cprint("      cannot link it without --out-implib support.", Color.YELLOW)
+
+    # stb_truetype.h: gpu_font_atlas.h includes it via __has_include, and the
+    # amalgamated header keeps that include. Ship it or GPU text silently
+    # degrades to empty glyphs for SDK users.
+    stb = os.path.join(VENDOR_DIR, "stb_truetype.h")
+    if os.path.exists(stb):
+        shutil.copy2(stb, os.path.join(target_dir, "stb_truetype.h"))
+        cprint(f"  stb_truetype.h -> {target_dir}", Color.CYAN)
+
+    # Validate the amalgamated header actually compiles
+    if not _smoke_compile_header(target_dir, compiler, is_msvc):
+        return False
 
     cprint("SDK export complete.", Color.GREEN, bold=True)
+    return True
 
 # --- Commands ---
 def cmd_build(positional, flags):
@@ -1004,11 +1058,14 @@ def cmd_build(positional, flags):
     # SDK export (--dll) — build shared lib only, skip examples/apps
     dll_dir = flags.get("dll")
     if dll_dir and isinstance(dll_dir, str):
-        lib_path = build_shared_lib(platform, is_release, compiler, is_msvc)
-        if not lib_path:
+        result = build_shared_lib(platform, is_release, compiler, is_msvc)
+        if not result:
             return
-        export_sdk(lib_path, dll_dir, platform)
+        dll_path, import_lib_path = result
+        ok = export_sdk(dll_path, import_lib_path, dll_dir, platform, compiler, is_msvc)
         _write_compile_commands()
+        if not ok:
+            return
         cprint("\nBuild complete.", Color.GREEN, bold=True)
         return
 
@@ -1121,7 +1178,7 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
     vendor_include = os.path.join(SCRIPT_DIR, "vendor")
 
     if is_msvc:
-        flags = [compiler, "/nologo", "/std:c++20", "/EHsc", "/Zi", "/Od"]
+        flags = [compiler, "/nologo", "/std:c++20", "/EHsc", "/Zi", "/Od", "/DLTGUI_STATIC"]
         flags += ["/I", INCLUDE_DIR, "/I", vendor_include]
         flags += get_platform_flags(platform, is_msvc=True)
         flags += [f"/Fe:{exe_path}"]
@@ -1135,6 +1192,7 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
             flags.append("-mconsole")
         flags += ["-I", INCLUDE_DIR, "-I", vendor_include]
         flags += get_platform_flags(platform)
+        flags += ["-DLTGUI_STATIC"]
         flags += [src, lib_path]
         flags += get_platform_libs(platform)
         flags += ["-o", exe_path]
@@ -1587,6 +1645,14 @@ def cmd_install(positional, flags):
                     header_count += 1
 
         cprint(f"  Headers: {header_count} copied", Color.GREEN)
+
+        # stb_truetype.h guards gpu_font_atlas.h via __has_include; missing it
+        # silently degrades GPU text to empty glyphs.
+        stb = os.path.join(VENDOR_DIR, "stb_truetype.h")
+        if os.path.exists(stb):
+            shutil.copy2(stb, os.path.join(include_dir, "ltgui", "stb_truetype.h"))
+            cprint("  stb_truetype.h copied", Color.GREEN)
+
         cprint("Install complete.", Color.GREEN, bold=True)
     except PermissionError:
         cprint(f"Permission denied writing to {prefix}. Try running with elevated privileges.", Color.RED)
@@ -1626,6 +1692,17 @@ def cmd_package(positional, flags):
     if os.path.exists(amalgamated):
         shutil.copy2(amalgamated, sdk_dir)
         cprint(f"  Packaged: ltgui.h", Color.CYAN)
+
+    # vendor header required by gpu_font_atlas via __has_include guard
+    stb = os.path.join(VENDOR_DIR, "stb_truetype.h")
+    if os.path.exists(stb):
+        shutil.copy2(stb, sdk_dir)
+        cprint("  Packaged: stb_truetype.h", Color.CYAN)
+
+    # Validate the amalgamated header compiles before packaging
+    compiler, is_msvc = resolve_compiler(flags.get("compiler"))
+    if not _smoke_compile_header(sdk_dir, compiler, is_msvc):
+        return
 
     # Version from git
     version = subprocess.run(
