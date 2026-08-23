@@ -30,6 +30,10 @@ option(LTGUI_BUILD_EXAMPLES "Build example applications" ON)
 option(LTGUI_BUILD_TESTS    "Build and enable tests" ON)
 option(LTGUI_BUILD_APPS     "Build app targets" ON)
 
+# GNUInstallDirs must be available before the target's INSTALL_INTERFACE
+# include dirs are computed (they use CMAKE_INSTALL_INCLUDEDIR).
+include(GNUInstallDirs)
+
 if(MSVC)
     # /utf-8 fixes C4819 warnings on Chinese-locale systems. Project-wide:
     # tests/examples/apps compile Chinese comments and literals too.
@@ -54,10 +58,14 @@ add_library(ltgui STATIC ${LTGUI_SOURCES} ${LTGUI_HEADERS})
 # __declspec(dllimport) when linking the static library (propagates to
 # tests/examples/apps through target_link_libraries).
 target_compile_definitions(ltgui PUBLIC LTGUI_STATIC)
+# Export the required standard to consumers via find_package(ltgui).
+target_compile_features(ltgui PUBLIC cxx_std_20)
 target_include_directories(ltgui PUBLIC
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/ltgui>"
     "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ltgui>"
 )
 target_include_directories(ltgui PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
@@ -135,3 +143,42 @@ if(LTGUI_BUILD_TESTS)
         add_test(NAME ${name} COMMAND ${name})
     endforeach()
 endif()
+
+# --- Install / find_package(ltgui) ---
+include(CMakePackageConfigHelpers)
+
+install(TARGETS ltgui EXPORT ltguiTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(DIRECTORY include/ltgui DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+# stb_truetype.h guards gpu_font_atlas.h via __has_include; ship it inside
+# the ltgui include dir so the installed headers find it.
+install(FILES vendor/stb_truetype.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/ltgui)
+
+install(EXPORT ltguiTargets
+    FILE ltguiTargets.cmake
+    NAMESPACE ltgui::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ltgui
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ltgui-config.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/ltgui-config.cmake"
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ltgui
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/ltgui-config-version.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/ltgui-config.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/ltgui-config-version.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ltgui
+)

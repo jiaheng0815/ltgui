@@ -630,6 +630,15 @@ python ltgui.py package                           # build/ltgui-1.0.0-sdk.zip
 `stb_truetype.h` under a versioned name taken from `include/ltgui/version.h`
 (the single source of truth; git tags only warn on mismatch).
 
+CMake consumers can use `find_package` directly after a CMake install:
+
+```bash
+cmake --install build-cmake --prefix /path/prefix
+# consumer CMakeLists.txt:
+#   find_package(ltgui REQUIRED)
+#   target_link_libraries(app PRIVATE ltgui::ltgui)   # includes LTGUI_STATIC
+```
+
 ## License
 
 MIT

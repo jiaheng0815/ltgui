@@ -85,6 +85,7 @@ _JSON_MODE = False
 _JOBS = os.cpu_count() or 1
 _COMPILE_COMMANDS = []
 _PROFILE_BUILD = False
+_SANITIZE = False
 LTGUI_VERSION = _load_version()
 
 # --- Platform helpers ---
@@ -350,6 +351,10 @@ def _get_compile_flags(src_path, platform, is_release, compiler, is_msvc, pic=Fa
         if _PROFILE_BUILD and not is_release:
             if platform != "macos":
                 flags += ["-pg", "-fno-omit-frame-pointer"]
+        # Sanitizer build (ASan + UBSan) — compile with instrumentation; the
+        # link step of executables/shared libs adds the flags as well.
+        if _SANITIZE:
+            flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
         flags += ["-Wall", "-Wextra", "-Wpedantic"]
         flags += ["-Wno-unused-parameter", "-Wno-missing-field-initializers"]
         flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
@@ -462,6 +467,8 @@ def build_shared_lib(platform, is_release, compiler, is_msvc):
         flags += ["-O2", "-DNDEBUG"]
     else:
         flags += ["-g", "-O0"]
+    if _SANITIZE:
+        flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
     flags += get_platform_flags(platform)
     flags += object_files
     flags += get_platform_libs(platform)
@@ -559,6 +566,8 @@ def build_program(name, src_dir, platform, is_release, lib_path, compiler, is_ms
         flags += ["-I", INCLUDE_DIR, "-I", VENDOR_DIR]
         flags += get_platform_flags(platform)
         flags += ["-DLTGUI_STATIC"]
+        if _SANITIZE:
+            flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
         flags += [src, lib_path]
         flags += get_platform_libs(platform)
         flags += ["-o", exe_path]
@@ -865,6 +874,8 @@ def cmd_build(positional, flags):
     compiler, is_msvc = resolve_compiler(flags.get("compiler"))
     single_example = flags.get("example")
     single_app = flags.get("app")
+    global _SANITIZE
+    _SANITIZE = bool(flags.get("sanitize"))
 
     check_platform_clean(compiler)
     platform = detect_platform()
@@ -1013,6 +1024,8 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
         flags += ["-I", INCLUDE_DIR, "-I", vendor_include]
         flags += get_platform_flags(platform)
         flags += ["-DLTGUI_STATIC"]
+        if _SANITIZE:
+            flags += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer"]
         flags += [src, lib_path]
         flags += get_platform_libs(platform)
         flags += ["-o", exe_path]
@@ -1029,6 +1042,8 @@ def build_test_exe(tf, platform, lib_path, compiler, is_msvc):
 def cmd_test(positional, flags):
     """Build and run all tests in test/."""
     compiler, is_msvc = resolve_compiler(flags.get("compiler"))
+    global _SANITIZE
+    _SANITIZE = bool(flags.get("sanitize"))
 
     check_platform_clean(compiler)
     platform = detect_platform()

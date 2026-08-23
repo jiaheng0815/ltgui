@@ -24,6 +24,20 @@ jobs:
       - name: Test
         run: python3 ltgui.py test
 
+      - name: Test (ASan + UBSan)
+        run: python3 ltgui.py test --sanitize
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (Cocoa backend)
+        run: python3 ltgui.py build
+
+      - name: Test
+        run: python3 ltgui.py test
+
   windows-clang:
     runs-on: windows-latest
     steps:
@@ -43,6 +57,16 @@ jobs:
 
       - name: SDK (--dll)
         run: python ltgui.py build --dll ./sdk
+
+      - name: GUI smoke (demo.exe)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath ".\build\demo.exe" -PassThru
+          Start-Sleep -Seconds 3
+          if ($p.HasExited) {
+            throw "demo.exe exited early with code $($p.ExitCode)"
+          }
+          Stop-Process -Id $p.Id -Force
 
   windows-msvc:
     runs-on: windows-latest

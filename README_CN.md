@@ -584,6 +584,15 @@ python ltgui.py package                          # build/ltgui-1.0.0-sdk.zip
 `package` 打包静态库、融合头 `ltgui.h` 与 `stb_truetype.h`,版本名取自
 `include/ltgui/version.h`(唯一事实源;git tag 不一致仅告警)。
 
+CMake 消费方在 `cmake --install` 后可以直接 `find_package`:
+
+```bash
+cmake --install build-cmake --prefix /path/prefix
+# 消费方 CMakeLists.txt:
+#   find_package(ltgui REQUIRED)
+#   target_link_libraries(app PRIVATE ltgui::ltgui)   # 自动带上 LTGUI_STATIC
+```
+
 ## 许可证
 
 MIT
