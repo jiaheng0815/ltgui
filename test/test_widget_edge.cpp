@@ -171,9 +171,11 @@ TEST_CASE("RadioButton edge: uncheck checked button in group") {
   rb1->setChecked(true);
   CHECK(rb1->isChecked());
 
-  // Try to uncheck the only checked one — should be ignored
+  // Programmatic uncheck is allowed (per RadioButton header docs); only a
+  // mouse click on the selected radio keeps it checked. A group can be
+  // emptied programmatically.
   rb1->setChecked(false);
-  CHECK(rb1->isChecked()); // still checked, radio group invariant
+  CHECK_FALSE(rb1->isChecked()); // programmatic uncheck honored
 
   // Check the other one
   rb2->setChecked(true);
