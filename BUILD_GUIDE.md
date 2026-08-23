@@ -26,7 +26,7 @@ From-scratch compiler setup, build, and debug walkthrough.
 
 ## Prerequisites
 
-You need Python 3 and a C++17 compiler. ltgui's build script (`ltgui.py`) auto-detects your platform and picks the right compiler.
+You need Python 3 and a C++20 compiler. ltgui's build script (`ltgui.py`) auto-detects your platform and picks the right compiler.
 
 | Compiler | Windows | Linux | macOS |
 |----------|---------|-------|-------|
@@ -194,7 +194,7 @@ Create `.vscode/c_cpp_properties.json`:
     "configurations": [{
         "name": "ltgui",
         "includePath": ["${workspaceFolder}/include", "${workspaceFolder}/vendor"],
-        "cppStandard": "c++17",
+        "cppStandard": "c++20",
         "intelliSenseMode": "windows-clang-x64",
         "compilerPath": "C:/Program Files/LLVM/bin/clang++.exe"
     }],
@@ -320,7 +320,9 @@ ctest --test-dir build
 ```
 build/
 ├── lib/
-│   └── ltgui.lib          ← static library
+│   ├── ltgui.lib          ← static library
+│   ├── ltgui.dll          ← shared library (only with --dll)
+│   └── libltgui.dll.a     ← import library (only with --dll)
 ├── obj/
 │   ├── animation.cpp.o    ← intermediate object files
 │   └── ...
@@ -329,6 +331,12 @@ build/
 ├── main.exe               ← app/ entry point
 └── .platform              ← compiler fingerprint (auto-cleans on switch)
 ```
+
+`python ltgui.py build --dll ./sdk` produces the shared-library SDK instead
+(ltgui.dll + libltgui.dll.a + amalgamated ltgui.h + stb_truetype.h in `sdk/`).
+Consumers link the static library with `-DLTGUI_STATIC` defined (Windows);
+SDK consumers omit it and link the import library. `install --prefix` and
+`package` cover the static path and are documented in README.md.
 
 Key files:
 - `vendor/stb_truetype.h` — font rasterization library (GPU text rendering)
@@ -341,7 +349,7 @@ Key files:
 ## Tests
 
 ```powershell
-# Build and run all 15 test suites
+# Build and run all 24 test suites
 python ltgui.py test
 
 # Run a single test binary
@@ -361,7 +369,7 @@ Coverage: geometry, color encoding, UTF-8, event routing, layout, widget tree, s
 ```powershell
 # One-shot build + run
 python ltgui.py run hello    # 2 buttons, counter
-python ltgui.py run demo     # 14 widgets showcase
+python ltgui.py run demo     # 21 widgets showcase
 
 # Or two steps
 python ltgui.py build
@@ -542,7 +550,7 @@ Then `python ltgui.py build` — the build script auto-scans all `.cpp` files un
 
 ## 前置条件
 
-需要 Python 3 和一个 C++17 编译器。ltgui 的构建脚本（`ltgui.py`）自动检测平台并选择合适的编译器。
+需要 Python 3 和一个 C++20 编译器。ltgui 的构建脚本（`ltgui.py`）自动检测平台并选择合适的编译器。
 
 | 编译器 | Windows | Linux | macOS |
 |--------|---------|-------|-------|
@@ -710,7 +718,7 @@ python ltgui.py build --dll ./sdk
     "configurations": [{
         "name": "ltgui",
         "includePath": ["${workspaceFolder}/include", "${workspaceFolder}/vendor"],
-        "cppStandard": "c++17",
+        "cppStandard": "c++20",
         "intelliSenseMode": "windows-clang-x64",
         "compilerPath": "C:/Program Files/LLVM/bin/clang++.exe"
     }],
@@ -857,7 +865,7 @@ build/
 ## 测试
 
 ```powershell
-# 构建并运行全部 15 个测试套件
+# 构建并运行全部 24 个测试套件
 python ltgui.py test
 
 # 运行单个测试

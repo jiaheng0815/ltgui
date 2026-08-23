@@ -194,4 +194,32 @@ accentPressed）。主题一换，下一帧绘制就生效，不用重新设置�
 
 ---
 
+## 🚀 发布流程（Release Process，v1.0.0 起）
+
+正经一点的工程约定，发版前看这一节就够啦：
+
+- **版本号唯一事实源**：`include/ltgui/version.h`。改版本时三处一起动：
+  1. `version.h`（`LTGUI_VERSION_MAJOR/MINOR/PATCH/STRING`）
+  2. `CMakeLists.txt` 的 `project(ltgui VERSION x.y.z)`——configure 时与
+     `version.h` 硬性比对（FATAL_ERROR），不改就配置失败
+  3. `git tag -a vX.Y.Z`
+  `ltgui.py` 启动时也会解析 `version.h`（不一致直接拒绝运行），
+  `package` 产物名 = `ltgui-<version>-sdk.zip`，与 git tag 无关。
+- **`LTGUI_STATIC` 约定**：静态库消费方（包含本项目 tests/examples/apps）
+  编译时必须定义 `LTGUI_STATIC`，否则 Windows 上 `LTGUI_API` 展开为
+  `__declspec(dllimport)`，链接静态库报 `__imp_` 未定义。
+  `ltgui.py` 全自动处理（见 `_get_compile_flags` 的 `dll` 参数）；
+  CMake 用 `target_compile_definitions(ltgui PUBLIC LTGUI_STATIC)` 传播。
+- **`--dll` 注意事项**：Windows 共享构建走 `--out-implib` 生成
+  `libltgui.dll.a` 导入库；MSVC 不支持 `--dll`（报错并提示方案）；
+  `export_sdk`/`package` 生成融合头后都会做**冒烟编译**
+  （`_smoke_compile_header`），头文件顺序失同步会拦在这里。
+- **SDK 内容**：融合头 `ltgui.h` + 库 + `stb_truetype.h`（`gpu_font_atlas.h`
+  靠 `__has_include` 守卫包含它，SDK/package/install 都必须带上）。
+- **改版本步骤**：改 version.h → 改 CMakeLists.txt → `python ltgui.py
+  build release` + `test` → `python ltgui.py package` 核包名 →
+  `git add` → `git commit` → `git tag -a vX.Y.Z`。
+
+---
+
 好啦，指南就到这里啦～ 有什么不懂的尽管问本妹妹，慢慢来，你没问题的！💪✨

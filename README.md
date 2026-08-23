@@ -1,8 +1,8 @@
 # ltgui
 
-A from-scratch, cross-platform retained-mode GUI framework in C++17.
+A from-scratch, cross-platform retained-mode GUI framework in C++20.
 Zero dependencies beyond platform APIs.
-一个从零构建的跨平台保留模式 C++17 GUI 框架，除平台 API 外零外部依赖。
+一个从零构建的跨平台保留模式 C++20 GUI 框架，除平台 API 外零外部依赖。
 
 [English](#english) | [中文](#中文)
 
@@ -14,7 +14,7 @@ Zero dependencies beyond platform APIs.
 
 - **Cross-platform** — Windows (GDI+/D3D11), Linux (X11+Xft/GLES3), macOS (Cocoa)
 - **GPU acceleration** — D3D11 (Windows) / OpenGL ES 3.0 (Linux), transparent fallback to CPU
-- **20 built-in widgets** — Button, Label, TextBox, CheckBox, RadioButton, Slider, ListBox, ScrollArea, ComboBox, Image, ProgressBar, TabWidget, Tooltip, TreeView, ContextMenu, MenuBar, **TableView**, **Dialog/MessageBox/InputDialog**, **FileDialog**
+- **21 built-in widgets** — Button, Label, TextBox, CheckBox, RadioButton, Slider, ListBox, ScrollArea, ComboBox, Image, ProgressBar, TabWidget, Tooltip, TreeView, ContextMenu, MenuBar, **TableView**, **Dialog/MessageBox/InputDialog**, **FileDialog**
 - **Retained widget tree** — `sizeHint()` → `setGeometry()` → `paint()` pipeline with hint caching
 - **Layout system** — `BoxLayout` (H/V), `GridLayout` with stretch factors, auto-relayout via `scheduleRelayout()`
 - **Theme system** — 6 presets (Light/Dark/DarkBlue/HighContrast/Solarized/Nord), `ThemeManager` with change signal, 28 color fields, custom theme support
@@ -40,7 +40,7 @@ Zero dependencies beyond platform APIs.
 
 ### Prerequisites
 
-- **C++17 compiler** — clang++, MSVC, or g++
+- **C++20 compiler** — clang++, MSVC, or g++
 - **Python 3**
 
 ### Build
@@ -58,7 +58,7 @@ python ltgui.py build --compiler clang
 # Release build
 python ltgui.py build release
 
-# Run tests (17 suites)
+# Run tests (24 suites)
 python ltgui.py test
 
 # CMake alternative
@@ -71,26 +71,34 @@ ctest --test-dir build
 
 ```cpp
 #include "ltgui.h"
+#include <iostream>
+
 using namespace ltgui;
 
 int main() {
     Window window;
-    window.create(400, 300, "Hello ltgui");
+    if (!window.create(400, 300, "Hello ltgui"))
+        return 1;
 
-    auto* root = new Widget();
-    root->setLayout(new BoxLayout(BoxLayout::TopToBottom, 8, 12));
+    auto root = std::make_unique<Widget>();
+    auto layout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12);
 
     auto* label = root->makeChild<Label>("Welcome!");
     label->style().font = Font("Segoe UI", 18, FontWeight::Bold);
 
     auto* button = root->makeChild<Button>("Click Me!");
-    button->onClick([&] { button->setText("Clicked!"); });
+    button->onClicked.connect([&] { button->setText("Clicked!"); });
 
-    window.setCentralWidget(root);
+    layout->addStretch(0);
+    root->setLayout(std::move(layout));
+    window.setCentralWidget(std::move(root));
     window.show();
+
     return Application::instance().run();
 }
 ```
+
+The equivalent minimal example lives in [`examples/hello.cpp`](examples/hello.cpp).
 
 ---
 
@@ -98,7 +106,7 @@ int main() {
 
 | Widget | Description |
 |--------|-------------|
-| `Button` | Clickable button with hover/press state, `onClick` callback |
+| `Button` | Clickable button with hover/press state, `onClicked` Signal |
 | `Label` | Static text display with alignment |
 | `TextBox` | Single-line text input, cursor, selection, clipboard |
 | `CheckBox` | Toggleable box with label, `onToggled(bool)` |
@@ -197,7 +205,8 @@ Tab and Shift+Tab navigate focusable widgets in depth-first tree order. Widgets 
 if (widget->widgetType() == WidgetType::RadioButton) { ... }
 // Enum: Base, Button, Label, TextBox, CheckBox, RadioButton,
 // Slider, ListBox, ScrollArea, ComboBox, ProgressBar, Tooltip,
-// TabWidget, Image, TreeView, ContextMenu
+// TabWidget, Image, TreeView, ContextMenu, MenuBar, Dialog,
+// MessageBox, InputDialog, TableView, FileDialog
 ```
 
 ---
@@ -339,7 +348,7 @@ class MyDialog : public Dialog {
         panelW_ = 400;
         panelH_ = 200;
         auto* btn = panel_->makeChild<Button>("OK");
-        btn->onClick([this]() { done(DialogResult::OK); });
+        btn->onClicked.connect([this]() { done(DialogResult::OK); });
     }
 };
 MyDialog dlg(parent);
@@ -546,6 +555,8 @@ ltgui/
 ├── CMakeLists.txt                    # CMake build
 ├── CLAUDE.md                         # Dev guide
 ├── README.md
+├── CHANGELOG.md
+├── docs/                             # Audit & design docs
 ├── include/ltgui/
 │   ├── ltgui.h                       # Umbrella
 │   ├── widget.h, window.h, app.h     # Core
@@ -562,17 +573,67 @@ ltgui/
 │   ├── platform/{native_window,native_canvas,platform}.h
 │   ├── platform/win32/x11/cocoa/     # CPU backends
 │   ├── platform/gpu/                 # GPU renderer (D3D11, GLES3)
-│   └── widgets/                      # 20 widgets
+│   └── widgets/                      # 21 widgets
 ├── src/
 │   ├── i18n.cpp, clipboard.cpp, dragdrop.cpp
 │   ├── platform/{win32,x11,cocoa,gpu}/
 │   ├── widgets/                      # One .cpp per widget
 │   ├── widget.cpp, window.cpp, app.cpp, ... 
 │   └── timer.cpp
-├── test/                             # 17 doctest suites
-├── examples/                         # hello, demo
+├── test/                             # 24 doctest suites
+├── examples/                         # hello, demo, tableview, dialogs, ...
 └── app/                              # main
 ```
+
+## Build, Install, Package & SDK
+
+### Static library (the default)
+
+`python ltgui.py build` produces the static library `build/lib/ltgui.lib`
+(Windows) or `build/lib/libltgui.a` (Linux/macOS), plus the app and all
+examples. Consumers **must define `LTGUI_STATIC`** so the public headers do
+not assume `__declspec(dllimport)` on Windows:
+
+```bash
+clang++ -std=c++20 -DLTGUI_STATIC -I <prefix>/include/ltgui my_app.cpp \
+    <prefix>/lib/ltgui.lib -lgdi32 -lgdiplus -luser32 -lcomctl32 -lole32 \
+    -limm32 -ld3d11 -ldxgi -ld3dcompiler
+```
+
+### Shared library SDK (`--dll`)
+
+```bash
+python ltgui.py build --dll ./sdk
+```
+
+The `sdk/` directory contains:
+
+| File | Purpose |
+|------|---------|
+| `ltgui.h` | Amalgamated single-header SDK (defined + smoke-compiled) |
+| `ltgui.dll` | Shared library (Windows) |
+| `libltgui.dll.a` | Import library to link against the DLL |
+| `stb_truetype.h` | Required by the GPU font atlas (shipped with the SDK) |
+
+Consumers include `sdk/ltgui.h` **without** `LTGUI_STATIC` and link the
+import library; the SDK header carries the `__declspec(dllimport)` decoration
+on Windows automatically. On Linux the header is link-neutral
+(`-lltgui` against `libltgui.so`); macOS uses `-dynamiclib` under the hood.
+
+> MSVC (`cl`) is not supported for `--dll` (shared builds need per-symbol
+> export markup or a .def); use `--compiler clang` for shared builds or build
+> the static library instead.
+
+### Install & package
+
+```bash
+python ltgui.py install --prefix /path           # copy lib + all headers
+python ltgui.py package                           # build/ltgui-1.0.0-sdk.zip
+```
+
+`package` bundles the static library, the amalgamated `ltgui.h` and
+`stb_truetype.h` under a versioned name taken from `include/ltgui/version.h`
+(the single source of truth; git tags only warn on mismatch).
 
 ## License
 
@@ -586,7 +647,7 @@ MIT
 
 - **跨平台** — Windows (GDI+/D3D11)，Linux (X11+Xft/GLES3)，macOS (Cocoa)
 - **GPU 加速** — D3D11 (Windows) / OpenGL ES 3.0 (Linux)，失败透明回退 CPU 渲染
-- **20 个内置控件** — Button、Label、TextBox、CheckBox、RadioButton、Slider、ListBox、ScrollArea、ComboBox、Image、ProgressBar、TabWidget、Tooltip、TreeView、ContextMenu、MenuBar、**TableView**、**Dialog/MessageBox/InputDialog**、**FileDialog**
+- **21 个内置控件** — Button、Label、TextBox、CheckBox、RadioButton、Slider、ListBox、ScrollArea、ComboBox、Image、ProgressBar、TabWidget、Tooltip、TreeView、ContextMenu、MenuBar、**TableView**、**Dialog/MessageBox/InputDialog**、**FileDialog**
 - **保留模式控件树** — `sizeHint()` → `setGeometry()` → `paint()` 管线，sizeHint 带缓存
 - **布局系统** — `BoxLayout`（水平/垂直）、`GridLayout`，支持拉伸因子，`scheduleRelayout()` 自动重排
 - **主题系统** — 6 种预设 (Light/Dark/DarkBlue/HighContrast/Solarized/Nord)，`ThemeManager` 带变更信号，28 色字段，支持自定义主题
@@ -612,7 +673,7 @@ MIT
 
 ### 环境要求
 
-- **C++17 编译器** — clang++、MSVC 或 g++
+- **C++20 编译器** — clang++、MSVC 或 g++
 - **Python 3**
 
 ### 编译
@@ -630,7 +691,7 @@ python ltgui.py build --compiler clang
 # 发布编译
 python ltgui.py build release
 
-# 运行测试（17 个测试套件）
+# 运行测试（24 个测试套件）
 python ltgui.py test
 
 # CMake
@@ -643,26 +704,34 @@ ctest --test-dir build
 
 ```cpp
 #include "ltgui.h"
+#include <iostream>
+
 using namespace ltgui;
 
 int main() {
     Window window;
-    window.create(400, 300, "Hello ltgui");
+    if (!window.create(400, 300, "Hello ltgui"))
+        return 1;
 
-    auto* root = new Widget();
-    root->setLayout(new BoxLayout(BoxLayout::TopToBottom, 8, 12));
+    auto root = std::make_unique<Widget>();
+    auto layout = std::make_unique<BoxLayout>(BoxLayout::TopToBottom, 8, 12);
 
     auto* label = root->makeChild<Label>("Welcome!");
     label->style().font = Font("Segoe UI", 18, FontWeight::Bold);
 
     auto* button = root->makeChild<Button>("Click Me!");
-    button->onClick([&] { button->setText("Clicked!"); });
+    button->onClicked.connect([&] { button->setText("Clicked!"); });
 
-    window.setCentralWidget(root);
+    layout->addStretch(0);
+    root->setLayout(std::move(layout));
+    window.setCentralWidget(std::move(root));
     window.show();
+
     return Application::instance().run();
 }
 ```
+
+等价的最小示例见 [`examples/hello.cpp`](examples/hello.cpp)。
 
 ---
 
@@ -670,7 +739,7 @@ int main() {
 
 | 控件 | 描述 |
 |------|------|
-| `Button` | 可点击按钮，带悬停/按下状态，`onClick` 回调 |
+| `Button` | 可点击按钮，带悬停/按下状态，`onClicked` 信号 |
 | `Label` | 静态文本显示，支持对齐 |
 | `TextBox` | 单行文本输入，光标、选择、剪贴板 |
 | `CheckBox` | 可切换复选框，`onToggled(bool)` 回调 |
@@ -769,7 +838,8 @@ Tab 和 Shift+Tab 按深度优先树序遍历可聚焦控件。重写 `nextFocus
 if (widget->widgetType() == WidgetType::RadioButton) { ... }
 // 枚举值: Base, Button, Label, TextBox, CheckBox, RadioButton,
 // Slider, ListBox, ScrollArea, ComboBox, ProgressBar, Tooltip,
-// TabWidget, Image, TreeView, ContextMenu
+// TabWidget, Image, TreeView, ContextMenu, MenuBar, Dialog,
+// MessageBox, InputDialog, TableView, FileDialog
 ```
 
 ---
@@ -806,9 +876,50 @@ s.bgColor = Color::White;
 s.borderWidth = 1;
 s.borderRadius = 4;
 s.setPadding(8, 4);
-s.setMargin(4);
 widget->setStyle(s);
 ```
+
+### 状态样式（悬停 / 按下 / 聚焦 / 禁用）
+
+每个控件按当前状态解析有效样式，优先级为 `状态补丁 > style > 主题默认`。
+逐状态覆盖颜色：
+
+```cpp
+Style s = widget->style();
+s.hovered.bgColor = Color(220, 230, 250);   // 悬停时
+s.pressed.accent  = Color(0, 90, 175);      // 按下时
+s.disabled.fgColor = Color(180, 180, 180);  // 禁用时
+widget->setStyle(s);
+```
+
+悬停过渡默认带动画（150ms ease-out）——Button 背景与 Slider 滑块会在状态间平滑过渡。
+
+### 渐变
+
+```cpp
+Style s = widget->style();
+s.gradient = Gradient{Color(0, 120, 215), Color(0, 200, 255), /*vertical=*/true};
+widget->setStyle(s);
+```
+
+### 从旧回调 API 迁移
+
+所有控件回调均为 `Signal<T>` 成员——用 connect 而不是赋值：
+
+| 旧写法                          | 新写法                                    |
+|---------------------------------|-------------------------------------------|
+| `btn.onClick([&]{ ... });`      | `btn.onClicked.connect([&]{ ... });`      |
+| `slider.onValueChanged(cb);`    | `slider.onValueChanged.connect(cb);`      |
+| `cb.onToggled(cb);`             | `cb.onToggled.connect(cb);`               |
+| `box.onSelectionChanged(cb);`   | `box.onSelectionChanged.connect(cb);`     |
+| `txt.onTextChanged(cb);`        | `txt.onTextChanged.connect(cb);`          |
+| `tv.onRowSelected(cb);`         | `tv.onRowSelected.connect(cb);`           |
+| `dlg.onFinished(cb);`           | `dlg.onFinished.connect(cb);`             |
+
+其他改名：`selectedIndex()/setSelected()` → `currentIndex()/setCurrentIndex()`、
+`TableView::selectedRow()/selectRow()` → `currentIndex()/setCurrentIndex()`、
+`Window::getSize()` → `size()`、`Image::setFitMode(char)` → `setFitMode(FitMode)`。
+`Style::setMargin()` 已移除。旧的名称保留为 `[[deprecated]]` 别名。
 
 ## 动画
 
@@ -865,7 +976,7 @@ class MyDialog : public Dialog {
         setTitle("自定义对话框");
         panelW_ = 400; panelH_ = 200;
         auto* btn = panel_->makeChild<Button>("确定");
-        btn->onClick([this]() { done(DialogResult::OK); });
+        btn->onClicked.connect([this]() { done(DialogResult::OK); });
     }
 };
 ```
@@ -1033,6 +1144,8 @@ ltgui/
 ├── CMakeLists.txt                    # CMake 构建
 ├── CLAUDE.md                         # 开发指南
 ├── README.md
+├── CHANGELOG.md
+├── docs/                             # 审计与设计文档
 ├── include/ltgui/
 │   ├── ltgui.h                       # 总头文件
 │   ├── widget.h, window.h, app.h     # 核心
@@ -1049,17 +1162,64 @@ ltgui/
 │   ├── platform/{native_window,native_canvas,platform}.h
 │   ├── platform/win32/x11/cocoa/     # CPU 后端
 │   ├── platform/gpu/                 # GPU 渲染器
-│   └── widgets/                      # 20 个控件
+│   └── widgets/                      # 21 个控件
 ├── src/
 │   ├── i18n.cpp, clipboard.cpp, dragdrop.cpp
 │   ├── platform/{win32,x11,cocoa,gpu}/
 │   ├── widgets/                      # 每个控件一个 .cpp
 │   ├── widget.cpp, window.cpp, app.cpp, ... 
 │   └── timer.cpp
-├── test/                             # 17 个 doctest 测试套件
-├── examples/                         # hello, demo
+├── test/                             # 24 个 doctest 测试套件
+├── examples/                         # hello, demo, tableview, dialogs, ...
 └── app/                              # main
 ```
+
+## 构建、安装、打包与 SDK
+
+### 静态库（默认）
+
+`python ltgui.py build` 产出静态库 `build/lib/ltgui.lib`(Windows)或
+`build/lib/libltgui.a`(Linux/macOS),连同 app 与全部示例一起构建。
+**消费者必须定义 `LTGUI_STATIC`**,否则 Windows 上公共头会假定
+`__declspec(dllimport)`:
+
+```bash
+clang++ -std=c++20 -DLTGUI_STATIC -I <prefix>/include/ltgui my_app.cpp \
+    <prefix>/lib/ltgui.lib -lgdi32 -lgdiplus -luser32 -lcomctl32 -lole32 \
+    -limm32 -ld3d11 -ldxgi -ld3dcompiler
+```
+
+### 共享库 SDK(--dll)
+
+```bash
+python ltgui.py build --dll ./sdk
+```
+
+`sdk/` 目录内容:
+
+| 文件 | 用途 |
+|------|------|
+| `ltgui.h` | 融合单头 SDK(生成后经冒烟编译验证) |
+| `ltgui.dll` | 共享库(Windows) |
+| `libltgui.dll.a` | 链接 DLL 用的导入库 |
+| `stb_truetype.h` | GPU 字体图集依赖(随 SDK 分发) |
+
+消费者 include `sdk/ltgui.h` **不要**定义 `LTGUI_STATIC`,链接导入库即可;
+Windows 上 SDK 头自动带上 `__declspec(dllimport)` 修饰。Linux 下头文件与
+链接方式无关(-lltgui 链 `libltgui.so`);macOS 内部走 `-dynamiclib`。
+
+> MSVC(`cl`)不支持 `--dll`(共享构建需要逐符号导出标记或 .def);共享构建
+> 请用 `--compiler clang`,或直接构建静态库。
+
+### 安装与打包
+
+```bash
+python ltgui.py install --prefix /path           # 复制库 + 全部头文件
+python ltgui.py package                          # build/ltgui-1.0.0-sdk.zip
+```
+
+`package` 打包静态库、融合头 `ltgui.h` 与 `stb_truetype.h`,版本名取自
+`include/ltgui/version.h`(唯一事实源;git tag 不一致仅告警)。
 
 ## 许可证
 
