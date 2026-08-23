@@ -236,11 +236,17 @@ bool ComboBox::handleEvent(Event &event) {
     // Case 1: click on a dropdown item → select, close, consume.
     if (relY >= 0 && relY < dropHeight_) {
       int index = relY / 26;
-      if (index >= 0 && index < static_cast<int>(items_.size())) {
-        setCurrentIndex(index);
-      }
-      closeDropdown();
       event.accepted = true;
+      if (index >= 0 && index < static_cast<int>(items_.size())) {
+        // Close the dropdown BEFORE selecting: setCurrentIndex() emits
+        // onSelectionChanged, whose slots may destroy this widget, so
+        // nothing of ours may run after the emit (closeDropdown emits no
+        // user signals and doesn't touch the selection).
+        closeDropdown();
+        setCurrentIndex(index);
+      } else {
+        closeDropdown();
+      }
       return true;
     }
 

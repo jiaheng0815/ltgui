@@ -15,11 +15,14 @@ void Range::setValue(int value) {
 void Range::setRange(int min, int max) {
   min_ = min;
   max_ = max;
+  int oldValue = value_;
   if (value_ < min_)
     value_ = min_;
   if (value_ > max_)
     value_ = max_;
   update();
+  if (value_ != oldValue)
+    onValueChanged.emit(value_);
 }
 
 } // namespace ltgui

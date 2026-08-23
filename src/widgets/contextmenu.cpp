@@ -42,11 +42,19 @@ void ContextMenu::popup(const Point &screenPos) {
   hovered_ = -1;
   setVisible(true);
   raiseToTop();
+  // Register with the window so clicks outside the menu dismiss it, and so
+  // the window routes input to us while we're open.
+  if (auto *win = window())
+    win->setOpenContextMenu(this);
   claimFocus();
   update();
 }
 
-void ContextMenu::dismiss() { setVisible(false); }
+void ContextMenu::dismiss() {
+  if (auto *win = window())
+    win->setOpenContextMenu(nullptr);
+  setVisible(false);
+}
 
 Size ContextMenu::sizeHint() const {
   if (!sizeHintDirty())
@@ -137,13 +145,18 @@ bool ContextMenu::handleEvent(Event &event) {
   }
 
   if (event.type == EventType::MouseDown) {
-    if (event.button == MouseButton::Left && itemIdx >= 0 &&
-        !items_[itemIdx].separator) {
-      if (items_[itemIdx].callback)
-        items_[itemIdx].callback();
-    }
+    // Snapshot the item's action BEFORE dismissing: the callback (or any
+    // re-entrant handler) may mutate or destroy this menu while it runs,
+    // so it must not run while we still hold a live reference into the
+    // state that dismissed the menu.
+    bool hasAction = itemIdx >= 0 && !items_[itemIdx].separator;
+    ItemCallback callback;
+    if (hasAction)
+      callback = items_[itemIdx].callback;
     // Any click on the menu (item hit or not, any button) dismisses it.
     dismiss();
+    if (hasAction && callback)
+      callback();
     event.accepted = true;
     return true;
   }

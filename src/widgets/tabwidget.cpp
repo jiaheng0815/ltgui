@@ -35,11 +35,25 @@ void TabWidget::removeTab(int index) {
   }
   tabs_.erase(tabs_.begin() + index);
 
+  // Erase shifted every tab after `index` down one slot — keep the current
+  // tab selected.  index == current_ stays on the same index, which now
+  // holds the next tab (or none, when the last tab was removed).
+  if (current_ > index) {
+    current_--;
+  }
   if (current_ >= static_cast<int>(tabs_.size())) {
     current_ = static_cast<int>(tabs_.size()) - 1;
   }
-  if (current_ >= 0 && current_ < static_cast<int>(tabs_.size())) {
+  if (current_ >= 0) {
     tabs_[current_].content->setVisible(true);
+    // Refresh the content geometry as setCurrentIndex() does — the new
+    // page may never have been laid out (hidden tabs have no geometry).
+    int cw = std::max(0, width() - 4);
+    int ch = std::max(0, height() - tabBarHeight_ - 2);
+    tabs_[current_].content->setGeometry(Rect(2, tabBarHeight_ + 2, cw, ch));
+  }
+  if (hoveredTab_ == index || hoveredTab_ >= static_cast<int>(tabs_.size())) {
+    hoveredTab_ = -1;
   }
   invalidateSizeHint();
   invalidateTabWidths();
@@ -207,6 +221,13 @@ bool TabWidget::handleEvent(Event &event) {
       update();
     }
     return false;
+  }
+
+  // Mouse left the tab bar (into the content area) — clear lingering tab
+  // hover so the old tab doesn't stay highlighted.
+  if (event.type == EventType::MouseMove && hoveredTab_ >= 0) {
+    hoveredTab_ = -1;
+    update();
   }
 
   // Forward events in content area to tab content children

@@ -39,6 +39,9 @@ protected:
 
 private:
   std::string path_;
+  // Path whose load could not be attempted yet because the widget had no
+  // window attached; retried at paint time once a window exists.
+  std::string pendingPath_;
   FitMode fitMode_ = FitMode::Contain;
   Size imageSize_;
   bool loaded_ = false;

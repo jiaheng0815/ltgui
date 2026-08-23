@@ -63,17 +63,25 @@ TableView::TableView(Widget *parent) : Widget(parent) {}
 
 void TableView::setModel(std::shared_ptr<TableModel> model) {
   model_ = std::move(model);
+  // The new model may have fewer rows than the previous selection/scroll
+  // state — reset them instead of clamping silently.
+  scrollY_ = 0;
+  selectedRow_ = -1;
+  selectedRows_.clear();
+  invalidateSizeHint();
   update();
 }
 
 void TableView::addColumn(const TableColumn &col) {
   columns_.push_back(col);
+  invalidateSizeHint();
   update();
 }
 
 void TableView::setColumnWidth(int col, int width) {
   if (col >= 0 && col < (int)columns_.size()) {
     columns_[col].width = std::max(columns_[col].minWidth, width);
+    invalidateSizeHint();
     update();
   }
 }
@@ -154,6 +162,10 @@ void TableView::paintSelf(NativeCanvas *canvas) {
   paintBackground(canvas);
 
   int numRows = model_ ? model_->rowCount() : 0;
+  // The model may have shrunk since the last scroll (e.g. removeRow) —
+  // clamp the cached scroll offset so painting stays in range.
+  int maxScroll = std::max(0, numRows - visibleRows());
+  scrollY_ = std::max(0, std::min(scrollY_, maxScroll));
   int numCols = (int)columns_.size();
   int firstVis = scrollY_;
   int visCount = visibleRows();
@@ -236,7 +248,8 @@ bool TableView::handleEvent(Event &event) {
     // Check column resize handle
     for (int c = 0; c < (int)columns_.size() - 1; c++) {
       int edge = colX(c) + columns_[c].width;
-      if (std::abs(localX - edge) < 4 && columns_[c].resizable) {
+      if (localY >= 0 && localY < headerHeight_ &&
+          std::abs(localX - edge) < 4 && columns_[c].resizable) {
         resizingCol_ = c;
         resizeStartX_ = localX;
         resizeStartW_ = columns_[c].width;

@@ -37,12 +37,16 @@ void ScrollArea::setWidget(std::unique_ptr<Widget> widget) {
   update();
 }
 
-void ScrollArea::updateScrollBars() {
+bool ScrollArea::updateScrollBars() {
   if (auto *cw = contentWidget()) {
     Size hint = cw->sizeHint();
+    bool changed =
+        (hint.width != contentWidth_ || hint.height != contentHeight_);
     contentWidth_ = hint.width;
     contentHeight_ = hint.height;
+    return changed;
   }
+  return false;
 }
 
 Size ScrollArea::sizeHint() const {
@@ -57,6 +61,10 @@ int ScrollArea::currentScrollY() {
 }
 
 void ScrollArea::scrollTo(int x, int y) {
+  // Refresh the cached content size so the clamp below uses the live
+  // children sizeHint (content widgets re-layout after e.g. setText()
+  // without notifying the ScrollArea).
+  updateScrollBars();
   scrollX_ = std::max(0, std::min(x, std::max(0, contentWidth_ - width())));
   scrollY_ = std::max(0, std::min(y, std::max(0, contentHeight_ - height())));
   scrollYAnim_.setTarget(static_cast<float>(scrollY_), 200, Easing::EaseOut);
@@ -68,6 +76,11 @@ void ScrollArea::scrollTo(int x, int y) {
 }
 
 void ScrollArea::paintSelf(NativeCanvas *canvas) {
+  // Lazily refresh the content size (see updateScrollBars) — repaint only
+  // when it actually changed.
+  if (updateScrollBars())
+    update();
+
   Rect r = absoluteRect();
   const Theme &t = currentTheme();
 
@@ -117,6 +130,11 @@ bool ScrollArea::handleEvent(Event &event) {
   if (!isEnabled())
     return false;
 
+  // Refresh the cached content size before any scrollbar math so wheel
+  // scrolling and thumb dragging use the live contentHeight_.
+  if (updateScrollBars())
+    update();
+
   if (event.type == EventType::MouseWheel) {
     int newY = scrollY_ - event.wheelDelta * 30;
     scrollTo(scrollX_, newY);
@@ -139,7 +157,7 @@ bool ScrollArea::handleEvent(Event &event) {
     int maxScroll = contentHeight_ - height();
     int thumbY = 0;
     if (maxScroll > 0) {
-      thumbY = (curScrollY * (height() - thumbH)) / maxScroll;
+      thumbY = (int)((int64_t)curScrollY * (height() - thumbH) / maxScroll);
     }
     if (localY < thumbY) {
       // Click above thumb: page up
@@ -166,7 +184,7 @@ bool ScrollArea::handleEvent(Event &event) {
     int trackH = height() - thumbH;
     if (maxScroll > 0 && trackH > 0) {
       int dy = event.pos.y - dragStartMouseY_;
-      int newY = dragStartScrollY_ + (dy * maxScroll) / trackH;
+      int newY = dragStartScrollY_ + (int)((int64_t)dy * maxScroll / trackH);
       scrollTo(scrollX_, newY);
     }
     event.accepted = true;

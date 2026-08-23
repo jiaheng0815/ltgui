@@ -14,13 +14,24 @@ void ProgressBar::setValue(int value) {
   value = std::max(minimum(), std::min(maximum(), value));
   if (value_ != value) {
     value_ = value;
-    float pct = (maximum() > minimum())
-                    ? static_cast<float>(value_ - minimum()) /
-                          static_cast<float>(maximum() - minimum())
-                    : 1.0f;
-    displayValue_.setTarget(pct, 300, Easing::EaseOut);
+    updateDisplayTarget();
     update();
+    onValueChanged.emit(value_);
   }
+}
+
+void ProgressBar::setRange(int min, int max) {
+  Range::setRange(min, max); // may clamp value_ and emit onValueChanged
+  updateDisplayTarget();
+  update();
+}
+
+void ProgressBar::updateDisplayTarget() {
+  float pct = (maximum() > minimum())
+                  ? static_cast<float>(value_ - minimum()) /
+                        static_cast<float>(maximum() - minimum())
+                  : 1.0f;
+  displayValue_.setTarget(pct, 300, Easing::EaseOut);
 }
 
 void ProgressBar::setIndeterminate(bool on) {
@@ -81,8 +92,11 @@ void ProgressBar::paintSelf(NativeCanvas *canvas) {
       canvas->setColor(t.progressBarFill);
       canvas->fillRoundedRect(fillRect, st.borderRadius);
 
-      // If not full, cover the right rounded corner on the fill end
-      if (fillW < r.width - st.borderRadius) {
+      // If not full, cover the right rounded corner on the fill end.
+      // Skip when the fill is narrower than the corner radius — the patch
+      // would extend left of the track's left edge (and square off the
+      // left corner).
+      if (fillW > st.borderRadius && fillW < r.width - st.borderRadius) {
         canvas->fillRect(Rect(r.x + fillW - st.borderRadius, r.y,
                               st.borderRadius, r.height));
       }

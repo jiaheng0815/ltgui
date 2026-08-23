@@ -115,13 +115,24 @@ bool Button::handleEvent(Event &event) {
     break;
   case EventType::KeyUp:
     if (event.key == Key::Enter || event.key == Key::Space) {
+      bool activated = pressed_;
       pressed_ = false;
       animateBg();
-      onClicked.emit();
+      // Only emit if we actually saw the matching KeyDown — otherwise a
+      // shortcut/Tab that consumed KeyDown could re-trigger the button.
+      if (activated)
+        onClicked.emit();
       event.accepted = true;
       return true;
     }
     break;
+  case EventType::FocusOut:
+    // Losing focus mid-press must never leave the button stuck pressed or
+    // trigger a click when the key is later released.
+    pressed_ = false;
+    animateBg();
+    event.accepted = true;
+    return true;
   default:
     break;
   }

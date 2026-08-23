@@ -102,6 +102,19 @@ void FileDialog::populateFileList(const std::string &dir) {
 #endif
   if (pathBar_)
     pathBar_->setText(dir);
+
+  // ListItems::addItem auto-selects row 0 but never touches FileDialog's
+  // selection_ — sync it (stripping the [D] directory prefix) so
+  // selectedPath() agrees with the row the UI highlights.
+  int sel = fileList_->currentIndex();
+  if (sel >= 0) {
+    std::string item = fileList_->item(sel);
+    bool isDir = (item.size() >= 4 && item[0] == '[' && item[1] == 'D' &&
+                  item[2] == ']');
+    selection_ = {isDir ? item.substr(4) : item};
+  } else {
+    selection_.clear();
+  }
 }
 
 void FileDialog::acceptSelection() {

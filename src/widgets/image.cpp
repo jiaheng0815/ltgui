@@ -11,10 +11,16 @@ Image::Image(Widget *parent) : Widget(parent) {
 
 bool Image::load(const std::string &path) {
   path_ = path;
+  pendingPath_.clear();
   auto *win = window();
   if (win && win->canvas()) {
     imageSize_ = win->canvas()->imageSize(path);
     loaded_ = imageSize_.width > 0 && imageSize_.height > 0;
+  } else {
+    // No window yet (e.g. loaded before being added to the tree) — defer
+    // the actual imageSize query until the widget is painted, when a
+    // window is guaranteed to exist.
+    pendingPath_ = path;
   }
   invalidateSizeHint();
   update();
@@ -33,6 +39,11 @@ Size Image::sizeHint() const {
 }
 
 void Image::paintSelf(NativeCanvas *canvas) {
+  // Lazy retry: load() called before the widget was attached to a window
+  // could not query the canvas. By paint time a window exists.
+  if (!loaded_ && !pendingPath_.empty() && window()) {
+    load(pendingPath_);
+  }
   if (!loaded_ || path_.empty())
     return;
   if (imageSize_.width <= 0 || imageSize_.height <= 0)

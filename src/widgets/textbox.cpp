@@ -9,14 +9,40 @@
 
 namespace ltgui {
 
+namespace {
+
+// Returns the next UTF-8 character boundary at or after `pos`, clamped to
+// s.size(). Advances past the character a position points into — including
+// positions inside a multi-byte sequence — so the caret never sits in the
+// middle of a glyph. (utf8::nextPos() treats a continuation byte start as a
+// one-byte char and thus needs this wrapper for mid-sequence positions.)
+int nextBoundary(const std::string &s, int pos) {
+  int len = static_cast<int>(s.size());
+  if (pos < 0 || pos >= len)
+    return len;
+  int p = pos;
+  // Skip any continuation bytes the position points into.
+  while (p < len && (static_cast<unsigned char>(s[p]) & 0xC0) == 0x80)
+    ++p;
+  if (p >= len)
+    return len;
+  // Step over the character itself.
+  p += utf8::codePointLen(static_cast<unsigned char>(s[p]));
+  return p < len ? p : len;
+}
+
+} // namespace
+
 TextBox::TextBox(const std::string &text, Widget *parent)
     : TextWidget(text, parent), cursorPos_(static_cast<int>(text.size())) {}
+
+void TextBox::clampCursorPos() { cursorPos_ = nextBoundary(text_, cursorPos_); }
 
 void TextBox::setText(const std::string &text) {
   text_ = text;
   cursorPos_ = static_cast<int>(text.size());
   selectionStart_ = -1;
-  scrollOffset_ = 0;
+  pendingHighSurrogate_ = 0;
   undoStack_.clear();
   redoStack_.clear();
   invalidateSizeHint();
@@ -89,8 +115,14 @@ void TextBox::redo() {
 void TextBox::deleteSelection() {
   if (selectionStart_ < 0)
     return;
-  int selStart = std::min(cursorPos_, selectionStart_);
-  int selEnd = std::max(cursorPos_, selectionStart_);
+  int selStart = std::clamp(std::min(cursorPos_, selectionStart_), 0,
+                            static_cast<int>(text_.size()));
+  int selEnd = std::clamp(std::max(cursorPos_, selectionStart_), 0,
+                          static_cast<int>(text_.size()));
+  if (selEnd <= selStart) {
+    selectionStart_ = -1;
+    return;
+  }
   text_.erase(selStart, selEnd - selStart);
   cursorPos_ = selStart;
   selectionStart_ = -1;
@@ -99,12 +131,17 @@ void TextBox::deleteSelection() {
 std::string TextBox::selectedText() const {
   if (selectionStart_ < 0)
     return {};
-  int selStart = std::min(cursorPos_, selectionStart_);
-  int selEnd = std::max(cursorPos_, selectionStart_);
+  int selStart = std::clamp(std::min(cursorPos_, selectionStart_), 0,
+                            static_cast<int>(text_.size()));
+  int selEnd = std::clamp(std::max(cursorPos_, selectionStart_), 0,
+                          static_cast<int>(text_.size()));
+  if (selEnd <= selStart)
+    return {};
   return text_.substr(selStart, selEnd - selStart);
 }
 
 void TextBox::insertText(const std::string &str) {
+  clampCursorPos();
   pushUndo();
   deleteSelection();
   text_.insert(cursorPos_, str);
@@ -132,6 +169,7 @@ void TextBox::deleteCharBefore() {
 }
 
 void TextBox::deleteCharAt() {
+  clampCursorPos();
   pushUndo();
   if (selectionStart_ >= 0) {
     deleteSelection();
@@ -147,24 +185,26 @@ void TextBox::deleteCharAt() {
   }
 }
 
-void TextBox::moveCursorByChar(int delta) {
+void TextBox::moveCursorByChar(int delta, bool preserveSelection) {
   if (delta < 0) {
     cursorPos_ = utf8::prevPos(text_, cursorPos_);
   } else if (delta > 0) {
     cursorPos_ = utf8::nextPos(text_, cursorPos_);
   }
-  selectionStart_ = -1;
+  if (!preserveSelection)
+    selectionStart_ = -1;
   update();
 }
 
-void TextBox::moveCursorByLine(int delta) {
+void TextBox::moveCursorByLine(int delta, bool preserveSelection) {
   if (!multiLine_) {
     // In single-line mode, up/down = home/end
     if (delta < 0)
       cursorPos_ = 0;
     else
       cursorPos_ = static_cast<int>(text_.size());
-    selectionStart_ = -1;
+    if (!preserveSelection)
+      selectionStart_ = -1;
     update();
     return;
   }
@@ -199,7 +239,8 @@ void TextBox::moveCursorByLine(int delta) {
   if (colOffset > maxCol)
     colOffset = maxCol;
   cursorPos_ = targetOffset + colOffset;
-  selectionStart_ = -1;
+  if (!preserveSelection)
+    selectionStart_ = -1;
   update();
 }
 
@@ -295,19 +336,26 @@ void TextBox::paintSelf(NativeCanvas *canvas) {
   int pad = st.paddingLeft;
   Rect textRect(r.x + pad, r.y, r.width - pad * 2, r.height);
 
+  // Defensive: alignment edits may have left a stale cursor — normalize
+  // before any substr()/insert() below.
+  clampCursorPos();
+
   // Build display text: combine IME preedit with actual text
   std::string displayText = text_;
   int displayCursor = cursorPos_;
   int imeLen = static_cast<int>(imePreedit_.size());
   if (focused_ && imeLen > 0) {
-    displayText.insert(cursorPos_, imePreedit_);
-    displayCursor = cursorPos_ + imeLen;
+    displayText.insert(displayCursor, imePreedit_);
+    displayCursor = displayCursor + imeLen;
   }
+  displayCursor = std::clamp(displayCursor, 0, static_cast<int>(displayText.size()));
 
   // Paint selection highlight
   if (focused_ && selectionStart_ >= 0 && selectionStart_ != cursorPos_) {
-    int selStart = std::min(cursorPos_, selectionStart_);
-    int selEnd = std::max(cursorPos_, selectionStart_);
+    int selStart = std::clamp(std::min(cursorPos_, selectionStart_), 0,
+                              static_cast<int>(displayText.size()));
+    int selEnd = std::clamp(std::max(cursorPos_, selectionStart_), 0,
+                            static_cast<int>(displayText.size()));
     std::string before = displayText.substr(0, selStart);
     std::string sel = displayText.substr(selStart, selEnd - selStart);
     int selX = r.x + pad + canvas->measureText(before).width;
@@ -378,7 +426,12 @@ bool TextBox::handleEvent(Event &event) {
           else
             hi = mid;
         }
-        cursorPos_ = lo;
+        // Align to the next character boundary so the caret never lands
+        // inside a multi-byte UTF-8 sequence.
+        cursorPos_ =
+            (lo >= static_cast<int>(text_.size()))
+                ? static_cast<int>(text_.size())
+                : nextBoundary(text_, lo);
       } else {
         cursorPos_ = static_cast<int>(text_.size());
       }
@@ -406,8 +459,13 @@ bool TextBox::handleEvent(Event &event) {
           else
             hi = mid;
         }
-        if (lo != cursorPos_) {
-          cursorPos_ = lo;
+        // Align to the next character boundary (see MouseDown).
+        int aligned =
+            (lo >= static_cast<int>(text_.size()))
+                ? static_cast<int>(text_.size())
+                : nextBoundary(text_, lo);
+        if (aligned != cursorPos_) {
+          cursorPos_ = aligned;
           update();
         }
       }
@@ -425,13 +483,17 @@ bool TextBox::handleEvent(Event &event) {
     dragging_ = false;
     selectionStart_ = -1;
     imePreedit_.clear();
+    pendingHighSurrogate_ = 0;
     update();
     event.accepted = true;
     return true;
   case EventType::ImeComposition: {
     // Update IME preedit display
     imePreedit_ = event.imeText;
-    imeCursor_ = event.imeCursor;
+    imeCursor_ = std::clamp(event.imeCursor, 0,
+                            static_cast<int>(imePreedit_.size()));
+    // Sanitize the insertion point before painting the preedit.
+    clampCursorPos();
     update();
     event.accepted = true;
     return true;
@@ -480,7 +542,21 @@ bool TextBox::handleEvent(Event &event) {
       if (event.charCode >= 32 && event.charCode != 127) {
         // Clear IME preedit when actual text arrives
         imePreedit_.clear();
-        insertText(utf8::encode(event.charCode));
+        unsigned int cp = event.charCode;
+        if (cp >= 0xD800 && cp <= 0xDBFF) {
+          // High surrogate (e.g. emoji from Windows WM_CHAR surrogate
+          // pairs) — defer insertion until the low half arrives.
+          pendingHighSurrogate_ = cp;
+        } else if (cp >= 0xDC00 && cp <= 0xDFFF && pendingHighSurrogate_ != 0) {
+          // Combine the pending pair into a single code point.
+          cp = 0x10000 + ((pendingHighSurrogate_ - 0xD800) << 10) +
+               (cp - 0xDC00);
+          pendingHighSurrogate_ = 0;
+          insertText(utf8::encode(cp));
+        } else {
+          pendingHighSurrogate_ = 0;
+          insertText(utf8::encode(cp));
+        }
         event.accepted = true;
         return true;
       }
@@ -503,33 +579,25 @@ bool TextBox::handleEvent(Event &event) {
       case Key::Left:
         if (shift && selectionStart_ < 0)
           selectionStart_ = cursorPos_;
-        moveCursorByChar(-1);
-        if (!shift)
-          selectionStart_ = -1;
+        moveCursorByChar(-1, shift);
         event.accepted = true;
         return true;
       case Key::Right:
         if (shift && selectionStart_ < 0)
           selectionStart_ = cursorPos_;
-        moveCursorByChar(1);
-        if (!shift)
-          selectionStart_ = -1;
+        moveCursorByChar(1, shift);
         event.accepted = true;
         return true;
       case Key::Up:
         if (shift && selectionStart_ < 0)
           selectionStart_ = cursorPos_;
-        moveCursorByLine(-1);
-        if (!shift)
-          selectionStart_ = -1;
+        moveCursorByLine(-1, shift);
         event.accepted = true;
         return true;
       case Key::Down:
         if (shift && selectionStart_ < 0)
           selectionStart_ = cursorPos_;
-        moveCursorByLine(1);
-        if (!shift)
-          selectionStart_ = -1;
+        moveCursorByLine(1, shift);
         event.accepted = true;
         return true;
       case Key::Home:

@@ -41,7 +41,6 @@ protected:
 private:
   int cursorPos_ = 0;
   int selectionStart_ = -1; // -1 = no selection
-  int scrollOffset_ = 0;
   bool focused_ = false;
   bool dragging_ = false;
   bool multiLine_ = false;
@@ -49,6 +48,11 @@ private:
   // IME composition state
   std::string imePreedit_;
   int imeCursor_ = 0;
+
+  // Pending high UTF-16 surrogate from a preceding charCode event
+  // (Windows WM_CHAR delivers emoji as surrogate pairs); combined with
+  // the following low surrogate into a single code point.
+  unsigned int pendingHighSurrogate_ = 0;
 
   // Undo/Redo stack
   struct UndoEntry {
@@ -68,10 +72,14 @@ private:
   void insertText(const std::string &str);
   void deleteCharBefore();
   void deleteCharAt();
-  void moveCursorByChar(int delta);
-  void moveCursorByLine(int delta);
+  void moveCursorByChar(int delta, bool preserveSelection = false);
+  void moveCursorByLine(int delta, bool preserveSelection = false);
   void deleteSelection();
   std::string selectedText() const;
+
+  // Clamps cursorPos_ into [0, text_.size()] and aligns it to a UTF-8
+  // character boundary (or text end).
+  void clampCursorPos();
 
   // Line handling for multi-line
   std::vector<std::string> lines() const;

@@ -80,28 +80,31 @@ bool ListBox::handleEvent(Event &event) {
 
   if (event.type == EventType::KeyDown) {
     if (event.key == Key::Down) {
-      if (selected_ < static_cast<int>(items_.size()) - 1) {
-        setCurrentIndex(selected_ + 1);
-        // Ensure selection is visible
+      event.accepted = true;
+      int target = selected_ + 1;
+      if (target < static_cast<int>(items_.size())) {
+        // Ensure the target would be visible BEFORE selecting: the scroll
+        // adjustment must not run after setCurrentIndex(), whose
+        // onSelectionChanged slots may destroy this widget.
         int visible = visibleItems();
         int maxOffset = std::max(0, static_cast<int>(items_.size()) - visible);
-        if (selected_ >= currentScrollOffset() + visible) {
-          setScrollTarget(selected_ - visible + 1, maxOffset);
+        if (target >= currentScrollOffset() + visible) {
+          setScrollTarget(target - visible + 1, maxOffset);
         }
+        setCurrentIndex(target);
       }
-      event.accepted = true;
       return true;
     }
     if (event.key == Key::Up) {
-      if (selected_ > 0) {
-        setCurrentIndex(selected_ - 1);
-        if (selected_ < currentScrollOffset()) {
-          setScrollTarget(
-              selected_,
-              std::max(0, static_cast<int>(items_.size()) - visibleItems()));
-        }
-      }
       event.accepted = true;
+      int target = selected_ - 1;
+      if (target >= 0) {
+        if (target < currentScrollOffset()) {
+          setScrollTarget(target, std::max(0, static_cast<int>(items_.size()) -
+                                                  visibleItems()));
+        }
+        setCurrentIndex(target);
+      }
       return true;
     }
   }

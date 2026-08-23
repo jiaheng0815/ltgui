@@ -31,7 +31,9 @@ private:
   int dragStartMouseY_ = 0;
   int dragStartScrollY_ = 0;
 
-  void updateScrollBars();
+  // Refresh contentWidth_/contentHeight_ from the child's current sizeHint.
+  // Returns true when the cached size changed.
+  bool updateScrollBars();
   void scrollTo(int x, int y);
   int currentScrollY();
 };

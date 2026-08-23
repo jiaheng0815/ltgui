@@ -146,12 +146,43 @@ int MenuBar::hitTestMenu(int localX, int localY) const {
   return -1;
 }
 
-int MenuBar::hitTestItem(int localY) const {
+Rect MenuBar::dropRectLocal() const {
   if (openMenu_ < 0 || openMenu_ >= (int)menus_.size())
+    return {};
+  const auto &items = menus_[openMenu_].items;
+  int dropW = dropWidth(items, 0) + 20;
+  int dropH = (int)items.size() * itemHeight_ + 4;
+  return Rect(menuX(openMenu_), height(), dropW, dropH);
+}
+
+Rect MenuBar::submenuRectLocal() const {
+  if (openMenu_ < 0 || openMenu_ >= (int)menus_.size())
+    return {};
+  if (openSubmenu_ < 0 ||
+      openSubmenu_ >= (int)menus_[openMenu_].items.size())
+    return {};
+  const auto &sub = menus_[openMenu_].items[openSubmenu_].submenu;
+  if (sub.empty())
+    return {};
+  Rect drop = dropRectLocal();
+  if (drop.isEmpty())
+    return {};
+  int subW = dropWidth(sub, 1) + 20;
+  int subH = (int)sub.size() * itemHeight_ + 4;
+  int subX = drop.x + drop.width - 4;
+  int subY = drop.y + 2 + openSubmenu_ * itemHeight_;
+  return Rect(subX, subY, subW, subH);
+}
+
+int MenuBar::hitTestItem(const Rect &panel, int localX, int localY,
+                         int count) const {
+  if (count <= 0)
     return -1;
-  int relY = localY - height() - 2;
+  if (!panel.contains(Point(localX, localY)))
+    return -1;
+  int relY = localY - panel.y - 2;
   int idx = relY / itemHeight_;
-  if (idx < 0 || idx >= (int)menus_[openMenu_].items.size())
+  if (idx < 0 || idx >= count)
     return -1;
   return idx;
 }
@@ -277,41 +308,40 @@ void MenuBar::paintSelf(NativeCanvas *canvas) {
   if (openMenu_ < 0 || openMenu_ >= (int)menus_.size())
     return;
 
+  // Panel geometry is computed by dropRectLocal()/submenuRectLocal() so
+  // painting and hit-testing always agree.
+  Rect drop = dropRectLocal();
+  if (drop.isEmpty())
+    return;
   auto &items = menus_[openMenu_].items;
-  int dropW = dropWidth(items, 0) + 20;
-  int dropH = static_cast<int>(items.size()) * itemHeight_ + 4;
-  int dropX = r.x + menuX(openMenu_);
-  int dropY = r.bottom();
+  Rect dropAbs = drop.translated(r.x, r.y);
 
   canvas->setColor(st.bgColor);
-  canvas->fillRoundedRect(Rect(dropX, dropY, dropW, dropH), 4);
+  canvas->fillRoundedRect(dropAbs, 4);
   canvas->setColor(st.borderColor);
-  canvas->strokeRoundedRect(Rect(dropX, dropY, dropW, dropH), 4);
+  canvas->strokeRoundedRect(dropAbs, 4);
   canvas->setFont(st.font);
 
   for (int j = 0; j < (int)items.size(); j++) {
-    int iy = dropY + 2 + j * itemHeight_;
-    Rect ir(dropX + 4, iy, dropW - 8, itemHeight_);
+    int iy = dropAbs.y + 2 + j * itemHeight_;
+    Rect ir(dropAbs.x + 4, iy, dropAbs.width - 8, itemHeight_);
     paintItem(canvas, ir, items[j], j == hoveredItem_, 0);
   }
 
   // Open submenu: panel to the right of the parent item.
-  if (openSubmenu_ >= 0 && openSubmenu_ < (int)items.size()) {
-    auto &sub = items[openSubmenu_].submenu;
-    if (!sub.empty()) {
-      int subW = dropWidth(sub, 1) + 20;
-      int subH = static_cast<int>(sub.size()) * itemHeight_ + 4;
-      int subX = dropX + dropW - 4;
-      int subY = dropY + 2 + openSubmenu_ * itemHeight_;
-      canvas->setColor(st.bgColor);
-      canvas->fillRoundedRect(Rect(subX, subY, subW, subH), 4);
-      canvas->setColor(st.borderColor);
-      canvas->strokeRoundedRect(Rect(subX, subY, subW, subH), 4);
-      canvas->setFont(st.font);
-      for (int k = 0; k < (int)sub.size(); k++) {
-        Rect sr(subX + 4, subY + 2 + k * itemHeight_, subW - 8, itemHeight_);
-        paintItem(canvas, sr, sub[k], k == hoveredSub_, 1);
-      }
+  Rect sub = submenuRectLocal();
+  if (!sub.isEmpty()) {
+    const auto &subItems = items[openSubmenu_].submenu;
+    Rect subAbs = sub.translated(r.x, r.y);
+    canvas->setColor(st.bgColor);
+    canvas->fillRoundedRect(subAbs, 4);
+    canvas->setColor(st.borderColor);
+    canvas->strokeRoundedRect(subAbs, 4);
+    canvas->setFont(st.font);
+    for (int k = 0; k < (int)subItems.size(); k++) {
+      Rect sr(subAbs.x + 4, subAbs.y + 2 + k * itemHeight_, subAbs.width - 8,
+              itemHeight_);
+      paintItem(canvas, sr, subItems[k], k == hoveredSub_, 1);
     }
   }
 }
@@ -330,7 +360,10 @@ bool MenuBar::handleEvent(Event &event) {
       if (idx < (int)menus_.size()) {
         openMenu_ = idx;
         hoveredItem_ = 0;
+        openSubmenu_ = -1;
+        hoveredSub_ = -1;
         keyboardNav_ = true;
+        notifyMenuOpened();
         update();
         return true;
       }
@@ -340,7 +373,6 @@ bool MenuBar::handleEvent(Event &event) {
 
   if (event.type == EventType::KeyDown && openMenu_ >= 0) {
     keyboardNav_ = true;
-    event.accepted = true;
 
     auto &items = menus_[openMenu_].items;
     auto &sub = (openSubmenu_ >= 0 && openSubmenu_ < (int)items.size())
@@ -382,6 +414,9 @@ bool MenuBar::handleEvent(Event &event) {
       } else if (openSubmenu_ < 0 && openMenu_ < (int)menus_.size() - 1) {
         openMenu_++;
         hoveredItem_ = 0;
+        // Switching top-level menus must not leave a ghost submenu open.
+        openSubmenu_ = -1;
+        hoveredSub_ = -1;
       }
       update();
       return true;
@@ -392,6 +427,8 @@ bool MenuBar::handleEvent(Event &event) {
       } else if (openMenu_ > 0) {
         openMenu_--;
         hoveredItem_ = 0;
+        openSubmenu_ = -1;
+        hoveredSub_ = -1;
       }
       update();
       return true;
@@ -406,14 +443,24 @@ bool MenuBar::handleEvent(Event &event) {
       }
       return true;
     default:
-      break;
+      // Key not consumed by the menu system — do not mark it accepted,
+      // so it can still reach shortcuts/focus navigation.
+      return false;
     }
   }
 
   int localX = event.pos.x - x();
   int localY = event.pos.y - y();
   int menuIdx = hitTestMenu(localX, localY);
-  int itemIdx = openMenu_ >= 0 ? hitTestItem(localY) : -1;
+  int itemIdx = -1, subIdx = -1;
+  if (openMenu_ >= 0) {
+    const auto &items = menus_[openMenu_].items;
+    itemIdx = hitTestItem(dropRectLocal(), localX, localY, (int)items.size());
+    if (openSubmenu_ >= 0 && openSubmenu_ < (int)items.size()) {
+      subIdx = hitTestItem(submenuRectLocal(), localX, localY,
+                           (int)items[openSubmenu_].submenu.size());
+    }
+  }
 
   switch (event.type) {
   case EventType::MouseMove:
@@ -422,20 +469,31 @@ bool MenuBar::handleEvent(Event &event) {
       break;
     }
     hoveredMenu_ = menuIdx;
-    if (openMenu_ >= 0)
+    if (openMenu_ >= 0) {
       hoveredItem_ = itemIdx;
-    if (menuIdx >= 0 && menuIdx != openMenu_ && openMenu_ >= 0) {
-      openMenu_ = menuIdx;
-      hoveredItem_ = -1;
+      hoveredSub_ = subIdx;
+      if (menuIdx >= 0 && menuIdx != openMenu_) {
+        openMenu_ = menuIdx;
+        hoveredItem_ = -1;
+        // Switching top-level menus must not leave a ghost submenu open.
+        openSubmenu_ = -1;
+        hoveredSub_ = -1;
+      }
     }
     update();
     event.accepted = (openMenu_ >= 0 || menuIdx >= 0);
     return event.accepted;
   case EventType::MouseDown:
-    if (event.button != MouseButton::Left)
+    if (event.button != MouseButton::Left) {
+      // Swallow non-left clicks while a menu is open so it closes cleanly.
+      if (openMenu_ >= 0) {
+        closeMenu();
+        return true;
+      }
       return false;
+    }
     {
-      bool handled = handleMouseDown(menuIdx, itemIdx);
+      bool handled = handleMouseDown(localX, localY);
       event.accepted = handled;
       return handled;
     }
@@ -493,24 +551,67 @@ void MenuBar::activateSubItem(int menuIdx, int itemIdx, int subIdx) {
   closeMenu();
 }
 
-bool MenuBar::handleMouseDown(int menuIdx, int itemIdx) {
-  if (openMenu_ >= 0) {
-    if (itemIdx >= 0 && !menus_[openMenu_].items[itemIdx].separator) {
-      activateItem(openMenu_, itemIdx);
+bool MenuBar::handleMouseDown(int localX, int localY) {
+  int menuIdx = hitTestMenu(localX, localY);
+
+  if (openMenu_ < 0) {
+    if (menuIdx >= 0) {
+      openMenu_ = menuIdx;
+      hoveredItem_ = -1;
+      openSubmenu_ = -1;
+      hoveredSub_ = -1;
+      keyboardNav_ = false;
+      notifyMenuOpened();
+      claimFocus();
+      update();
+      return true;
     }
-    closeMenu();
-    return true;
+    return false;
   }
 
+  // Any click is swallowed while a menu is open — the menu decides whether
+  // it activates an item, switches to another top-level menu, or closes.
+  // 1) Inside the open submenu panel → activate its entry.
+  const auto &items = menus_[openMenu_].items;
+  if (openSubmenu_ >= 0 && openSubmenu_ < (int)items.size()) {
+    const auto &subItems = items[openSubmenu_].submenu;
+    int subIdx = hitTestItem(submenuRectLocal(), localX, localY,
+                             (int)subItems.size());
+    if (subIdx >= 0) {
+      if (!subItems[subIdx].separator)
+        activateSubItem(openMenu_, openSubmenu_, subIdx);
+      return true;
+    }
+  }
+  // 2) Inside the dropdown panel → activate its entry.
+  int itemIdx = hitTestItem(dropRectLocal(), localX, localY, (int)items.size());
+  if (itemIdx >= 0) {
+    if (!items[itemIdx].separator)
+      activateItem(openMenu_, itemIdx);
+    return true;
+  }
+  // 3) On another top-level menu label → switch to it.
   if (menuIdx >= 0) {
     openMenu_ = menuIdx;
     hoveredItem_ = -1;
+    openSubmenu_ = -1;
+    hoveredSub_ = -1;
     update();
     return true;
   }
-
+  // 4) Outside the whole panel → close and swallow.
   closeMenu();
-  return false;
+  return true;
+}
+
+void MenuBar::notifyMenuOpened() {
+  if (auto *win = window())
+    win->setOpenMenuBar(this);
+}
+
+void MenuBar::notifyMenuClosed() {
+  if (auto *win = window())
+    win->setOpenMenuBar(nullptr);
 }
 
 void MenuBar::closeMenu() {
@@ -519,6 +620,7 @@ void MenuBar::closeMenu() {
   openSubmenu_ = -1;
   hoveredSub_ = -1;
   keyboardNav_ = false;
+  notifyMenuClosed();
   update();
 }
 

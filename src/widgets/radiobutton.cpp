@@ -34,10 +34,6 @@ void RadioButton::setChecked(bool checked) {
       }
     }
   }
-  // If trying to uncheck the only checked button in group, ignore
-  if (!checked && checked_) {
-    return;
-  }
 
   checked_ = checked;
   update();

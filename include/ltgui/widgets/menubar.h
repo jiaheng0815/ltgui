@@ -70,8 +70,25 @@ private:
   int menuX(int idx) const;
   int menuWidth(int idx) const;
   int hitTestMenu(int localX, int localY) const;
-  int hitTestItem(int localY) const;
-  bool handleMouseDown(int menuIdx, int itemIdx);
+
+  // Dropdown/submenu panel geometry in this widget's LOCAL coordinates
+  // (origin 0,0) — shared by paintSelf(), hit-testing and mouse routing so
+  // the painted panel and its hit area can never diverge. Returns an empty
+  // Rect when the panel is not open.
+  Rect dropRectLocal() const;
+  Rect submenuRectLocal() const;
+
+  // Index of the item inside `panel` at the given local position, or -1.
+  // Count limits the checked range (the panel rect may be smaller than the
+  // full item count in visible-area terms).
+  int hitTestItem(const Rect &panel, int localX, int localY, int count) const;
+  bool handleMouseDown(int localX, int localY);
+
+  // Register/unregister this menubar with its window while a dropdown is
+  // open, so the window routes mouse/keyboard input to the panel.
+  void notifyMenuOpened();
+  void notifyMenuClosed();
+
   void activateItem(int menuIdx, int itemIdx);
   void activateSubItem(int menuIdx, int itemIdx, int subIdx);
   void closeMenu();

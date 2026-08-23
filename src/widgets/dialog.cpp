@@ -40,13 +40,32 @@ DialogResult Dialog::exec() {
   setVisible(true);
   fadeAnim_.setImmediate(0.0f);
   fadeAnim_.setTarget(1.0f, 150, Easing::EaseOut);
-  claimFocus();
 
+  // The dialog owns no window directly (it isn't part of the widget tree);
+  // resolve the window via the parent chain or a propagated window_.
   auto *win = window();
+  if (!win) {
+    for (Widget *p = parent(); p && !win; p = p->parent())
+      win = p->window();
+  }
   if (!win) {
     running_ = false;
     return DialogResult::None;
   }
+
+  // Cover the window and attach the dialog's subtree to `win` so its
+  // children can update()/paint/paint cursor while running.
+  Size sz = win->size();
+  setGeometry(Rect(0, 0, sz.width, sz.height));
+  propagateWindow(win);
+
+  // Register as the window's modal dialog (paint + event routing hook).
+  // Nested dialogs restore the previous registration when they finish.
+  Widget *prevModal = win->setModalDialog(this);
+  // Move keyboard focus into the dialog's first focusable child (e.g. the
+  // first button or the input field).
+  if (Widget *first = nextFocusWidget())
+    win->setFocusWidget(first);
 
   // Position the content panel once before entering the event loop,
   // instead of re-computing it every frame inside paintSelf().
@@ -70,6 +89,10 @@ DialogResult Dialog::exec() {
   }
 
   setVisible(false);
+  win->setFocusWidget(nullptr);
+  win->setModalDialog(prevModal);
+  // Detach before destruction so the window cannot touch us afterwards.
+  propagateWindow(nullptr);
   return result_;
 }
 
@@ -82,7 +105,7 @@ void Dialog::done(DialogResult result) {
 
 void Dialog::positionPanel() {
   int ww = 640, wh = 480;
-  if (auto *win = window()) {
+  if (auto *win = findWindow()) {
     Size sz = win->size();
     ww = sz.width;
     wh = sz.height;
@@ -102,7 +125,7 @@ void Dialog::paintSelf(NativeCanvas *canvas) {
     return;
 
   int ww = 640, wh = 480;
-  if (auto *win = window()) {
+  if (auto *win = findWindow()) {
     Size sz = win->size();
     ww = sz.width;
     wh = sz.height;
@@ -141,6 +164,21 @@ bool Dialog::handleEvent(Event &event) {
   if (event.type == EventType::KeyDown && event.key == Key::Escape) {
     done(DialogResult::Cancel);
     return true;
+  }
+  if (event.type == EventType::MouseDown) {
+    // Clicks on the overlay (outside the content panel) must not leak to
+    // the widgets behind the modal dialog — swallow them.
+    int ww = 640, wh = 480;
+    if (auto *win = findWindow()) {
+      Size sz = win->size();
+      ww = sz.width;
+      wh = sz.height;
+    }
+    Rect panelRect((ww - panelW_) / 2, (wh - panelH_) / 2, panelW_, panelH_);
+    if (!panelRect.contains(event.pos)) {
+      event.accepted = true;
+      return true;
+    }
   }
   return Widget::handleEvent(event);
 }
