@@ -30,7 +30,7 @@ void ListBox::paintSelf(NativeCanvas *canvas) {
   canvas->setFont(st.font);
   int visible = visibleItems();
   int maxOffset = std::max(0, static_cast<int>(items_.size()) - visible);
-  int scrollOffset = currentScrollOffset();
+  int scrollOffset = this->scrollOffset();
   if (scrollOffset > maxOffset)
     scrollOffset = maxOffset;
 
@@ -60,7 +60,7 @@ bool ListBox::handleEvent(Event &event) {
 
   if (event.type == EventType::MouseDown && event.button == MouseButton::Left) {
     int localY = event.pos.y - y() - 1;
-    int scrollOffset = currentScrollOffset();
+    int scrollOffset = this->scrollOffset();
     int index = scrollOffset + localY / itemHeight_;
     if (index >= 0 && index < static_cast<int>(items_.size())) {
       setCurrentIndex(index);
@@ -88,7 +88,7 @@ bool ListBox::handleEvent(Event &event) {
         // onSelectionChanged slots may destroy this widget.
         int visible = visibleItems();
         int maxOffset = std::max(0, static_cast<int>(items_.size()) - visible);
-        if (target >= currentScrollOffset() + visible) {
+        if (target >= scrollOffset() + visible) {
           setScrollTarget(target - visible + 1, maxOffset);
         }
         setCurrentIndex(target);
@@ -99,7 +99,7 @@ bool ListBox::handleEvent(Event &event) {
       event.accepted = true;
       int target = selected_ - 1;
       if (target >= 0) {
-        if (target < currentScrollOffset()) {
+        if (target < scrollOffset()) {
           setScrollTarget(target, std::max(0, static_cast<int>(items_.size()) -
                                                   visibleItems()));
         }

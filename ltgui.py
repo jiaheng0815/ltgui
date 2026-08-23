@@ -617,7 +617,6 @@ _HEADER_ORDER = [
     "animation.h",
     "app.h",
     "widget.h",
-    "canvas.h",
     "clipboard.h",
     "window.h",
     "widgets/textwidget.h",

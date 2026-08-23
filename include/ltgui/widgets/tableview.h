@@ -63,14 +63,6 @@ public:
   int currentIndex() const { return selectedRow_; }
   void setCurrentIndex(int row);
 
-  // Legacy names — use currentIndex()/setCurrentIndex() instead.
-  [[deprecated("use currentIndex() instead")]] int selectedRow() const {
-    return selectedRow_;
-  }
-  [[deprecated("use setCurrentIndex() instead")]] void selectRow(int row) {
-    setCurrentIndex(row);
-  }
-
   std::vector<int> selectedRows() const { return selectedRows_; }
   void clearSelection();
 

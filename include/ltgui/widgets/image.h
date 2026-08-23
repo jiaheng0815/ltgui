@@ -24,13 +24,6 @@ public:
   }
   FitMode fitMode() const { return fitMode_; }
 
-  // Legacy char-based overload: 'f'=Fill, 'c'=Contain, 's'=Stretch
-  [[deprecated("use setFitMode(FitMode) instead")]] void setFitMode(char mode) {
-    setFitMode(mode == 'f'   ? FitMode::Fill
-               : mode == 's' ? FitMode::Stretch
-                             : FitMode::Contain);
-  }
-
   LTGUI_DECLARE_WIDGET_TYPE(Image)
   Size sizeHint() const override;
 

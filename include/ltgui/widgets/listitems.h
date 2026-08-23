@@ -26,14 +26,6 @@ public:
   int currentIndex() const { return selected_; }
   void setCurrentIndex(int index);
 
-  // Legacy names — use currentIndex()/setCurrentIndex() instead.
-  [[deprecated("use currentIndex() instead")]] int selectedIndex() const {
-    return selected_;
-  }
-  [[deprecated("use setCurrentIndex() instead")]] void setSelected(int index) {
-    setCurrentIndex(index);
-  }
-
   // Emitted when the selection changes (after clamping).
   Signal<int> onSelectionChanged;
   // Emitted after any structural change (add/remove/clear).

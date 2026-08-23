@@ -59,7 +59,7 @@ TEST_CASE("TableView selection API") {
   CHECK(selected == 2);
 
   // Legacy alias still works.
-  CHECK(tv.selectedRow() == 2);
+  CHECK(tv.currentIndex() == 2);
 
   tv.clearSelection();
   CHECK(tv.currentIndex() == -1);

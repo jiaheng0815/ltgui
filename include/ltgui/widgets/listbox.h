@@ -20,7 +20,6 @@ protected:
 private:
   int itemHeight_ = 26;
 
-  int currentScrollOffset() { return scrollOffset(); }
   int visibleItems() const;
 };
 

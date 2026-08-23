@@ -4,7 +4,6 @@
 #include "version.h"
 #include "animation.h"
 #include "app.h"
-#include "canvas.h"
 #include "clipboard.h"
 #include "color.h"
 #include "dragdrop.h"
