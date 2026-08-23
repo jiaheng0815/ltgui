@@ -54,6 +54,21 @@ CI 门禁(推送后自动):Linux(clang + **ASan/UBSan** + C23)、macOS(Cocoa
 
 前缀:`feat/fix/refactor/style/docs/chore/build/perf/test`。
 
+## 分支流程(beta 先行)
+
+新版本 / 新功能开发与验证在 **beta** 分支进行;beta 通过全部 CI
+(含 ASan/UBSan、macOS、GUI 冒烟、C23)后,再合并/推送 **master**:
+
+```
+beta  ── 开发、测试、修 bug、打预发布 tag
+master ── 稳定发布;仅接受 beta 验证过的合并
+```
+
+- 日常开发:切到 beta 提交,CI 全绿后 `git checkout master && git merge beta`
+- 发布:在 beta 上打 `vX.Y.Z` tag(CI 自动出 Release 草稿),验证后合并
+  master;master 上无需重复打 tag
+- 紧急热修:master 上直接小修 + `git cherry-pick` 回 beta
+
 ## 评审关注点
 
 1. 是否有回归风险(测试覆盖不足)?

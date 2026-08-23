@@ -219,6 +219,9 @@ accentPressed）。主题一换，下一帧绘制就生效，不用重新设置�
 - **改版本步骤**：改 version.h → 改 CMakeLists.txt → `python ltgui.py
   build release` + `test` → `python ltgui.py package` 核包名 →
   `git add` → `git commit` → `git tag -a vX.Y.Z`。
+- **分支策略（beta 先行）**：新版本/功能先推 **beta** 分支（CI 对 beta
+  同跑全部门禁），全部通过后合并 **master**（master 只收验证过的改动）。
+  CI 在 push/PR 的 master/main/beta 三条分支上运行。
 
 ---
 
