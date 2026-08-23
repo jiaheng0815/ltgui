@@ -28,6 +28,19 @@ public:
     (void)column;
     (void)ascending;
   }
+
+  // Whether TableView::beginEdit() may write cells through setCellText().
+  // Default false — read-only models cannot be edited in place.
+  virtual bool supportsEdit() const { return false; }
+
+  // Write a cell. Default no-op; editable models override. Returns false
+  // when the coordinates are out of range.
+  virtual bool setCellText(int row, int col, const std::string &text) {
+    (void)row;
+    (void)col;
+    (void)text;
+    return false;
+  }
 };
 
 class SimpleTableModel : public TableModel {
@@ -38,7 +51,8 @@ public:
   int columnCount() const override { return colCount_; }
 
   std::string cellText(int row, int col) const override;
-  void setCellText(int row, int col, const std::string &text);
+  bool supportsEdit() const override { return true; }
+  bool setCellText(int row, int col, const std::string &text) override;
   void addRow(const std::vector<std::string> &cells);
   void removeRow(int row);
   void clear();
@@ -68,13 +82,25 @@ public:
 
   void setSortColumn(int col, bool ascending);
 
+  // Start editing the cell (double-click or Enter). Works only when the
+  // model supportsEdit(); commit with Enter, cancel with Escape.
+  bool beginEdit(int row, int col);
+  bool isEditing() const {
+    return editRow_ >= 0 && editCol_ >= 0;
+  }
+  int editingRow() const { return editRow_; }
+  int editingCol() const { return editCol_; }
+
   // Emitted when a row is selected / a header column is clicked.
   Signal<int> onRowSelected;
   Signal<int> onHeaderClicked;
+  // Emitted after an in-place edit commits (row, col).
+  Signal<int, int> onCellEdited;
 
   LTGUI_DECLARE_WIDGET_TYPE(TableView)
   bool canAcceptFocus() const override { return true; }
   Size sizeHint() const override;
+  void setGeometry(const Rect &rect) override;
 
 protected:
   void paintSelf(NativeCanvas *canvas) override;
@@ -94,6 +120,18 @@ private:
   int resizeStartX_ = 0;
   int resizeStartW_ = 0;
 
+  // In-place editing state.
+  class CellEditor;
+  CellEditor *editor_ = nullptr;
+  int editRow_ = -1;
+  int editCol_ = -1;
+  // Double-click detection (Event carries no click-count).
+  int lastClickRow_ = -1;
+  int lastClickCol_ = -1;
+  uint64_t lastClickMs_ = 0;
+
+  void endEdit(bool commit);
+  void updateEditorGeometry();
   int visibleRows() const;
   int totalWidth() const;
   int colX(int idx) const;

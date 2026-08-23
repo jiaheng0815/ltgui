@@ -2,8 +2,11 @@
 #include "platform/native_canvas.h"
 #include "platform/native_window.h"
 #include "theme.h"
+#include "widgets/textbox.h"
 #include "window.h"
 #include <algorithm>
+#include <chrono>
+#include <functional>
 
 namespace ltgui {
 
@@ -21,12 +24,13 @@ std::string SimpleTableModel::cellText(int row, int col) const {
   return data_[row][col];
 }
 
-void SimpleTableModel::setCellText(int row, int col, const std::string &text) {
+bool SimpleTableModel::setCellText(int row, int col, const std::string &text) {
   if (row < 0 || row >= (int)data_.size())
-    return;
+    return false;
   if (col < 0 || col >= colCount_)
-    return;
+    return false;
   data_[row][col] = text;
+  return true;
 }
 
 void SimpleTableModel::addRow(const std::vector<std::string> &cells) {
@@ -59,7 +63,54 @@ void SimpleTableModel::sort(int column, bool ascending) {
 
 // --- TableView ---
 
-TableView::TableView(Widget *parent) : Widget(parent) {}
+// In-place cell editor: a single-line TextBox that commutes Enter/Tab into
+// commit and Escape into cancel. The framework sends KeyDown to the focus
+// widget; single-line TextBox leaves Enter unconsumed — handling it in the
+// editor removes any reliance on event bubbling through the table.
+class TableView::CellEditor : public TextBox {
+public:
+  using CommitFn = std::function<void()>;
+  using CancelFn = std::function<void()>;
+
+  CellEditor(CommitFn commit, CancelFn cancel)
+      : TextBox(""), commit_(std::move(commit)), cancel_(std::move(cancel)) {
+    setVisible(false);
+  }
+
+  bool handleEvent(Event &e) override {
+    if (e.type == EventType::KeyDown) {
+      switch (e.key) {
+      case Key::Enter:
+      case Key::Tab:
+        if (commit_) {
+          e.accepted = true;
+          commit_();
+        }
+        return true;
+      case Key::Escape:
+        if (cancel_) {
+          e.accepted = true;
+          cancel_();
+        }
+        return true;
+      default:
+        break;
+      }
+    }
+    return TextBox::handleEvent(e);
+  }
+
+private:
+  CommitFn commit_;
+  CancelFn cancel_;
+};
+
+TableView::TableView(Widget *parent) : Widget(parent) {
+  editor_ = static_cast<CellEditor *>(
+      addChild(std::make_unique<CellEditor>([this]() { endEdit(true); },
+                                            [this]() { endEdit(false); })));
+  editor_->setVisible(false);
+}
 
 void TableView::setModel(std::shared_ptr<TableModel> model) {
   model_ = std::move(model);
@@ -220,6 +271,9 @@ void TableView::paintSelf(NativeCanvas *canvas) {
     canvas->setFont(st.font);
 
     for (int c = 0; c < numCols; c++) {
+      // The in-place editor draws this cell's text itself.
+      if (isEditing() && i == editRow_ && c == editCol_)
+        continue;
       int cx = r.x + colX(c);
       std::string text = model_->cellText(i, c);
       // Skip rows with column mismatches
@@ -229,6 +283,64 @@ void TableView::paintSelf(NativeCanvas *canvas) {
                            NativeCanvas::SingleLine);
     }
   }
+}
+
+// --- In-place editing ---
+
+bool TableView::beginEdit(int row, int col) {
+  if (!model_ || !model_->supportsEdit())
+    return false;
+  if (row < 0 || row >= model_->rowCount() || col < 0 ||
+      col >= (int)columns_.size())
+    return false;
+  // Switching cells commits the previous edit first so the model never holds
+  // two editors' intermediate states at once.
+  if (isEditing())
+    endEdit(true);
+  editRow_ = row;
+  editCol_ = col;
+  editor_->setText(model_->cellText(row, col));
+  updateEditorGeometry();
+  editor_->setVisible(true);
+  editor_->selectAll();
+  editor_->claimFocus();  // moves the window's keyboard focus to the editor
+  update();
+  return true;
+}
+
+void TableView::endEdit(bool commit) {
+  if (!isEditing())
+    return;
+  int row = editRow_, col = editCol_;
+  if (commit && model_ && model_->supportsEdit() &&
+      row >= 0 && row < model_->rowCount() && col >= 0 &&
+      col < (int)columns_.size()) {
+    const std::string newText = editor_->text();
+    const std::string oldText = model_->cellText(row, col);
+    if (model_->setCellText(row, col, newText) && newText != oldText)
+      onCellEdited.emit(row, col);
+  }
+  editRow_ = -1;
+  editCol_ = -1;
+  editor_->setVisible(false);
+  claimFocus();  // hand keyboard focus back to the table
+  update();
+}
+
+void TableView::updateEditorGeometry() {
+  if (!isEditing() || !editor_)
+    return;
+  int cx = colX(editCol_) + 2;
+  int cw = columns_[editCol_].width - 4;
+  int ry = headerHeight_ + (editRow_ - scrollY_) * rowHeight_ + 1;
+  int rh = rowHeight_ - 2;
+  editor_->setGeometry(Rect(cx, ry, std::max(8, cw), std::max(4, rh)));
+}
+
+void TableView::setGeometry(const Rect &rect) {
+  Widget::setGeometry(rect);
+  if (isEditing())
+    updateEditorGeometry();
 }
 
 // --- Events ---
@@ -244,6 +356,9 @@ bool TableView::handleEvent(Event &event) {
   case EventType::MouseDown:
     if (event.button != MouseButton::Left)
       return false;
+
+    if (isEditing())
+      endEdit(true);  // clicking anywhere outside the editor commits it
 
     // Check column resize handle
     for (int c = 0; c < (int)columns_.size() - 1; c++) {
@@ -276,17 +391,56 @@ bool TableView::handleEvent(Event &event) {
       return true;
     }
 
-    // Row click → select
+    // Row click → select; double-click (same cell within 400ms) → edit.
     {
       int row =
           (int)((localY - headerHeight_ + (int64_t)scrollY_ * rowHeight_) /
                 rowHeight_);
       if (row >= 0 && model_ && row < model_->rowCount()) {
+        int col = hitTestCol(localX);
+        uint64_t nowMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count();
+        if (col >= 0 && row == lastClickRow_ && col == lastClickCol_ &&
+            nowMs - lastClickMs_ < 400) {
+          setCurrentIndex(row);
+          update();
+          event.accepted = true;
+          beginEdit(row, col);
+          return true;
+        }
+        lastClickRow_ = row;
+        lastClickCol_ = col;
+        lastClickMs_ = nowMs;
         setCurrentIndex(row);
         update();
         event.accepted = true;
         return true;
       }
+    }
+    break;
+
+  case EventType::KeyDown:
+    // While editing, the keyboard shortcut keys are forwarded to the editor
+    // (the editor is the focus widget in a real window; this path also makes
+    // programmatic KeyDown dispatch deterministic).
+    if (isEditing()) {
+      if (event.key == Key::Enter || event.key == Key::Escape ||
+          event.key == Key::Tab) {
+        event.accepted = true;
+        editor_->handleEvent(event);
+        return true;
+      }
+      break;
+    }
+    // Enter on the focused table opens the editor for the selected row
+    // (column 0). While editing, the CellEditor consumes Enter/Escape.
+    if (event.key == Key::Enter && model_ && model_->supportsEdit() &&
+        selectedRow_ >= 0) {
+      beginEdit(selectedRow_, 0);
+      event.accepted = true;
+      return true;
     }
     break;
 
